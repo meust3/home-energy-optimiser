@@ -50,3 +50,24 @@ global flag/score, weather is backfilled healthy at 100, and the JSON records
 
 Load-profile queries use `telemetry_is_healthy`, including migrated rows according
 to that best-effort mapping.
+
+## Derived reports and exports
+
+Collection coverage is computed rather than stored. Expected slots form an
+inclusive five-minute UTC sequence. Without a requested window, the sequence spans
+the first through last selected observation; `--days` includes empty slots between
+the aligned cutoff and current aligned slot. Coverage is collected distinct slots
+divided by expected slots.
+
+Health issue summaries parse `health_domains_json` and report average stored score,
+warning/error occurrence counts, and common issue code/entity/severity tuples per
+domain. Legacy rows contribute to score averages but cannot contribute decomposed
+issues because their original global issue list was not domain-specific.
+
+CSV exports contain the observation columns in schema order. SQL `NULL` values are
+empty CSV fields and JSON columns remain JSON text. Exporting never changes stored
+rows.
+
+Power-sign hypotheses are also derived, never stored. Each complete sample includes
+PV power, house consumption, grid power, battery power, and optional battery-mode
+context.

@@ -226,6 +226,41 @@ def _solar_health(
     return _domain(issues, ["grid_charge", "battery_export"])
 
 
+def _weather_health(
+    states: dict[str, HomeAssistantState],
+    config: CollectorConfig,
+    current: datetime,
+) -> HealthDomain:
+    """Evaluate configured weather context without affecting overall health."""
+    issues: list[HealthIssue] = []
+    temperature_id = config.weather_temperature_entity_id
+    if temperature_id:
+        issues.extend(
+            _check_numeric_entity(
+                states,
+                temperature_id,
+                current=current,
+                freshness_minutes=config.weather_freshness_minutes,
+            )
+        )
+    condition_id = config.weather_condition_entity_id
+    if condition_id:
+        state = states.get(condition_id)
+        if state is None:
+            issues.append(
+                _issue(
+                    "missing_entity",
+                    "Configured weather entity is absent",
+                    condition_id,
+                )
+            )
+        elif is_missing_state(state.state):
+            issues.append(
+                _issue("unavailable_state", f"State is {state.state!r}", condition_id)
+            )
+    return _domain(issues, [])
+
+
 def evaluate_data_health(
     states: dict[str, HomeAssistantState],
     config: CollectorConfig,
@@ -237,7 +272,7 @@ def evaluate_data_health(
     telemetry = _telemetry_health(states, config, current)
     price = _price_health(states, config, current)
     solar = _solar_health(states, config, current)
-    weather = _domain([], [])
+    weather = _weather_health(states, config, current)
     overall = HealthDomain(
         is_healthy=telemetry.is_healthy,
         score=telemetry.score,

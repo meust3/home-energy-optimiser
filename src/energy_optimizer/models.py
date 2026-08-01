@@ -107,6 +107,9 @@ class CollectorConfig(BaseModel):
     amber_current_price_freshness_minutes: int = Field(default=10, gt=0)
     amber_forecast_freshness_minutes: int = Field(default=60, gt=0)
     solcast_forecast_freshness_minutes: int = Field(default=360, gt=0)
+    weather_freshness_minutes: int = Field(default=60, gt=0)
+    weather_temperature_entity_id: str | None = None
+    weather_condition_entity_id: str | None = None
     conservative_fallback_household_load_kw: float = Field(default=2.0, ge=0)
     load_profile_minimum_samples: int = Field(default=3, gt=0)
     request_timeout_seconds: float = Field(default=10.0, gt=0)

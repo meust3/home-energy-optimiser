@@ -35,5 +35,17 @@ have no freshness penalty.
 Power signs are stored exactly as Home Assistant reports them. No charge/discharge,
 import/export interpretation is applied until those conventions are measured.
 
+History analysis remains a separate read-only concern. Gap analysis compares stored
+UTC slots with an inclusive five-minute sequence. Domain issue analysis reads the
+structured health JSON. CSV export selects an inclusive timezone-aware range. The
+power-sign validator evaluates all four grid/battery multiplier combinations using
+the balance `PV + signed grid + signed battery ≈ house`, alongside battery-mode
+groups. It reports residuals and confidence but does not select or persist a sign
+convention.
+
+Weather entity IDs are optional configuration. When configured, temperature and
+condition are collected in the existing bulk GET. Missing weather may make only the
+weather domain unhealthy; it cannot affect overall Phase 1 observation health.
+
 The future executor is deliberately absent. Adding it requires a separate safety
 review and explicit approval.

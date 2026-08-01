@@ -85,3 +85,26 @@ def test_action_specific_readiness(healthy_states, config, now):
     assert is_ready_for(health, "load_profile")
     assert not is_ready_for(health, "grid_charge")
     assert not is_ready_for(health, "battery_export")
+
+
+def test_configured_weather_is_collected_but_remains_optional(
+    healthy_states, config, now
+):
+    temperature_id = "sensor.outdoor_temperature"
+    condition_id = "sensor.outdoor_condition"
+    config.weather_temperature_entity_id = temperature_id
+    config.weather_condition_entity_id = condition_id
+    healthy_states[temperature_id] = healthy_states[ids.AMBER_IMPORT_PRICE].model_copy(
+        update={"entity_id": temperature_id, "state": "24.5"}
+    )
+    healthy_states[condition_id] = healthy_states[ids.GOODWE_WORK_MODE].model_copy(
+        update={"entity_id": condition_id, "state": "sunny"}
+    )
+    observation = build_observation(healthy_states, config, observed_at=now)
+    assert observation.temperature_c == 24.5
+    assert observation.weather_condition == "sunny"
+    assert observation.data_health.weather.is_healthy
+    healthy_states.pop(temperature_id)
+    missing_weather = build_observation(healthy_states, config, observed_at=now)
+    assert not missing_weather.data_health.weather.is_healthy
+    assert missing_weather.data_health.overall.is_healthy

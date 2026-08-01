@@ -2,7 +2,7 @@ import sqlite3
 from datetime import timedelta
 
 from energy_optimizer import entity_ids as ids
-from energy_optimizer.collector import build_observation
+from energy_optimizer.collector import align_to_five_minute_slot, build_observation
 from energy_optimizer.historian import Historian
 from energy_optimizer.load_profile import estimate_load_profile
 
@@ -99,3 +99,20 @@ def test_migrates_existing_schema_without_deleting_rows(config):
     assert row["telemetry_health_score"] == 65
     assert "legacy_global_health" in row["health_domains_json"]
     assert version["version"] == 2
+
+
+def test_observation_rows_select_inclusive_range(healthy_states, config, now):
+    historian = Historian(config.database_path)
+    for offset in (0, 5, 10):
+        historian.save(
+            build_observation(
+                healthy_states, config, observed_at=now + timedelta(minutes=offset)
+            )
+        )
+    rows = historian.observation_rows(
+        start=align_to_five_minute_slot(now + timedelta(minutes=5)),
+        end=align_to_five_minute_slot(now + timedelta(minutes=10)),
+        columns=("slot_utc", "house_consumption_w"),
+    )
+    assert len(rows) == 2
+    assert list(rows[0]) == ["slot_utc", "house_consumption_w"]

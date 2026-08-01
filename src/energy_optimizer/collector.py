@@ -65,6 +65,17 @@ def build_observation(
         item = _state(states, entity_id)
         return parse_text(item.state) if item else None
 
+    temperature = (
+        number(config.weather_temperature_entity_id)
+        if config.weather_temperature_entity_id
+        else None
+    )
+    weather_condition = (
+        text(config.weather_condition_entity_id)
+        if config.weather_condition_entity_id
+        else None
+    )
+
     return EnergyObservation(
         slot_utc=align_to_five_minute_slot(now_utc),
         observed_at_utc=now_utc,
@@ -100,6 +111,8 @@ def build_observation(
         solcast_this_hour=parse_solar_summary(_state(states, ids.SOLCAST_THIS_HOUR)),
         solcast_today=parse_solar_summary(_state(states, ids.SOLCAST_TODAY)),
         solcast_power_now_w=number(ids.SOLCAST_POWER_NOW),
+        temperature_c=temperature,
+        weather_condition=weather_condition,
         data_health=health,
     )
 
@@ -110,5 +123,13 @@ class Collector:
         self._config = config
 
     def collect(self, *, observed_at: datetime | None = None) -> EnergyObservation:
-        states = self._client.get_states(ids.ALL_ENTITY_IDS)
+        weather_entities = tuple(
+            entity_id
+            for entity_id in (
+                self._config.weather_temperature_entity_id,
+                self._config.weather_condition_entity_id,
+            )
+            if entity_id
+        )
+        states = self._client.get_states(ids.ALL_ENTITY_IDS + weather_entities)
         return build_observation(states, self._config, observed_at=observed_at)

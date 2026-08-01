@@ -8,6 +8,10 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from energy_optimizer.history_analysis import (
+    calculate_gap_report,
+    summarize_health_issues,
+)
 from energy_optimizer.models import EnergyObservation
 
 SCHEMA_VERSION = 2
@@ -251,8 +255,10 @@ class Historian:
     def summary(self, *, days: int | None = None, limit: int = 10) -> dict[str, Any]:
         self.migrate()
         cutoff = None
+        range_end: datetime | None = None
         if days is not None:
-            cutoff = datetime.now(UTC).timestamp() - days * 86400
+            range_end = datetime.now(UTC)
+            cutoff = range_end.timestamp() - days * 86400
             cutoff = datetime.fromtimestamp(cutoff, UTC).isoformat()
         where = "WHERE slot_utc >= ?" if cutoff else ""
         params: tuple[Any, ...] = (cutoff,) if cutoff else ()
@@ -309,6 +315,16 @@ class Historian:
                 "telemetry_is_healthy=1 AND house_consumption_w IS NOT NULL"
             )
             profile_rows = connection.execute(profile_sql, params).fetchall()
+            slot_rows = connection.execute(
+                f"SELECT slot_utc FROM observations {where} ORDER BY slot_utc", params
+            ).fetchall()
+            health_rows = connection.execute(
+                "SELECT health_domains_json, health_score AS overall_health_score, "
+                "telemetry_health_score, price_health_score, "
+                "solar_health_score, weather_health_score "
+                f"FROM observations {where}",
+                params,
+            ).fetchall()
         weekday: dict[int, list[float]] = {}
         for row in profile_rows:
             day = datetime.fromisoformat(row["observed_at_local"]).weekday()
@@ -340,6 +356,14 @@ class Historian:
                 for day, values in sorted(weekday.items())
             ],
             "recent": [dict(row) for row in recent],
+            "gap_report": calculate_gap_report(
+                [datetime.fromisoformat(row["slot_utc"]) for row in slot_rows],
+                start=datetime.fromisoformat(cutoff) if cutoff else None,
+                end=range_end,
+            ),
+            "health_issue_summary": summarize_health_issues(
+                [dict(row) for row in health_rows]
+            ),
         }
 
     def healthy_load_samples(self, *, days: int | None = None) -> list[sqlite3.Row]:
@@ -355,3 +379,53 @@ class Historian:
             params = (datetime.fromtimestamp(cutoff, UTC).isoformat(),)
         with self.connect() as connection:
             return connection.execute(sql, params).fetchall()
+
+    def power_sign_samples(
+        self, *, start: datetime | None = None, end: datetime | None = None
+    ) -> list[dict[str, Any]]:
+        """Return raw stored values needed for non-mutating sign analysis."""
+        rows = self.observation_rows(
+            start=start,
+            end=end,
+            columns=(
+                "slot_utc",
+                "pv_power_w",
+                "house_consumption_w",
+                "grid_power_w",
+                "battery_power_w",
+                "battery_mode",
+            ),
+        )
+        return rows
+
+    def observation_rows(
+        self,
+        *,
+        start: datetime | None = None,
+        end: datetime | None = None,
+        columns: tuple[str, ...] | None = None,
+    ) -> list[dict[str, Any]]:
+        """Query an inclusive UTC range for analysis or export."""
+        self.migrate()
+        table_columns = tuple(row["name"] for row in self._table_info())
+        allowed_columns = set(table_columns)
+        selected = columns or table_columns
+        if not selected or any(column not in allowed_columns for column in selected):
+            raise ValueError("Unknown or empty observation column selection")
+        clauses: list[str] = []
+        params: list[str] = []
+        for operator, value in ((">=", start), ("<=", end)):
+            if value is None:
+                continue
+            if value.tzinfo is None or value.utcoffset() is None:
+                raise ValueError("history query datetimes must be timezone-aware")
+            clauses.append(f"slot_utc {operator} ?")
+            params.append(value.astimezone(UTC).isoformat())
+        where = f" WHERE {' AND '.join(clauses)}" if clauses else ""
+        sql = f"SELECT {','.join(selected)} FROM observations{where} ORDER BY slot_utc"
+        with self.connect() as connection:
+            return [dict(row) for row in connection.execute(sql, params)]
+
+    def _table_info(self) -> list[sqlite3.Row]:
+        with self.connect() as connection:
+            return connection.execute("PRAGMA table_info(observations)").fetchall()

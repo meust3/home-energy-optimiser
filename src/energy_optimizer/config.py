@@ -55,6 +55,13 @@ def load_config(env_file: Path | None = Path(".env")) -> CollectorConfig:
         solcast_forecast_freshness_minutes=int(
             os.getenv("SOLCAST_FORECAST_FRESHNESS_MINUTES", "360")
         ),
+        weather_freshness_minutes=int(os.getenv("WEATHER_FRESHNESS_MINUTES", "60")),
+        weather_temperature_entity_id=(
+            os.getenv("WEATHER_TEMPERATURE_ENTITY_ID", "").strip() or None
+        ),
+        weather_condition_entity_id=(
+            os.getenv("WEATHER_CONDITION_ENTITY_ID", "").strip() or None
+        ),
         conservative_fallback_household_load_kw=float(
             os.getenv("CONSERVATIVE_FALLBACK_HOUSEHOLD_LOAD_KW", "2.0")
         ),
@@ -70,3 +77,10 @@ def load_database_path(env_file: Path | None = Path(".env")) -> Path:
     if env_file is not None:
         load_dotenv(dotenv_path=env_file, override=False)
     return Path(os.getenv("DATABASE_PATH", "data/energy_history.db"))
+
+
+def load_timezone_name(env_file: Path | None = Path(".env")) -> str:
+    """Load the configured local timezone without requiring HA credentials."""
+    if env_file is not None:
+        load_dotenv(dotenv_path=env_file, override=False)
+    return os.getenv("TIMEZONE", "Australia/Brisbane")

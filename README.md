@@ -24,11 +24,16 @@ BATTERY_SOC_FRESHNESS_MINUTES=10
 AMBER_CURRENT_PRICE_FRESHNESS_MINUTES=10
 AMBER_FORECAST_FRESHNESS_MINUTES=60
 SOLCAST_FORECAST_FRESHNESS_MINUTES=360
+WEATHER_TEMPERATURE_ENTITY_ID=sensor.outdoor_temperature
+WEATHER_CONDITION_ENTITY_ID=weather.home
+WEATHER_FRESHNESS_MINUTES=60
 CONSERVATIVE_FALLBACK_HOUSEHOLD_LOAD_KW=2.0
 LOAD_PROFILE_MINIMUM_SAMPLES=3
 ```
 
-Only `HA_URL` and `HA_TOKEN` are required. Never commit or paste the token into
+Only `HA_URL` and `HA_TOKEN` are required. The weather entity IDs are optional;
+omit them when weather collection is not configured. Weather health never changes
+overall observation health during this phase. Never commit or paste the token into
 logs, test data, or issue reports.
 
 ## 2. Install the editable project
@@ -83,12 +88,40 @@ python tools/inspect_history.py --json
 Inspection reports healthy/unhealthy counts separately for telemetry, price, solar,
 and weather. Overall health follows telemetry during Phase 1. Missing price or solar
 forecasts therefore remain visible but do not discard sound household-load samples.
+The report also shows five-minute collection coverage, its longest missing run,
+average domain scores, warning/error totals, and common structured issues.
 
 Home Assistant may leave `last_updated` unchanged while a value remains stable.
 Freshness warnings consequently apply only to periodically updating powers, SOC,
 prices, and required forecasts—not modes or price-spike context.
 
-## 7. Run validation
+## 7. Validate power-sign hypotheses
+
+Analyze raw GoodWe measurements without changing the database:
+
+```powershell
+python tools/validate_power_signs.py
+python tools/validate_power_signs.py --start 2026-08-01 --end 2026-08-07
+python tools/validate_power_signs.py --json
+```
+
+The tool compares PV, household, grid, and battery power against every grid/battery
+sign combination. It reports sample counts, residual errors, battery-mode evidence,
+and confidence. Its leading result is only a hypothesis; no sign convention is
+selected or saved.
+
+## 8. Export history to CSV
+
+Dates use the configured local timezone and include the full start and end dates:
+
+```powershell
+python tools/export_history.py --start 2026-08-01 --end 2026-08-07 `
+  --output data/exports/history-2026-08-01-to-07.csv
+```
+
+CSV export reads the selected SQLite rows and does not modify them.
+
+## 9. Run validation
 
 ```powershell
 pytest

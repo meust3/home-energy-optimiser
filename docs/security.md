@@ -34,3 +34,11 @@ and introduced only after controlled hardware testing and explicit approval. It
 must never be smuggled into the collector, forecaster, or advisory optimiser.
 Domain readiness checks are advisory guards; they do not introduce an executor or
 any Home Assistant write capability.
+
+History inspection, CSV export, and power-sign validation read local observations
+only. Exports inherit the database's privacy sensitivity and should remain under
+`data/` or another protected location. Sign-analysis output is statistical evidence,
+not authority to control the inverter.
+
+Optional weather entities use the same allowlisted `GET /api/states` call. They do
+not add endpoints or write capabilities and are not mandatory for overall health.
