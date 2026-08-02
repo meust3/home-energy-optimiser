@@ -70,3 +70,9 @@ reads the latest stored observation and telemetry-healthy baseline samples, fore
 household demand until a plausible replenishment window, and calculates held versus
 potentially tradable energy. It has no Home Assistant client, executor, or automatic
 action path. Its readiness flag means manual review only.
+
+Reserve input selection is explicit. Live mode injects a fresh collector result into
+the estimator and does not persist it by default. History mode uses SQLite read-only
+queries, supports an as-of upper bound, and exposes observation age. Both modes use
+stored baseline history for demand forecasting; current-state provenance is never
+implicit.

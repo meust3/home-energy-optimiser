@@ -533,17 +533,29 @@ class Historian:
 
     def latest_observation_read_only(self) -> dict[str, Any] | None:
         """Return the latest observation without migration or any database write."""
+        return self.observation_as_of_read_only()
+
+    def observation_as_of_read_only(
+        self, as_of: datetime | None = None
+    ) -> dict[str, Any] | None:
+        """Return the latest observation at or before an optional UTC instant."""
+        if as_of is not None and (as_of.tzinfo is None or as_of.utcoffset() is None):
+            raise ValueError("as_of must be timezone-aware")
+        where = "WHERE slot_utc <= ?" if as_of is not None else ""
+        params = (as_of.astimezone(UTC).isoformat(),) if as_of is not None else ()
         with self.connect_read_only() as connection:
             row = connection.execute(
-                "SELECT * FROM observations ORDER BY slot_utc DESC LIMIT 1"
+                f"SELECT * FROM observations {where} " "ORDER BY slot_utc DESC LIMIT 1",
+                params,
             ).fetchone()
         return dict(row) if row is not None else None
 
     def healthy_load_samples_read_only(
-        self, *, days: int, now: datetime
+        self, *, days: int, now: datetime, as_of: datetime | None = None
     ) -> list[sqlite3.Row]:
         """Read eligible baseline samples without migration or database writes."""
-        cutoff = now.astimezone(UTC).timestamp() - days * 86400
+        end = (as_of or now).astimezone(UTC)
+        cutoff = end.timestamp() - days * 86400
         with self.connect_read_only() as connection:
             return connection.execute(
                 "SELECT observed_at_local, "
@@ -551,8 +563,11 @@ class Historian:
                 "FROM observations WHERE telemetry_is_healthy=1 "
                 "AND baseline_training_eligible=1 "
                 "AND baseline_house_consumption_w IS NOT NULL "
-                "AND slot_utc >= ?",
-                (datetime.fromtimestamp(cutoff, UTC).isoformat(),),
+                "AND slot_utc >= ? AND slot_utc <= ?",
+                (
+                    datetime.fromtimestamp(cutoff, UTC).isoformat(),
+                    end.isoformat(),
+                ),
             ).fetchall()
 
     def power_sign_samples(

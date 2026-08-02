@@ -196,12 +196,21 @@ demand before the next plausible solar or cheap-grid replenishment window:
 ```powershell
 python tools/estimate_reserve.py
 python tools/estimate_reserve.py --json
+python tools/estimate_reserve.py --source history
+python tools/estimate_reserve.py --source history `
+  --as-of 2026-08-02T12:00:00+10:00 --json
 ```
 
-The estimator reads only local SQLite history. It does not connect to Home
-Assistant, recommend an executable action, or alter the database. Its output is
-marked `ready_for_manual_review`, never `ready_for_execution`. Potentially tradable
-energy is an analytical upper bound, not an instruction to export or discharge.
+Interactive use defaults to `--source live`: one allowlisted `GET /api/states`
+collection supplies current SOC and power, while demand still comes from SQLite
+history. The live observation is not saved unless `--save-observation` is supplied.
+`--source history` uses the latest stored observation, reports its timestamp and
+age, and warns when it is older than ten minutes. `--as-of` provides deterministic
+history replay and must include a timezone offset.
+
+The estimator does not recommend an executable action. Its output is marked
+`ready_for_manual_review`, never `ready_for_execution`. Potentially tradable energy
+is an analytical upper bound, not an instruction to export or discharge.
 
 See [reserve estimation](docs/reserve_estimation.md) for its assumptions,
 confidence model, and limitations.

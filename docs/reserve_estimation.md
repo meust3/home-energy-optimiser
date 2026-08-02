@@ -5,10 +5,24 @@ be retained for household use before the next plausible replenishment opportunit
 and how much appears potentially tradable? It never controls equipment and never
 returns execution readiness.
 
+## Current-state source
+
+The CLI makes its current-state source explicit. `--source live` is the default and
+performs one GET-only Home Assistant collection without saving it. Only
+`--save-observation` persists that snapshot. `--source history` reads SQLite in
+read-only mode, prints the stored observation timestamp and age, and warns after ten
+minutes. A timezone-aware `--as-of` selects the last observation at or before that
+instant and excludes later load samples, enabling deterministic replay.
+
+Every result includes the source, observation timestamp and age, SOC used, usable
+capacity assumption, and calculated battery energy. This prevents a stored SOC from
+being presented as live state.
+
 ## Inputs
 
-The estimator reads the latest local SQLite observation and healthy baseline-load
-history. It uses battery SOC/estimated energy, usable capacity, minimum SOC,
+The estimator uses either a fresh GET-only observation or an explicitly selected
+stored observation, plus healthy baseline-load history. It uses battery
+SOC/estimated energy, usable capacity, minimum SOC,
 emergency reserve, local time, GoodWe mode/derived-flow context, normalized Solcast
 energy, Amber import forecasts, optional weather health, and optional direct EV
 required-energy context. EV power is removed from baseline history only where the

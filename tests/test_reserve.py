@@ -6,8 +6,12 @@ import pytest
 from energy_optimizer.collector import build_observation
 from energy_optimizer.demand_forecast import forecast_household_demand
 from energy_optimizer.historian import Historian
+from energy_optimizer.home_assistant import HomeAssistantClient
 from energy_optimizer.opportunity_window import find_next_opportunity
-from energy_optimizer.reserve import estimate_battery_reserve
+from energy_optimizer.reserve import (
+    estimate_battery_reserve,
+    estimate_live_battery_reserve,
+)
 
 
 def _rows(start, *, days=21, power_w=1200):
@@ -34,10 +38,10 @@ class _History:
         self.observation = observation
         self.rows = rows
 
-    def latest_observation_read_only(self):
+    def observation_as_of_read_only(self, as_of=None):
         return self.observation
 
-    def healthy_load_samples_read_only(self, *, days, now):
+    def healthy_load_samples_read_only(self, *, days, now, as_of=None):
         return self.rows
 
 
@@ -257,3 +261,101 @@ def test_json_output_and_manual_readiness(healthy_states, config, now):
     assert "ready_for_execution" not in payload
     assert payload["operational_context"]["battery_mode"] == "Normal"
     assert payload["operational_context"]["amber_import_price_per_kwh"] == 0.21
+
+
+class _Response:
+    def __init__(self, payload):
+        self.payload = payload
+
+    def raise_for_status(self):
+        return None
+
+    def json(self):
+        return self.payload
+
+
+class _GetOnlySession:
+    def __init__(self, payload):
+        self.headers = {}
+        self.payload = payload
+        self.calls = []
+
+    def get(self, url, timeout):
+        self.calls.append(("GET", url, timeout))
+        return _Response(self.payload)
+
+
+def test_live_soc_overrides_stored_soc_without_saving(healthy_states, config, now):
+    healthy_states[
+        "sensor.outside_back_goodwe_inverter_battery_state_of_charge"
+    ].state = "58"
+    historian = Historian(config.database_path)
+    historian.save(build_observation(healthy_states, config, observed_at=now))
+    with historian.connect() as connection:
+        before = connection.execute("SELECT COUNT(*) FROM observations").fetchone()[0]
+
+    healthy_states[
+        "sensor.outside_back_goodwe_inverter_battery_state_of_charge"
+    ].state = "92"
+    session = _GetOnlySession(
+        [state.model_dump(mode="json") for state in healthy_states.values()]
+    )
+    client = HomeAssistantClient("http://ha", "secret", session=session)
+    result = estimate_live_battery_reserve(
+        historian,
+        config,
+        client,
+        save_observation=False,
+        now=now + timedelta(minutes=5),
+    )
+
+    with historian.connect() as connection:
+        after = connection.execute("SELECT COUNT(*) FROM observations").fetchone()[0]
+        stored_soc = connection.execute(
+            "SELECT battery_soc_percent FROM observations"
+        ).fetchone()[0]
+    assert result.current_state_source == "live"
+    assert result.battery_soc_percent == 92
+    assert result.usable_battery_capacity_kwh == 40
+    assert result.battery_energy_kwh == 36.8
+    assert before == after == 1
+    assert stored_soc == 58
+    assert len(session.calls) == 1
+    assert session.calls[0][0] == "GET"
+    assert session.calls[0][1].endswith("/api/states")
+
+
+def test_stale_history_observation_is_explicit(healthy_states, config, now):
+    observation = _stored_observation(healthy_states, config, now)
+    current = now + timedelta(minutes=11)
+    result = estimate_battery_reserve(
+        _History(observation, []),
+        config,
+        now=current,
+        source="history",
+    )
+    assert result.current_state_source == "history"
+    assert result.observation_timestamp == now.astimezone()
+    assert result.observation_age_seconds == 660
+    assert result.observation_is_stale
+    assert "older than 10 minutes" in result.observation_warning
+
+
+def test_history_as_of_selects_prior_observation(healthy_states, config, now):
+    historian = Historian(config.database_path)
+    healthy_states[
+        "sensor.outside_back_goodwe_inverter_battery_state_of_charge"
+    ].state = "58"
+    historian.save(build_observation(healthy_states, config, observed_at=now))
+    healthy_states[
+        "sensor.outside_back_goodwe_inverter_battery_state_of_charge"
+    ].state = "92"
+    historian.save(
+        build_observation(
+            healthy_states, config, observed_at=now + timedelta(minutes=5)
+        )
+    )
+    as_of = now + timedelta(minutes=2)
+    result = estimate_battery_reserve(historian, config, source="history", as_of=as_of)
+    assert result.battery_soc_percent == 58
+    assert result.observation_age_seconds == 120
