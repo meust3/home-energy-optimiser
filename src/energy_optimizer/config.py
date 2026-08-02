@@ -28,6 +28,19 @@ def _env_bool(name: str, default: bool = False) -> bool:
     raise ConfigurationError(f"{name} must be true or false")
 
 
+def _weekend_days() -> set[int]:
+    raw = os.getenv("DEMAND_WEEKEND_DAYS", "5,6")
+    try:
+        days = {int(value.strip()) for value in raw.split(",") if value.strip()}
+    except ValueError as exc:
+        raise ConfigurationError(
+            "DEMAND_WEEKEND_DAYS must be comma-separated integers"
+        ) from exc
+    if not days or any(day < 0 or day > 6 for day in days):
+        raise ConfigurationError("DEMAND_WEEKEND_DAYS values must be between 0 and 6")
+    return days
+
+
 def load_config(env_file: Path | None = Path(".env")) -> CollectorConfig:
     if env_file is not None:
         load_dotenv(dotenv_path=env_file, override=False)
@@ -99,6 +112,33 @@ def load_config(env_file: Path | None = Path(".env")) -> CollectorConfig:
         reserve_recent_days=int(os.getenv("RESERVE_RECENT_DAYS", "7")),
         reserve_max_horizon_hours=int(os.getenv("RESERVE_MAX_HORIZON_HOURS", "24")),
         reserve_uncertainty_ratio=float(os.getenv("RESERVE_UNCERTAINTY_RATIO", "0.20")),
+        reserve_fallback_mode=os.getenv("RESERVE_FALLBACK_MODE", "banded"),
+        reserve_fallback_overnight_kw=float(
+            os.getenv("RESERVE_FALLBACK_OVERNIGHT_KW", "2.0")
+        ),
+        reserve_fallback_morning_kw=float(
+            os.getenv("RESERVE_FALLBACK_MORNING_KW", "2.5")
+        ),
+        reserve_fallback_daytime_kw=float(
+            os.getenv("RESERVE_FALLBACK_DAYTIME_KW", "2.0")
+        ),
+        reserve_fallback_evening_kw=float(
+            os.getenv("RESERVE_FALLBACK_EVENING_KW", "3.0")
+        ),
+        reserve_fallback_late_evening_kw=float(
+            os.getenv("RESERVE_FALLBACK_LATE_EVENING_KW", "2.5")
+        ),
+        demand_tier2_minimum_samples=int(
+            os.getenv("DEMAND_TIER2_MINIMUM_SAMPLES", "3")
+        ),
+        demand_tier3_minimum_samples=int(
+            os.getenv("DEMAND_TIER3_MINIMUM_SAMPLES", "3")
+        ),
+        demand_tier4_minimum_samples=int(
+            os.getenv("DEMAND_TIER4_MINIMUM_SAMPLES", "6")
+        ),
+        demand_tier4_lookback_days=int(os.getenv("DEMAND_TIER4_LOOKBACK_DAYS", "7")),
+        demand_weekend_days=_weekend_days(),
         cheap_import_price_per_kwh=float(
             os.getenv("CHEAP_IMPORT_PRICE_PER_KWH", "0.15")
         ),
@@ -160,6 +200,33 @@ def load_reserve_config(env_file: Path | None = Path(".env")) -> CollectorConfig
         reserve_recent_days=int(os.getenv("RESERVE_RECENT_DAYS", "7")),
         reserve_max_horizon_hours=int(os.getenv("RESERVE_MAX_HORIZON_HOURS", "24")),
         reserve_uncertainty_ratio=float(os.getenv("RESERVE_UNCERTAINTY_RATIO", "0.20")),
+        reserve_fallback_mode=os.getenv("RESERVE_FALLBACK_MODE", "banded"),
+        reserve_fallback_overnight_kw=float(
+            os.getenv("RESERVE_FALLBACK_OVERNIGHT_KW", "2.0")
+        ),
+        reserve_fallback_morning_kw=float(
+            os.getenv("RESERVE_FALLBACK_MORNING_KW", "2.5")
+        ),
+        reserve_fallback_daytime_kw=float(
+            os.getenv("RESERVE_FALLBACK_DAYTIME_KW", "2.0")
+        ),
+        reserve_fallback_evening_kw=float(
+            os.getenv("RESERVE_FALLBACK_EVENING_KW", "3.0")
+        ),
+        reserve_fallback_late_evening_kw=float(
+            os.getenv("RESERVE_FALLBACK_LATE_EVENING_KW", "2.5")
+        ),
+        demand_tier2_minimum_samples=int(
+            os.getenv("DEMAND_TIER2_MINIMUM_SAMPLES", "3")
+        ),
+        demand_tier3_minimum_samples=int(
+            os.getenv("DEMAND_TIER3_MINIMUM_SAMPLES", "3")
+        ),
+        demand_tier4_minimum_samples=int(
+            os.getenv("DEMAND_TIER4_MINIMUM_SAMPLES", "6")
+        ),
+        demand_tier4_lookback_days=int(os.getenv("DEMAND_TIER4_LOOKBACK_DAYS", "7")),
+        demand_weekend_days=_weekend_days(),
         cheap_import_price_per_kwh=float(
             os.getenv("CHEAP_IMPORT_PRICE_PER_KWH", "0.15")
         ),
@@ -173,3 +240,18 @@ def load_reserve_config(env_file: Path | None = Path(".env")) -> CollectorConfig
             os.getenv("LOAD_PROFILE_MINIMUM_SAMPLES", "3")
         ),
     )
+
+
+def load_reprocessing_config(env_file: Path | None = Path(".env")) -> CollectorConfig:
+    """Load non-secret settings for local historical derivation."""
+    config = load_reserve_config(env_file)
+    config.grid_power_sign_convention = os.getenv("GRID_POWER_SIGN", "unknown")
+    config.battery_power_sign_convention = os.getenv("BATTERY_POWER_SIGN", "unknown")
+    config.sign_convention_confidence = os.getenv(
+        "SIGN_CONVENTION_CONFIDENCE", "unconfirmed"
+    )
+    config.sign_convention_supporting_samples = int(
+        os.getenv("SIGN_CONVENTION_SUPPORTING_SAMPLES", "0")
+    )
+    config.balance_tolerance_w = float(os.getenv("BALANCE_TOLERANCE_W", "250"))
+    return config

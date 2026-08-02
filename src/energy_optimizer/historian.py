@@ -14,7 +14,7 @@ from energy_optimizer.history_analysis import (
 )
 from energy_optimizer.models import EnergyObservation, ForecastRun
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 
 SOLCAST_KWH_COLUMNS = {
     "solcast_remaining_today_kwh_json": "TEXT",
@@ -67,6 +67,13 @@ DERIVED_COLUMNS = {
     "event_labels_json": "TEXT NOT NULL DEFAULT '[\"unknown\"]'",
     "event_label_confidence": "TEXT NOT NULL DEFAULT 'unconfirmed'",
     "event_label_evidence_json": "TEXT NOT NULL DEFAULT '{}'",
+}
+
+REPROCESSING_COLUMNS = {
+    "derivation_model_version": "TEXT",
+    "reprocessed_at_utc": "TEXT",
+    "derivation_metadata_json": "TEXT",
+    "originally_legacy": "INTEGER NOT NULL DEFAULT 0",
 }
 
 
@@ -198,6 +205,11 @@ class Historian:
                     connection.execute(
                         f"ALTER TABLE observations ADD COLUMN {name} {declaration}"
                     )
+            for name, declaration in REPROCESSING_COLUMNS.items():
+                if name not in existing_columns:
+                    connection.execute(
+                        f"ALTER TABLE observations ADD COLUMN {name} {declaration}"
+                    )
             connection.executescript("""
                 CREATE TABLE IF NOT EXISTS forecast_runs (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -229,6 +241,21 @@ class Historian:
                     ON forecast_points(forecast_run_id, period_start_utc);
                 CREATE INDEX IF NOT EXISTS idx_observations_baseline_training
                     ON observations(baseline_training_eligible, slot_utc);
+                CREATE TABLE IF NOT EXISTS observation_derivations (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    slot_utc TEXT NOT NULL,
+                    derived_at_utc TEXT NOT NULL,
+                    model_version TEXT NOT NULL,
+                    input_fingerprint TEXT NOT NULL,
+                    conventions_json TEXT NOT NULL,
+                    previous_derived_json TEXT NOT NULL,
+                    result_derived_json TEXT NOT NULL,
+                    originally_legacy INTEGER NOT NULL,
+                    UNIQUE(slot_utc, model_version, input_fingerprint),
+                    FOREIGN KEY(slot_utc) REFERENCES observations(slot_utc)
+                );
+                CREATE INDEX IF NOT EXISTS idx_derivations_slot
+                    ON observation_derivations(slot_utc, derived_at_utc);
                 """)
             connection.execute(
                 """CREATE INDEX IF NOT EXISTS idx_observations_telemetry_health_time
@@ -568,6 +595,22 @@ class Historian:
                     datetime.fromtimestamp(cutoff, UTC).isoformat(),
                     end.isoformat(),
                 ),
+            ).fetchall()
+
+    def reserve_history_rows_read_only(
+        self, *, days: int, now: datetime, as_of: datetime | None = None
+    ) -> list[sqlite3.Row]:
+        """Read all candidate rows so reserve eligibility remains explainable."""
+        end = (as_of or now).astimezone(UTC)
+        cutoff = datetime.fromtimestamp(end.timestamp() - days * 86400, UTC)
+        with self.connect_read_only() as connection:
+            return connection.execute(
+                "SELECT observed_at_local, telemetry_is_healthy, "
+                "baseline_training_eligible, baseline_exclusion_reason, "
+                "baseline_house_consumption_w "
+                "FROM observations WHERE slot_utc >= ? AND slot_utc <= ? "
+                "ORDER BY slot_utc",
+                (cutoff.isoformat(), end.isoformat()),
             ).fetchall()
 
     def power_sign_samples(

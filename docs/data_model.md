@@ -1,6 +1,6 @@
 # Read-only operational data model
 
-SQLite uses schema version 4 and one `observations` row per five-minute UTC slot.
+SQLite uses schema version 5 and one `observations` row per five-minute UTC slot.
 `slot_utc` is the primary key. A repeat collection for a slot uses a last-write-wins
 upsert so a newer snapshot atomically replaces an earlier snapshot without creating
 a duplicate.
@@ -110,7 +110,7 @@ there unless recollected through the normal same-slot upsert policy.
 ## Reserve estimates
 
 Reserve estimates are calculated on demand and are not persisted in schema version
-4. Inputs come from the latest observation and telemetry-healthy,
+5. Inputs come from the latest observation and telemetry-healthy,
 baseline-training-eligible history. This avoids making an ephemeral advisory result
 look like measured data. JSON output includes the battery estimate, household and EV
 demand, technical/emergency reserves, uncertainty, recommended held energy,
@@ -118,3 +118,17 @@ potentially tradable energy, opportunity window, confidence, health context,
 reasoning, and `ready_for_manual_review`.
 Operational context echoes relevant stored modes, directional-flow status, prices,
 weather, and EV state for audit; it remains input context rather than an instruction.
+
+## Version 5 derivation audit
+
+Version 5 additively adds derivation model/version, reprocessed timestamp,
+structured metadata, and original-legacy status. The append-only
+`observation_derivations` table stores conventions, raw-input fingerprint, previous
+interpretation, result, model version, timestamp, and legacy status. Its unique
+slot/model/fingerprint policy makes identical reruns idempotent while retaining new
+audit records for changed inputs or models.
+
+Historical reprocessing updates only derived flow, event, baseline, and flow-health
+columns. Raw telemetry is absent from the update statement. Missing raw values,
+invalid residuals, inadequate original telemetry quality, and known EV activity
+without EV power remain baseline-ineligible.

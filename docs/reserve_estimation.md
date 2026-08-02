@@ -35,6 +35,49 @@ opportunity. Slots without the configured sample minimum use the conservative lo
 fallback. A bounded recent-history ratio adjusts historical slots without machine
 learning.
 
+History qualification is explicit. A row must have healthy telemetry, be marked
+eligible for baseline training, contain a baseline value, and match both the target
+local weekday and five-minute slot. Each target needs the configured minimum sample
+count. Migrated legacy rows without a trustworthy baseline are counted as
+`legacy_or_unclassified`; the estimator never reconstructs them from raw load.
+
+Fallback defaults are configured assumptions:
+
+- overnight, 00:00–06:00: 2.0 kW;
+- morning, 06:00–09:00: 2.5 kW;
+- daytime, 09:00–17:00: 2.0 kW;
+- evening, 17:00–22:00: 3.0 kW;
+- late evening, 22:00–00:00: 2.5 kW.
+
+All values are configurable and none is learned from the current dataset. The
+banded defaults never reduce the former 2.0 kW assumption. Flat mode remains
+available. Reports decompose fallback energy by band and distinguish forecast slots
+with too few matching samples from slots with no matching history.
+
+Forecast iteration advances in UTC and converts every interval back to local time
+for band and weekday/slot matching. This avoids inventing or losing elapsed energy
+across daylight-saving transitions, including deployments outside Brisbane.
+
+## Hierarchical demand tiers
+
+Each five-minute output slot uses the first tier meeting its sample minimum:
+
+1. Exact local weekday and five-minute slot.
+2. Configured weekday/weekend category and matching 30-minute local bucket.
+3. All days and matching 30-minute local bucket.
+4. Recent eligible samples in the same broad time band, using the median.
+5. Configured fallback-band assumption.
+
+Tiers 2–4 are broader contextual estimates, not exact household patterns.
+Diagnostics report samples, slots, energy, and variability by tier plus fallback
+share. Confidence weights stronger tiers more highly and penalizes variability and
+fallback-heavy horizons. Exact weekday/five-minute history normally needs at least
+three weeks to acquire three eligible samples for each slot.
+
+Reprocessed rows without direct EV telemetry preserve measured household load and
+record that limitation. Known EV activity without power remains excluded, and
+inferred EV power is never subtracted.
+
 The opportunity detector considers qualifying remaining-today or tomorrow Solcast
 energy and Amber intervals at or below the configured cheap-import threshold. Stored
 Solcast summaries lack interval timing, so solar windows use documented 07:00 and

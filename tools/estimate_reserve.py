@@ -94,6 +94,78 @@ def main() -> int:
         console.print(
             f"[bold yellow]WARNING: {estimate.observation_warning}[/bold yellow]"
         )
+    diagnostics = estimate.demand_forecast.diagnostics
+    diagnostic_table = Table(title="Demand-history qualification")
+    diagnostic_table.add_column("Diagnostic")
+    diagnostic_table.add_column("Value", justify="right")
+    for label, value in (
+        ("Historical observations examined", diagnostics.total_observations_examined),
+        ("Eligible baseline observations", diagnostics.eligible_baseline_observations),
+        (
+            "Minimum samples per weekday/slot",
+            diagnostics.minimum_samples_per_weekday_slot,
+        ),
+        (
+            "Forecast slots qualified from history",
+            diagnostics.historical_slots_qualified,
+        ),
+        (
+            "Slots with some but insufficient history",
+            diagnostics.slots_with_insufficient_matching_history,
+        ),
+        ("Slots with no matching history", diagnostics.slots_with_no_matching_history),
+    ):
+        diagnostic_table.add_row(label, str(value))
+    for reason, count in diagnostics.ineligible_observations_by_reason.items():
+        diagnostic_table.add_row(f"Ineligible: {reason}", str(count))
+    console.print(diagnostic_table)
+    console.print(diagnostics.matching_rule)
+    console.print(diagnostics.legacy_row_policy)
+
+    tier_table = Table(title="Hierarchical demand forecast")
+    tier_table.add_column("Tier")
+    tier_table.add_column("Available samples", justify="right")
+    tier_table.add_column("Forecast slots", justify="right")
+    tier_table.add_column("Energy kWh", justify="right")
+    tier_table.add_column("Variability", justify="right")
+    tier_table.add_column("Avg age days", justify="right")
+    for tier, contribution in diagnostics.tier_contributions.items():
+        tier_table.add_row(
+            tier,
+            str(diagnostics.samples_available_by_tier.get(tier, 0)),
+            str(contribution.slot_count),
+            f"{contribution.energy_kwh:.3f}",
+            (
+                "N/A"
+                if contribution.average_variability is None
+                else f"{contribution.average_variability:.3f}"
+            ),
+            (
+                "N/A"
+                if contribution.average_sample_age_days is None
+                else f"{contribution.average_sample_age_days:.1f}"
+            ),
+        )
+    console.print(tier_table)
+    console.print(f"Configured fallback share: {diagnostics.fallback_share:.1%}")
+
+    fallback_table = Table(title="Configured fallback assumptions")
+    fallback_table.add_column("Local-time band")
+    fallback_table.add_column("Configured kW", justify="right")
+    fallback_table.add_column("Slots", justify="right")
+    fallback_table.add_column("Energy kWh", justify="right")
+    for band, contribution in estimate.demand_forecast.fallback_contributions.items():
+        fallback_table.add_row(
+            band.replace("_", " "),
+            f"{contribution.configured_power_kw:.3f}",
+            str(contribution.slot_count),
+            f"{contribution.energy_kwh:.3f}",
+        )
+    console.print(fallback_table)
+    console.print(
+        "Fallback values are configured conservative assumptions; they were not "
+        "learned from household history."
+    )
     console.print(
         Panel(
             f"Type: {estimate.next_opportunity.opportunity_type}\n"

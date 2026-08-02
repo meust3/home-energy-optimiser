@@ -76,3 +76,10 @@ the estimator and does not persist it by default. History mode uses SQLite read-
 queries, supports an as-of upper bound, and exposes observation age. Both modes use
 stored baseline history for demand forecasting; current-state provenance is never
 implicit.
+
+Demand-history diagnostics are produced before aggregation. All candidate rows are
+counted, then exclusions are grouped by telemetry health, baseline-training reason,
+missing baseline, or legacy status. Qualified samples still require exact local
+weekday and five-minute-slot matching. Configured local-time fallback bands replace
+the default flat assumption, while flat mode remains available; neither mode learns
+fallback values from sparse data.

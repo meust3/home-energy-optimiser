@@ -17,3 +17,19 @@ facts. Excess residual makes flow readiness unhealthy without affecting telemetr
 The supplied 175-sample analysis strongly supports grid-positive export and
 battery-positive discharge (21.75 W MAE, high confidence, 99.48% separation). This
 is evidence for manual configuration, not automatic configuration.
+
+## Historical reprocessing
+
+`tools/reprocess_observations.py` uses only manually configured, confirmed signs.
+It defaults to dry-run and reports eligibility, exclusions, residual statistics, and
+tolerance failures. `--apply` recomputes derived flows, allocations, events,
+baseline eligibility, and flow health while preserving every raw value.
+
+Each interpretation records its model, timestamp, conventions, supporting samples,
+raw-input fingerprint, previous result, new result, and original legacy status.
+Identical reruns do not duplicate audit entries. Rows outside residual tolerance
+remain excluded.
+
+Without direct EV telemetry, measured house load is preserved and the limitation is
+recorded. If EV charging is known active but EV power is missing, the baseline stays
+ineligible. Inferred EV power is never invented or subtracted.

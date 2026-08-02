@@ -105,12 +105,13 @@ def test_migrates_existing_schema_without_deleting_rows(config):
     assert row["telemetry_is_healthy"] == 1
     assert row["telemetry_health_score"] == 65
     assert "legacy_global_health" in row["health_domains_json"]
-    assert version["version"] == 4
+    assert version["version"] == 5
     assert row["solcast_next_hour_kwh_json"] is None
     assert row["solcast_next_hour_json"] == '{"estimate":6796}'
     assert row["sign_convention_status"] == "unconfirmed"
     assert row["grid_import_power_w"] is None
     assert row["baseline_house_consumption_w"] is None
+    assert row["derivation_model_version"] is None
 
 
 def test_observation_rows_select_inclusive_range(healthy_states, config, now):

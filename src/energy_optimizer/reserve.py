@@ -77,7 +77,7 @@ def estimate_battery_reserve(
         solar_surplus_threshold_kwh=config.solar_surplus_threshold_kwh,
         max_horizon_hours=config.reserve_max_horizon_hours,
     )
-    rows = historian.healthy_load_samples_read_only(
+    rows = historian.reserve_history_rows_read_only(
         days=config.reserve_history_days,
         now=current,
         as_of=as_of or current,
@@ -88,7 +88,20 @@ def estimate_battery_reserve(
         end_local=opportunity.expected_start_local,
         minimum_samples=config.load_profile_minimum_samples,
         fallback_kw=config.conservative_fallback_household_load_kw,
+        fallback_mode=config.reserve_fallback_mode,
+        fallback_band_powers_kw={
+            "overnight": config.reserve_fallback_overnight_kw,
+            "morning": config.reserve_fallback_morning_kw,
+            "daytime": config.reserve_fallback_daytime_kw,
+            "evening": config.reserve_fallback_evening_kw,
+            "late_evening": config.reserve_fallback_late_evening_kw,
+        },
         recent_days=config.reserve_recent_days,
+        tier2_minimum_samples=config.demand_tier2_minimum_samples,
+        tier3_minimum_samples=config.demand_tier3_minimum_samples,
+        tier4_minimum_samples=config.demand_tier4_minimum_samples,
+        tier4_lookback_days=config.demand_tier4_lookback_days,
+        weekend_days=config.demand_weekend_days,
     )
     battery_energy = _number(observation.get("battery_energy_estimate_kwh"))
     soc = _number(observation.get("battery_soc_percent"))

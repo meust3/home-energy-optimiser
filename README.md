@@ -48,6 +48,17 @@ RESERVE_HISTORY_DAYS=28
 RESERVE_RECENT_DAYS=7
 RESERVE_MAX_HORIZON_HOURS=24
 RESERVE_UNCERTAINTY_RATIO=0.20
+RESERVE_FALLBACK_MODE=banded
+RESERVE_FALLBACK_OVERNIGHT_KW=2.0
+RESERVE_FALLBACK_MORNING_KW=2.5
+RESERVE_FALLBACK_DAYTIME_KW=2.0
+RESERVE_FALLBACK_EVENING_KW=3.0
+RESERVE_FALLBACK_LATE_EVENING_KW=2.5
+DEMAND_TIER2_MINIMUM_SAMPLES=3
+DEMAND_TIER3_MINIMUM_SAMPLES=3
+DEMAND_TIER4_MINIMUM_SAMPLES=6
+DEMAND_TIER4_LOOKBACK_DAYS=7
+DEMAND_WEEKEND_DAYS=5,6
 CHEAP_IMPORT_PRICE_PER_KWH=0.15
 SOLAR_SURPLUS_THRESHOLD_KWH=1.0
 CONSERVATIVE_FALLBACK_HOUSEHOLD_LOAD_KW=2.0
@@ -212,10 +223,42 @@ The estimator does not recommend an executable action. Its output is marked
 `ready_for_manual_review`, never `ready_for_execution`. Potentially tradable energy
 is an analytical upper bound, not an instruction to export or discharge.
 
+The default demand fallback uses configured local-time bands. Every default is at
+least as conservative as the former 2.0 kW flat fallback. Set
+`RESERVE_FALLBACK_MODE=flat` to retain the original single
+`CONSERVATIVE_FALLBACK_HOUSEHOLD_LOAD_KW` assumption. Terminal and JSON output show
+eligibility exclusions, weekday/slot sample qualification, and fallback energy by
+band; these are configured assumptions and are never inferred from sparse history.
+
+Before fallback, the forecast tries exact weekday/five-minute, weekday-or-weekend
+30-minute, all-days 30-minute, and recent same-band tiers. Output reports every
+slot's tier, samples, energy, variability, and fallback share. Broader tiers are
+context estimates, not exact learned household patterns.
+
 See [reserve estimation](docs/reserve_estimation.md) for its assumptions,
 confidence model, and limitations.
 
-## 11. Run validation
+## 11. Reprocess historical derivations
+
+Preview recovery of derived fields from preserved raw observations:
+
+```powershell
+python tools/reprocess_observations.py
+python tools/reprocess_observations.py --json
+```
+
+Before applying, stop collection briefly and create a timestamped backup:
+
+```powershell
+Copy-Item data/energy_history.db `
+  data/energy_history-before-reprocess-20260802.db
+python tools/reprocess_observations.py --apply
+```
+
+Dry-run is the default. Apply updates derived columns only and appends auditable
+derivation history; raw telemetry is never changed. Identical reruns are idempotent.
+
+## 12. Run validation
 
 ```powershell
 pytest

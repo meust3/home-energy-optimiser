@@ -231,6 +231,17 @@ class CollectorConfig(BaseModel):
     reserve_recent_days: int = Field(default=7, gt=0)
     reserve_max_horizon_hours: int = Field(default=24, gt=0)
     reserve_uncertainty_ratio: float = Field(default=0.20, ge=0)
+    reserve_fallback_mode: Literal["banded", "flat"] = "banded"
+    reserve_fallback_overnight_kw: float = Field(default=2.0, ge=0)
+    reserve_fallback_morning_kw: float = Field(default=2.5, ge=0)
+    reserve_fallback_daytime_kw: float = Field(default=2.0, ge=0)
+    reserve_fallback_evening_kw: float = Field(default=3.0, ge=0)
+    reserve_fallback_late_evening_kw: float = Field(default=2.5, ge=0)
+    demand_tier2_minimum_samples: int = Field(default=3, gt=0)
+    demand_tier3_minimum_samples: int = Field(default=3, gt=0)
+    demand_tier4_minimum_samples: int = Field(default=6, gt=0)
+    demand_tier4_lookback_days: int = Field(default=7, gt=0)
+    demand_weekend_days: set[int] = Field(default_factory=lambda: {5, 6})
     cheap_import_price_per_kwh: float = 0.15
     solar_surplus_threshold_kwh: float = Field(default=1.0, ge=0)
     conservative_fallback_household_load_kw: float = Field(default=2.0, ge=0)
