@@ -83,3 +83,15 @@ missing baseline, or legacy status. Qualified samples still require exact local
 weekday and five-minute-slot matching. Configured local-time fallback bands replace
 the default flat assumption, while flat mode remains available; neither mode learns
 fallback values from sparse data.
+
+Reliability is decomposed into data availability, household-demand forecasting,
+opportunity forecasting, and overall reserve confidence. Overall confidence is
+capped by demand confidence, which uses history completeness, tier composition,
+sample variability and age, EV telemetry, and completed-run error. Training rows
+must precede forecast creation, and the current partial local day is excluded from
+broad tiers so live and replay results are leakage-safe.
+
+Each reserve CLI run writes only its advisory demand projection to the existing
+local forecast tables. Completed horizons can be scored against eligible stored
+actuals by tier. This analytical feedback path has no executor or Home Assistant
+write capability.

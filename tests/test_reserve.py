@@ -12,6 +12,7 @@ from energy_optimizer.opportunity_window import find_next_opportunity
 from energy_optimizer.reserve import (
     estimate_battery_reserve,
     estimate_live_battery_reserve,
+    store_reserve_forecast,
 )
 
 
@@ -545,7 +546,9 @@ def test_weekday_weekend_bucket_tier():
     start = datetime(2026, 8, 8, 12, 0, tzinfo=zone)  # Saturday
     rows = [
         {
-            "observed_at_local": start.replace(minute=minute).isoformat(),
+            "observed_at_local": (start - timedelta(days=7))
+            .replace(minute=minute)
+            .isoformat(),
             "house_consumption_w": 1200,
         }
         for minute in (5, 10, 15)
@@ -622,17 +625,125 @@ def test_mixed_tier_forecast_horizon():
 
 def test_confidence_decreases_for_weaker_tiers(now):
     start = now.astimezone().replace(hour=12, minute=0, second=0, microsecond=0)
-    exact_rows = [
-        {
-            "observed_at_local": (start - timedelta(days=7 * week)).isoformat(),
-            "house_consumption_w": 1000,
-        }
-        for week in (1, 2, 3)
-    ]
+    exact_rows = _rows(start, days=22, power_w=1000)
     exact = _forecast_for_tier(exact_rows, start)
     fallback = _forecast_for_tier([], start)
     assert exact.confidence == "high"
     assert fallback.confidence == "low"
+
+
+def test_one_partial_day_cannot_produce_medium_confidence():
+    zone = ZoneInfo("Australia/Brisbane")
+    start = datetime(2026, 8, 2, 18, tzinfo=zone)
+    rows = [
+        {
+            "observed_at_local": (
+                start - timedelta(days=1, minutes=offset)
+            ).isoformat(),
+            "house_consumption_w": 1200,
+        }
+        for offset in range(0, 12 * 5, 5)
+    ]
+    result = _forecast_for_tier(rows, start, tier4_minimum_samples=1)
+    assert result.diagnostics.complete_daily_periods == 0
+    assert result.confidence == "low"
+    assert any(
+        "fewer_than_2_complete_days" in item for item in result.confidence_ceilings
+    )
+
+
+def test_zero_exact_matches_cannot_be_high():
+    zone = ZoneInfo("Australia/Brisbane")
+    start = datetime(2026, 8, 10, 12, tzinfo=zone)
+    rows = [
+        {
+            "observed_at_local": (start - timedelta(days=day))
+            .replace(minute=5)
+            .isoformat(),
+            "house_consumption_w": 1200,
+        }
+        for day in range(1, 9)
+    ]
+    result = _forecast_for_tier(rows, start)
+    assert result.diagnostics.exact_history_share == 0
+    assert result.confidence != "high"
+
+
+def test_majority_tier_three_is_capped_at_medium():
+    zone = ZoneInfo("Australia/Brisbane")
+    start = datetime(2026, 8, 10, 12, tzinfo=zone)
+    result = _forecast_for_tier(
+        _rows(start, days=9),
+        start,
+        minimum_samples=999,
+        tier2_minimum_samples=999,
+        tier3_minimum_samples=3,
+    )
+    assert result.slot_decisions[0].tier == "tier3_all_days_30m"
+    assert result.diagnostics.weak_estimate_share == 1
+    assert result.confidence != "high"
+
+
+def test_multiple_complete_days_are_reported():
+    zone = ZoneInfo("Australia/Brisbane")
+    start = datetime(2026, 8, 10, 12, tzinfo=zone)
+    result = _forecast_for_tier(_rows(start, days=9), start)
+    assert result.diagnostics.complete_daily_periods == 8
+    assert result.diagnostics.complete_overnight_periods == 8
+
+
+def test_same_partial_day_and_future_samples_are_not_used():
+    zone = ZoneInfo("Australia/Brisbane")
+    start = datetime(2026, 8, 10, 12, tzinfo=zone)
+    rows = [
+        {
+            "observed_at_local": (start - timedelta(hours=1)).isoformat(),
+            "house_consumption_w": 9000,
+        },
+        {
+            "observed_at_local": (start + timedelta(minutes=5)).isoformat(),
+            "house_consumption_w": 9000,
+        },
+    ]
+    result = _forecast_for_tier(rows, start, tier4_minimum_samples=1)
+    assert result.slot_decisions[0].tier == "tier5_fallback"
+    assert result.diagnostics.same_partial_day_samples_excluded == 1
+    assert result.diagnostics.future_samples_excluded == 1
+
+
+def test_reserve_forecast_is_stored_for_later_scoring(healthy_states, config, now):
+    observation = _stored_observation(healthy_states, config, now)
+    observation["solcast_remaining_today_kwh_json"] = None
+    estimate = estimate_battery_reserve(
+        _History(observation, []), config, now=now.astimezone()
+    )
+    historian = Historian(config.database_path)
+    run_id = store_reserve_forecast(historian, estimate)
+    with historian.connect() as connection:
+        run = connection.execute(
+            "SELECT source, model_version FROM forecast_runs WHERE id=?", (run_id,)
+        ).fetchone()
+        point_count = connection.execute(
+            "SELECT COUNT(*) FROM forecast_points WHERE forecast_run_id=?", (run_id,)
+        ).fetchone()[0]
+    assert run["source"] == "reserve_estimator"
+    assert run["model_version"] == "hierarchical-demand-v1"
+    assert point_count == len(estimate.demand_forecast.slot_decisions)
+
+
+def test_gross_requirement_reports_capacity_overflow(healthy_states, config, now):
+    observation = _stored_observation(healthy_states, config, now)
+    observation["solcast_remaining_today_kwh_json"] = None
+    observation["solcast_tomorrow_kwh_json"] = None
+    observation["amber_import_forecast_json"] = None
+    config.reserve_fallback_mode = "flat"
+    config.conservative_fallback_household_load_kw = 10
+    result = estimate_battery_reserve(
+        _History(observation, []), config, now=now.astimezone()
+    )
+    assert result.gross_reserve_requirement_kwh > config.usable_battery_capacity_kwh
+    assert result.capacity_capped_reserve_kwh == config.usable_battery_capacity_kwh
+    assert result.unmet_reserve_requirement_kwh > 0
 
 
 def test_brisbane_local_slot_matching():

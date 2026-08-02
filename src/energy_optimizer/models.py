@@ -242,6 +242,10 @@ class CollectorConfig(BaseModel):
     demand_tier4_minimum_samples: int = Field(default=6, gt=0)
     demand_tier4_lookback_days: int = Field(default=7, gt=0)
     demand_weekend_days: set[int] = Field(default_factory=lambda: {5, 6})
+    demand_complete_period_fraction: float = Field(default=0.90, gt=0, le=1)
+    demand_low_ceiling_complete_days: int = Field(default=2, ge=0)
+    demand_medium_low_ceiling_complete_days: int = Field(default=7, ge=1)
+    demand_weak_tier_share_ceiling: float = Field(default=0.50, ge=0, le=1)
     cheap_import_price_per_kwh: float = 0.15
     solar_surplus_threshold_kwh: float = Field(default=1.0, ge=0)
     conservative_fallback_household_load_kw: float = Field(default=2.0, ge=0)

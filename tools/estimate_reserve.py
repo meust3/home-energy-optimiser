@@ -7,12 +7,13 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
-from energy_optimizer.config import load_config, load_reserve_config
+from energy_optimizer.config import load_config, load_database_path, load_reserve_config
 from energy_optimizer.historian import Historian
 from energy_optimizer.home_assistant import HomeAssistantClient
 from energy_optimizer.reserve import (
     estimate_battery_reserve,
     estimate_live_battery_reserve,
+    store_reserve_forecast,
 )
 
 
@@ -35,7 +36,20 @@ def main() -> int:
         type=_aware_datetime,
         help="Timezone-aware instant for deterministic history replay",
     )
+    parser.add_argument(
+        "--score-run",
+        type=int,
+        help="Score a completed reserve forecast run against stored actuals",
+    )
     args = parser.parse_args()
+    if args.score_run is not None:
+        result = Historian(load_database_path()).score_reserve_forecast(args.score_run)
+        console = Console()
+        if args.json:
+            console.print_json(data=result)
+        else:
+            console.print(Panel(str(result), title="Reserve forecast scoring"))
+        return 0
     if args.source != "live" and args.save_observation:
         parser.error("--save-observation is only valid with --source live")
     if args.source != "history" and args.as_of is not None:
@@ -63,6 +77,7 @@ def main() -> int:
             source="history",
             as_of=args.as_of,
         )
+    store_reserve_forecast(historian, estimate)
     console = Console()
     if args.json:
         console.print_json(data=estimate.model_dump(mode="json"))
@@ -80,11 +95,17 @@ def main() -> int:
             _unit(estimate.usable_battery_capacity_kwh, "kWh"),
         ),
         ("Calculated battery energy", _unit(estimate.battery_energy_kwh, "kWh")),
+        ("Forecast horizon", f"{estimate.forecast_horizon_hours:.2f} hours"),
+        ("Average forecast load", _unit(estimate.average_forecast_load_kw, "kW")),
         ("Expected household demand", estimate.expected_house_demand_kwh),
         ("Expected EV demand", estimate.expected_ev_demand_kwh),
         ("Technical minimum", estimate.technical_reserve_kwh),
         ("Emergency reserve", estimate.emergency_reserve_kwh),
         ("Forecast uncertainty", estimate.uncertainty_buffer_kwh),
+        ("Gross reserve requirement", estimate.gross_reserve_requirement_kwh),
+        ("Capacity-capped reserve", estimate.capacity_capped_reserve_kwh),
+        ("Unmet reserve requirement", estimate.unmet_reserve_requirement_kwh),
+        ("Current reserve shortfall", estimate.current_reserve_shortfall_kwh),
         ("Recommended reserve", estimate.recommended_reserve_kwh),
         ("Potentially tradable", estimate.potentially_tradable_kwh),
     ):
@@ -114,6 +135,11 @@ def main() -> int:
             diagnostics.slots_with_insufficient_matching_history,
         ),
         ("Slots with no matching history", diagnostics.slots_with_no_matching_history),
+        (
+            "Same partial-day samples excluded",
+            diagnostics.same_partial_day_samples_excluded,
+        ),
+        ("Future samples excluded", diagnostics.future_samples_excluded),
     ):
         diagnostic_table.add_row(label, str(value))
     for reason, count in diagnostics.ineligible_observations_by_reason.items():
@@ -148,6 +174,20 @@ def main() -> int:
         )
     console.print(tier_table)
     console.print(f"Configured fallback share: {diagnostics.fallback_share:.1%}")
+    console.print(
+        f"History: {diagnostics.history_duration_days:.0f} calendar days, "
+        f"{diagnostics.complete_daily_periods} complete days, "
+        f"{diagnostics.complete_overnight_periods} complete overnights"
+    )
+    console.print(
+        f"Shares: exact {diagnostics.exact_history_share:.1%}, grouped "
+        f"{diagnostics.grouped_history_share:.1%}, recent band "
+        f"{diagnostics.recent_band_share:.1%}, fallback "
+        f"{diagnostics.configured_fallback_share:.1%}, weak estimates "
+        f"{diagnostics.weak_estimate_share:.1%}"
+    )
+    if diagnostics.ev_contamination_risk:
+        console.print(f"[yellow]{diagnostics.ev_contamination_risk}[/yellow]")
 
     fallback_table = Table(title="Configured fallback assumptions")
     fallback_table.add_column("Local-time band")
@@ -175,9 +215,25 @@ def main() -> int:
             title="Next replenishment opportunity",
         )
     )
-    console.print(
-        f"Confidence: {estimate.confidence} ({estimate.confidence_score}/100)"
-    )
+    confidence_table = Table(title="Confidence components")
+    confidence_table.add_column("Component")
+    confidence_table.add_column("Rating")
+    confidence_table.add_column("Score", justify="right")
+    confidence_table.add_column("Ceilings")
+    for label, component in (
+        ("Data availability", estimate.data_availability_confidence),
+        ("Household demand", estimate.household_demand_confidence),
+        ("Opportunity", estimate.opportunity_forecast_confidence),
+        ("Overall reserve", estimate.overall_reserve_confidence),
+    ):
+        confidence_table.add_row(
+            label,
+            component.rating,
+            str(component.score),
+            ", ".join(component.ceilings) or "none",
+        )
+    console.print(confidence_table)
+    console.print(f"Stored forecast run: {estimate.forecast_run_id}")
     console.print(f"Ready for manual review: {estimate.ready_for_manual_review}")
     console.print(estimate.reasoning)
     console.print("Strictly read-only advisory output. No command was issued.")

@@ -139,6 +139,18 @@ def load_config(env_file: Path | None = Path(".env")) -> CollectorConfig:
         ),
         demand_tier4_lookback_days=int(os.getenv("DEMAND_TIER4_LOOKBACK_DAYS", "7")),
         demand_weekend_days=_weekend_days(),
+        demand_complete_period_fraction=float(
+            os.getenv("DEMAND_COMPLETE_PERIOD_FRACTION", "0.90")
+        ),
+        demand_low_ceiling_complete_days=int(
+            os.getenv("DEMAND_LOW_CEILING_COMPLETE_DAYS", "2")
+        ),
+        demand_medium_low_ceiling_complete_days=int(
+            os.getenv("DEMAND_MEDIUM_LOW_CEILING_COMPLETE_DAYS", "7")
+        ),
+        demand_weak_tier_share_ceiling=float(
+            os.getenv("DEMAND_WEAK_TIER_SHARE_CEILING", "0.50")
+        ),
         cheap_import_price_per_kwh=float(
             os.getenv("CHEAP_IMPORT_PRICE_PER_KWH", "0.15")
         ),
@@ -227,6 +239,18 @@ def load_reserve_config(env_file: Path | None = Path(".env")) -> CollectorConfig
         ),
         demand_tier4_lookback_days=int(os.getenv("DEMAND_TIER4_LOOKBACK_DAYS", "7")),
         demand_weekend_days=_weekend_days(),
+        demand_complete_period_fraction=float(
+            os.getenv("DEMAND_COMPLETE_PERIOD_FRACTION", "0.90")
+        ),
+        demand_low_ceiling_complete_days=int(
+            os.getenv("DEMAND_LOW_CEILING_COMPLETE_DAYS", "2")
+        ),
+        demand_medium_low_ceiling_complete_days=int(
+            os.getenv("DEMAND_MEDIUM_LOW_CEILING_COMPLETE_DAYS", "7")
+        ),
+        demand_weak_tier_share_ceiling=float(
+            os.getenv("DEMAND_WEAK_TIER_SHARE_CEILING", "0.50")
+        ),
         cheap_import_price_per_kwh=float(
             os.getenv("CHEAP_IMPORT_PRICE_PER_KWH", "0.15")
         ),

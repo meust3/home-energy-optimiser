@@ -58,6 +58,10 @@ DEMAND_TIER2_MINIMUM_SAMPLES=3
 DEMAND_TIER3_MINIMUM_SAMPLES=3
 DEMAND_TIER4_MINIMUM_SAMPLES=6
 DEMAND_TIER4_LOOKBACK_DAYS=7
+DEMAND_COMPLETE_PERIOD_FRACTION=0.90
+DEMAND_LOW_CEILING_COMPLETE_DAYS=2
+DEMAND_MEDIUM_LOW_CEILING_COMPLETE_DAYS=7
+DEMAND_WEAK_TIER_SHARE_CEILING=0.50
 DEMAND_WEEKEND_DAYS=5,6
 CHEAP_IMPORT_PRICE_PER_KWH=0.15
 SOLAR_SURPLUS_THRESHOLD_KWH=1.0
@@ -210,6 +214,7 @@ python tools/estimate_reserve.py --json
 python tools/estimate_reserve.py --source history
 python tools/estimate_reserve.py --source history `
   --as-of 2026-08-02T12:00:00+10:00 --json
+python tools/estimate_reserve.py --score-run 123
 ```
 
 Interactive use defaults to `--source live`: one allowlisted `GET /api/states`
@@ -233,7 +238,18 @@ band; these are configured assumptions and are never inferred from sparse histor
 Before fallback, the forecast tries exact weekday/five-minute, weekday-or-weekend
 30-minute, all-days 30-minute, and recent same-band tiers. Output reports every
 slot's tier, samples, energy, variability, and fallback share. Broader tiers are
-context estimates, not exact learned household patterns.
+context estimates, not exact learned household patterns. The report separates data
+availability, household-demand, opportunity, and overall confidence; entity
+availability cannot override incomplete demand history. It also shows complete days
+and overnights, tier shares, EV contamination risk, gross reserve, the battery cap,
+unmet requirement, and current shortfall.
+
+Each invocation stores the advisory five-minute demand projection in local SQLite
+for later validation, even when a live observation itself is not saved. Use the
+printed forecast-run ID with `--score-run` after the horizon to compare eligible
+actual household energy with the forecast and inspect error by tier. Training never
+uses observations at or after creation time and excludes the current partial local
+day, preventing future-data leakage in historical replay.
 
 See [reserve estimation](docs/reserve_estimation.md) for its assumptions,
 confidence model, and limitations.

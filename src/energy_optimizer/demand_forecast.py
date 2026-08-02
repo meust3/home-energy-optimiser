@@ -15,6 +15,7 @@ ForecastTier = Literal[
     "tier4_recent_band",
     "tier5_fallback",
 ]
+DemandConfidenceRating = Literal["low", "medium_low", "medium", "high"]
 FALLBACK_BANDS = ("overnight", "morning", "daytime", "evening", "late_evening")
 TIERS: tuple[ForecastTier, ...] = (
     "tier1_exact",
@@ -62,6 +63,20 @@ class DemandDiagnostics(BaseModel):
     samples_available_by_tier: dict[str, int]
     tier_contributions: dict[str, TierContribution]
     fallback_share: float = Field(ge=0, le=1)
+    eligible_history_days: int = Field(ge=0)
+    history_duration_days: float = Field(ge=0)
+    complete_overnight_periods: int = Field(ge=0)
+    complete_daily_periods: int = Field(ge=0)
+    exact_history_share: float = Field(ge=0, le=1)
+    grouped_history_share: float = Field(ge=0, le=1)
+    recent_band_share: float = Field(ge=0, le=1)
+    configured_fallback_share: float = Field(ge=0, le=1)
+    weak_estimate_share: float = Field(ge=0, le=1)
+    independent_ev_telemetry_available: bool
+    ev_contamination_risk: str | None
+    same_partial_day_samples_excluded: int = Field(ge=0)
+    future_samples_excluded: int = Field(ge=0)
+    prior_forecast_mape: float | None = Field(default=None, ge=0)
 
 
 class DemandForecast(BaseModel):
@@ -76,7 +91,9 @@ class DemandForecast(BaseModel):
     slot_decisions: list[ForecastSlotDecision]
     diagnostics: DemandDiagnostics
     recent_adjustment: float = Field(gt=0)
-    confidence: Literal["low", "medium", "high"]
+    confidence: DemandConfidenceRating
+    confidence_score: int = Field(ge=0, le=100)
+    confidence_ceilings: list[str]
     explanation: str
 
 
@@ -95,6 +112,11 @@ def forecast_household_demand(
     tier4_minimum_samples: int = 6,
     tier4_lookback_days: int = 7,
     weekend_days: set[int] | None = None,
+    complete_period_fraction: float = 0.90,
+    low_ceiling_complete_days: int = 2,
+    medium_low_ceiling_complete_days: int = 7,
+    weak_tier_share_ceiling: float = 0.50,
+    prior_forecast_mape: float | None = None,
 ) -> DemandForecast:
     """Forecast each five-minute slot using the strongest available tier."""
     if start_local.tzinfo is None or end_local.tzinfo is None:
@@ -105,7 +127,9 @@ def forecast_household_demand(
     band_powers = _fallback_powers(
         mode=fallback_mode, flat_kw=fallback_kw, configured=fallback_band_powers_kw
     )
-    samples, ineligible = _eligible_samples(rows)
+    samples, ineligible, same_day_excluded, future_excluded = _eligible_samples(
+        rows, start_local
+    )
     exact: dict[tuple[int, int], list[_Sample]] = defaultdict(list)
     day_type: dict[tuple[bool, int], list[_Sample]] = defaultdict(list)
     all_days: dict[int, list[_Sample]] = defaultdict(list)
@@ -218,6 +242,32 @@ def forecast_household_demand(
         )
         for tier in TIERS
     }
+    completeness = _history_completeness(samples, complete_period_fraction)
+    exact_share = tier_slots["tier1_exact"] / total_slots if total_slots else 0.0
+    grouped_share = (
+        tier_slots["tier2_day_type_30m"] / total_slots if total_slots else 0.0
+    )
+    recent_share = tier_slots["tier4_recent_band"] / total_slots if total_slots else 0.0
+    weak_tiers = ("tier3_all_days_30m", "tier4_recent_band", "tier5_fallback")
+    weak_share = (
+        sum(tier_slots[tier] for tier in weak_tiers) / total_slots
+        if total_slots
+        else 1.0
+    )
+    independent_ev = any(sample.independent_ev_telemetry for sample in samples)
+    confidence_score, confidence, ceilings = _forecast_confidence(
+        contributions,
+        fallback_share,
+        eligible_history_days=completeness["eligible_history_days"],
+        complete_overnight_periods=completeness["complete_overnight_periods"],
+        complete_daily_periods=completeness["complete_daily_periods"],
+        exact_share=exact_share,
+        weak_share=weak_share,
+        low_ceiling_complete_days=low_ceiling_complete_days,
+        medium_low_ceiling_complete_days=medium_low_ceiling_complete_days,
+        weak_tier_share_ceiling=weak_tier_share_ceiling,
+        prior_forecast_mape=prior_forecast_mape,
+    )
     diagnostics = DemandDiagnostics(
         total_observations_examined=len(rows),
         eligible_baseline_observations=len(samples),
@@ -240,8 +290,26 @@ def forecast_household_demand(
         },
         tier_contributions=contributions,
         fallback_share=round(fallback_share, 3),
+        eligible_history_days=completeness["eligible_history_days"],
+        history_duration_days=completeness["history_duration_days"],
+        complete_overnight_periods=completeness["complete_overnight_periods"],
+        complete_daily_periods=completeness["complete_daily_periods"],
+        exact_history_share=round(exact_share, 3),
+        grouped_history_share=round(grouped_share, 3),
+        recent_band_share=round(recent_share, 3),
+        configured_fallback_share=round(fallback_share, 3),
+        weak_estimate_share=round(weak_share, 3),
+        independent_ev_telemetry_available=independent_ev,
+        ev_contamination_risk=(
+            None
+            if independent_ev
+            else "No independent EV power telemetry in eligible history; household "
+            "demand may contain unidentified EV charging."
+        ),
+        same_partial_day_samples_excluded=same_day_excluded,
+        future_samples_excluded=future_excluded,
+        prior_forecast_mape=prior_forecast_mape,
     )
-    confidence = _forecast_confidence(contributions, fallback_share)
     fallback_contributions = {
         band: FallbackContribution(
             configured_power_kw=band_powers[band],
@@ -267,6 +335,8 @@ def forecast_household_demand(
         diagnostics=diagnostics,
         recent_adjustment=1.0,
         confidence=confidence,
+        confidence_score=confidence_score,
+        confidence_ceilings=ceilings,
         explanation=(
             f"Five-minute forecast tiers: {tier_summary or 'no slots'}. "
             f"Tier 2-4 values are broader contextual estimates, not exact household "
@@ -276,14 +346,21 @@ def forecast_household_demand(
 
 
 class _Sample:
-    def __init__(self, local: datetime, power_kw: float) -> None:
+    def __init__(
+        self, local: datetime, power_kw: float, independent_ev_telemetry: bool
+    ) -> None:
         self.local = local
         self.power_kw = power_kw
+        self.independent_ev_telemetry = independent_ev_telemetry
 
 
-def _eligible_samples(rows: list[Any]) -> tuple[list[_Sample], Counter[str]]:
+def _eligible_samples(
+    rows: list[Any], forecast_start: datetime
+) -> tuple[list[_Sample], Counter[str], int, int]:
     samples: list[_Sample] = []
     ineligible: Counter[str] = Counter()
+    same_day_excluded = 0
+    future_excluded = 0
     for original in rows:
         row = dict(original)
         reason = _ineligibility_reason(row)
@@ -295,10 +372,21 @@ def _eligible_samples(rows: list[Any]) -> tuple[list[_Sample], Counter[str]]:
         if value is None or not isinstance(local_value, str):
             ineligible["missing_baseline_or_timestamp"] += 1
             continue
+        local = datetime.fromisoformat(local_value)
+        if local >= forecast_start:
+            future_excluded += 1
+            continue
+        if local.date() == forecast_start.date():
+            same_day_excluded += 1
+            continue
         samples.append(
-            _Sample(datetime.fromisoformat(local_value), max(float(value), 0) / 1000)
+            _Sample(
+                local,
+                max(float(value), 0) / 1000,
+                row.get("ev_power_w") is not None or row.get("ev_source") == "charger",
+            )
         )
-    return samples, ineligible
+    return samples, ineligible, same_day_excluded, future_excluded
 
 
 def _select_tier(
@@ -378,12 +466,48 @@ def _variability(values: list[float]) -> float | None:
     return mad / max(centre, 0.05)
 
 
+def _history_completeness(
+    samples: list[_Sample], required_fraction: float
+) -> dict[str, int | float]:
+    by_day: dict[Any, set[int]] = defaultdict(set)
+    for sample in samples:
+        by_day[sample.local.date()].add(
+            sample.local.hour * 12 + sample.local.minute // 5
+        )
+    dates = sorted(by_day)
+    complete_days = sum(
+        len(slots) >= 288 * required_fraction for slots in by_day.values()
+    )
+    complete_overnights = sum(
+        len({slot for slot in slots if slot < 72}) >= 72 * required_fraction
+        for slots in by_day.values()
+    )
+    duration = (dates[-1] - dates[0]).days + 1 if dates else 0
+    return {
+        "eligible_history_days": len(dates),
+        "history_duration_days": float(duration),
+        "complete_overnight_periods": complete_overnights,
+        "complete_daily_periods": complete_days,
+    }
+
+
 def _forecast_confidence(
-    contributions: dict[str, TierContribution], fallback_share: float
-) -> Literal["low", "medium", "high"]:
+    contributions: dict[str, TierContribution],
+    fallback_share: float,
+    *,
+    eligible_history_days: int,
+    complete_overnight_periods: int,
+    complete_daily_periods: int,
+    exact_share: float,
+    weak_share: float,
+    low_ceiling_complete_days: int,
+    medium_low_ceiling_complete_days: int,
+    weak_tier_share_ceiling: float,
+    prior_forecast_mape: float | None,
+) -> tuple[int, DemandConfidenceRating, list[str]]:
     total = sum(item.slot_count for item in contributions.values())
     if total == 0:
-        return "low"
+        return 0, "low", ["empty_horizon"]
     weights = {
         "tier1_exact": 1.0,
         "tier2_day_type_30m": 0.8,
@@ -394,6 +518,13 @@ def _forecast_confidence(
     quality = (
         sum(contributions[tier].slot_count * weights[tier] for tier in TIERS) / total
     )
+    average_bucket_samples = (
+        sum(item.sample_count for item in contributions.values()) / total
+    )
+    quality += min(average_bucket_samples / 20, 0.05)
+    quality += min(eligible_history_days / 28, 1) * 0.05
+    quality += min(complete_overnight_periods / 7, 1) * 0.03
+    quality += min(complete_daily_periods / 7, 1) * 0.07
     variability = [
         item.average_variability
         for item in contributions.values()
@@ -410,11 +541,38 @@ def _forecast_confidence(
         quality -= 0.1
     if fallback_share > 0.5:
         quality -= 0.1
-    if quality >= 0.85 and fallback_share <= 0.1:
-        return "high"
-    if quality >= 0.55 and fallback_share <= 0.5:
-        return "medium"
-    return "low"
+    if prior_forecast_mape is not None:
+        if prior_forecast_mape > 0.30:
+            quality -= 0.15
+        elif prior_forecast_mape <= 0.15:
+            quality += 0.05
+    score = round(max(0.0, min(quality, 1.0)) * 100)
+    ceilings: list[str] = []
+    if complete_daily_periods < low_ceiling_complete_days:
+        score = min(score, 39)
+        ceilings.append(
+            f"fewer_than_{low_ceiling_complete_days}_complete_days_caps_low"
+        )
+    elif complete_daily_periods < medium_low_ceiling_complete_days:
+        score = min(score, 54)
+        ceilings.append(
+            f"fewer_than_{medium_low_ceiling_complete_days}_complete_days_caps_medium_low"
+        )
+    if exact_share == 0:
+        score = min(score, 79)
+        ceilings.append("zero_exact_slot_coverage_prevents_high")
+    if weak_share > weak_tier_share_ceiling:
+        score = min(score, 79)
+        ceilings.append("majority_tier3_tier4_or_fallback_caps_medium")
+    if score >= 80:
+        rating: DemandConfidenceRating = "high"
+    elif score >= 55:
+        rating = "medium"
+    elif score >= 40:
+        rating = "medium_low"
+    else:
+        rating = "low"
+    return score, rating, ceilings
 
 
 def _floor_five_minutes(value: datetime) -> datetime:

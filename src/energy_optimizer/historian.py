@@ -605,9 +605,9 @@ class Historian:
         cutoff = datetime.fromtimestamp(end.timestamp() - days * 86400, UTC)
         with self.connect_read_only() as connection:
             return connection.execute(
-                "SELECT observed_at_local, telemetry_is_healthy, "
+                "SELECT slot_utc, observed_at_local, telemetry_is_healthy, "
                 "baseline_training_eligible, baseline_exclusion_reason, "
-                "baseline_house_consumption_w "
+                "baseline_house_consumption_w, ev_power_w, ev_source "
                 "FROM observations WHERE slot_utc >= ? AND slot_utc <= ? "
                 "ORDER BY slot_utc",
                 (cutoff.isoformat(), end.isoformat()),
@@ -768,6 +768,96 @@ class Historian:
             "sample_count": row["sample_count"],
             "mae": row["mae"],
             "bias": row["bias"],
+        }
+
+    def prior_reserve_forecast_mape_read_only(self) -> float | None:
+        """Return prior scored reserve-demand MAPE as a fraction when available."""
+        with self.connect_read_only() as connection:
+            row = connection.execute(
+                "SELECT AVG(ABS(p.error_value) / ABS(p.expected_value)) AS mape "
+                "FROM forecast_points p JOIN forecast_runs r "
+                "ON r.id=p.forecast_run_id WHERE r.source='reserve_estimator' "
+                "AND p.error_value IS NOT NULL AND ABS(p.expected_value) > 1"
+            ).fetchone()
+        return float(row["mape"]) if row and row["mape"] is not None else None
+
+    def score_reserve_forecast(self, run_id: int) -> dict[str, Any]:
+        """Attach baseline actuals and score energy/error by recorded forecast tier."""
+        self.migrate()
+        with self.connect() as connection:
+            run = connection.execute(
+                "SELECT source, horizon_end_utc FROM forecast_runs WHERE id=?",
+                (run_id,),
+            ).fetchone()
+            if run is None or run["source"] != "reserve_estimator":
+                raise ValueError(f"Reserve forecast run {run_id} does not exist")
+            if datetime.fromisoformat(run["horizon_end_utc"]) > datetime.now(UTC):
+                raise ValueError("Reserve forecast horizon has not ended")
+            points = connection.execute(
+                "SELECT id, period_start_utc, period_end_utc, expected_value, "
+                "metadata_json FROM forecast_points WHERE forecast_run_id=?",
+                (run_id,),
+            ).fetchall()
+            totals: dict[str, dict[str, float]] = {}
+            forecast_energy = 0.0
+            actual_energy = 0.0
+            scored = 0
+            for point in points:
+                actual = connection.execute(
+                    "SELECT AVG(baseline_house_consumption_w) actual "
+                    "FROM observations WHERE slot_utc >= ? AND slot_utc < ? "
+                    "AND telemetry_is_healthy=1 AND baseline_training_eligible=1",
+                    (point["period_start_utc"], point["period_end_utc"]),
+                ).fetchone()["actual"]
+                error = actual - point["expected_value"] if actual is not None else None
+                connection.execute(
+                    "UPDATE forecast_points SET actual_value=?, error_value=? "
+                    "WHERE id=?",
+                    (actual, error, point["id"]),
+                )
+                hours = (
+                    datetime.fromisoformat(point["period_end_utc"])
+                    - datetime.fromisoformat(point["period_start_utc"])
+                ).total_seconds() / 3600
+                tier = json.loads(point["metadata_json"]).get("tier", "unknown")
+                bucket = totals.setdefault(
+                    tier, {"forecast_kwh": 0.0, "actual_kwh": 0.0, "slots": 0.0}
+                )
+                predicted_kwh = point["expected_value"] * hours / 1000
+                if actual is not None:
+                    measured_kwh = actual * hours / 1000
+                    forecast_energy += predicted_kwh
+                    bucket["forecast_kwh"] += predicted_kwh
+                    actual_energy += measured_kwh
+                    bucket["actual_kwh"] += measured_kwh
+                    bucket["slots"] += 1
+                    scored += 1
+        error_kwh = actual_energy - forecast_energy if scored else None
+        return {
+            "forecast_run_id": run_id,
+            "scored_slots": scored,
+            "total_slots": len(points),
+            "scored_slot_coverage": round(scored / len(points), 4) if points else 0.0,
+            "forecast_household_energy_kwh": round(forecast_energy, 3),
+            "actual_household_energy_kwh": round(actual_energy, 3) if scored else None,
+            "forecast_error_kwh": (
+                round(error_kwh, 3) if error_kwh is not None else None
+            ),
+            "absolute_percentage_error": (
+                round(abs(error_kwh) / forecast_energy, 4)
+                if error_kwh is not None and forecast_energy > 0
+                else None
+            ),
+            "bias_kwh": round(error_kwh, 3) if error_kwh is not None else None,
+            "error_by_tier": {
+                tier: {
+                    **{key: round(value, 3) for key, value in values.items()},
+                    "error_kwh": round(
+                        values["actual_kwh"] - values["forecast_kwh"], 3
+                    ),
+                }
+                for tier, values in totals.items()
+            },
         }
 
     def forecast_comparison_rows(
