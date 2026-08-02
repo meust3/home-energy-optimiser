@@ -90,6 +90,17 @@ class Historian:
         finally:
             connection.close()
 
+    @contextmanager
+    def connect_read_only(self) -> Iterator[sqlite3.Connection]:
+        """Open an existing database with SQLite writes explicitly disabled."""
+        uri = f"{self.database_path.resolve().as_uri()}?mode=ro"
+        connection = sqlite3.connect(uri, uri=True)
+        connection.row_factory = sqlite3.Row
+        try:
+            yield connection
+        finally:
+            connection.close()
+
     def migrate(self) -> None:
         with self.connect() as connection:
             connection.executescript("""
@@ -510,6 +521,39 @@ class Historian:
             params = (datetime.fromtimestamp(cutoff, UTC).isoformat(),)
         with self.connect() as connection:
             return connection.execute(sql, params).fetchall()
+
+    def latest_observation(self) -> dict[str, Any] | None:
+        """Return the latest stored observation without modifying history."""
+        self.migrate()
+        with self.connect() as connection:
+            row = connection.execute(
+                "SELECT * FROM observations ORDER BY slot_utc DESC LIMIT 1"
+            ).fetchone()
+        return dict(row) if row is not None else None
+
+    def latest_observation_read_only(self) -> dict[str, Any] | None:
+        """Return the latest observation without migration or any database write."""
+        with self.connect_read_only() as connection:
+            row = connection.execute(
+                "SELECT * FROM observations ORDER BY slot_utc DESC LIMIT 1"
+            ).fetchone()
+        return dict(row) if row is not None else None
+
+    def healthy_load_samples_read_only(
+        self, *, days: int, now: datetime
+    ) -> list[sqlite3.Row]:
+        """Read eligible baseline samples without migration or database writes."""
+        cutoff = now.astimezone(UTC).timestamp() - days * 86400
+        with self.connect_read_only() as connection:
+            return connection.execute(
+                "SELECT observed_at_local, "
+                "baseline_house_consumption_w AS house_consumption_w "
+                "FROM observations WHERE telemetry_is_healthy=1 "
+                "AND baseline_training_eligible=1 "
+                "AND baseline_house_consumption_w IS NOT NULL "
+                "AND slot_utc >= ?",
+                (datetime.fromtimestamp(cutoff, UTC).isoformat(),),
+            ).fetchall()
 
     def power_sign_samples(
         self, *, start: datetime | None = None, end: datetime | None = None

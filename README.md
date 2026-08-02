@@ -42,6 +42,14 @@ EV_PLAUSIBLE_POWER_MIN_W=1800
 EV_PLAUSIBLE_POWER_MAX_W=12000
 EV_MINIMUM_SESSION_MINUTES=30
 FORECAST_RETENTION_DAYS=365
+MINIMUM_SOC_PERCENT=20
+EMERGENCY_RESERVE_KWH=6
+RESERVE_HISTORY_DAYS=28
+RESERVE_RECENT_DAYS=7
+RESERVE_MAX_HORIZON_HOURS=24
+RESERVE_UNCERTAINTY_RATIO=0.20
+CHEAP_IMPORT_PRICE_PER_KWH=0.15
+SOLAR_SURPLUS_THRESHOLD_KWH=1.0
 CONSERVATIVE_FALLBACK_HOUSEHOLD_LOAD_KW=2.0
 LOAD_PROFILE_MINIMUM_SAMPLES=3
 ```
@@ -180,7 +188,25 @@ python tools/export_forecast_comparison.py --forecast-type solar_power `
 These tools write only forecast data and comparisons to local SQLite/files. They do
 not make recommendations or control devices.
 
-## 10. Run validation
+## 10. Estimate a battery reserve
+
+Estimate how much stored battery energy should be held for household and known EV
+demand before the next plausible solar or cheap-grid replenishment window:
+
+```powershell
+python tools/estimate_reserve.py
+python tools/estimate_reserve.py --json
+```
+
+The estimator reads only local SQLite history. It does not connect to Home
+Assistant, recommend an executable action, or alter the database. Its output is
+marked `ready_for_manual_review`, never `ready_for_execution`. Potentially tradable
+energy is an analytical upper bound, not an instruction to export or discharge.
+
+See [reserve estimation](docs/reserve_estimation.md) for its assumptions,
+confidence model, and limitations.
+
+## 11. Run validation
 
 ```powershell
 pytest

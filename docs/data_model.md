@@ -106,3 +106,15 @@ cannot reinterpret or destroy existing rows. They may contain mixed representati
 from collectors predating schema version 4 and must not be treated as normalized
 kWh. New writes use only the `solcast_*_kwh_json` columns; legacy rows have `NULL`
 there unless recollected through the normal same-slot upsert policy.
+
+## Reserve estimates
+
+Reserve estimates are calculated on demand and are not persisted in schema version
+4. Inputs come from the latest observation and telemetry-healthy,
+baseline-training-eligible history. This avoids making an ephemeral advisory result
+look like measured data. JSON output includes the battery estimate, household and EV
+demand, technical/emergency reserves, uncertainty, recommended held energy,
+potentially tradable energy, opportunity window, confidence, health context,
+reasoning, and `ready_for_manual_review`.
+Operational context echoes relevant stored modes, directional-flow status, prices,
+weather, and EV state for audit; it remains input context rather than an instruction.

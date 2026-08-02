@@ -93,6 +93,18 @@ def load_config(env_file: Path | None = Path(".env")) -> CollectorConfig:
         ev_plausible_power_max_w=float(os.getenv("EV_PLAUSIBLE_POWER_MAX_W", "12000")),
         ev_minimum_session_minutes=int(os.getenv("EV_MINIMUM_SESSION_MINUTES", "30")),
         forecast_retention_days=int(os.getenv("FORECAST_RETENTION_DAYS", "365")),
+        minimum_soc_percent=float(os.getenv("MINIMUM_SOC_PERCENT", "20")),
+        emergency_reserve_kwh=float(os.getenv("EMERGENCY_RESERVE_KWH", "6")),
+        reserve_history_days=int(os.getenv("RESERVE_HISTORY_DAYS", "28")),
+        reserve_recent_days=int(os.getenv("RESERVE_RECENT_DAYS", "7")),
+        reserve_max_horizon_hours=int(os.getenv("RESERVE_MAX_HORIZON_HOURS", "24")),
+        reserve_uncertainty_ratio=float(os.getenv("RESERVE_UNCERTAINTY_RATIO", "0.20")),
+        cheap_import_price_per_kwh=float(
+            os.getenv("CHEAP_IMPORT_PRICE_PER_KWH", "0.15")
+        ),
+        solar_surplus_threshold_kwh=float(
+            os.getenv("SOLAR_SURPLUS_THRESHOLD_KWH", "1.0")
+        ),
         conservative_fallback_household_load_kw=float(
             os.getenv("CONSERVATIVE_FALLBACK_HOUSEHOLD_LOAD_KW", "2.0")
         ),
@@ -128,3 +140,36 @@ def load_sign_settings(env_file: Path | None = Path(".env")) -> dict[str, str | 
         "supporting_samples": int(os.getenv("SIGN_CONVENTION_SUPPORTING_SAMPLES", "0")),
         "balance_tolerance_w": float(os.getenv("BALANCE_TOLERANCE_W", "250")),
     }
+
+
+def load_reserve_config(env_file: Path | None = Path(".env")) -> CollectorConfig:
+    """Load local estimator settings without requiring Home Assistant secrets."""
+    if env_file is not None:
+        load_dotenv(dotenv_path=env_file, override=False)
+    return CollectorConfig(
+        ha_url="http://read-only.local",
+        ha_token="not-used",
+        timezone=os.getenv("TIMEZONE", "Australia/Brisbane"),
+        database_path=Path(os.getenv("DATABASE_PATH", "data/energy_history.db")),
+        usable_battery_capacity_kwh=float(
+            os.getenv("USABLE_BATTERY_CAPACITY_KWH", "40")
+        ),
+        minimum_soc_percent=float(os.getenv("MINIMUM_SOC_PERCENT", "20")),
+        emergency_reserve_kwh=float(os.getenv("EMERGENCY_RESERVE_KWH", "6")),
+        reserve_history_days=int(os.getenv("RESERVE_HISTORY_DAYS", "28")),
+        reserve_recent_days=int(os.getenv("RESERVE_RECENT_DAYS", "7")),
+        reserve_max_horizon_hours=int(os.getenv("RESERVE_MAX_HORIZON_HOURS", "24")),
+        reserve_uncertainty_ratio=float(os.getenv("RESERVE_UNCERTAINTY_RATIO", "0.20")),
+        cheap_import_price_per_kwh=float(
+            os.getenv("CHEAP_IMPORT_PRICE_PER_KWH", "0.15")
+        ),
+        solar_surplus_threshold_kwh=float(
+            os.getenv("SOLAR_SURPLUS_THRESHOLD_KWH", "1.0")
+        ),
+        conservative_fallback_household_load_kw=float(
+            os.getenv("CONSERVATIVE_FALLBACK_HOUSEHOLD_LOAD_KW", "2.0")
+        ),
+        load_profile_minimum_samples=int(
+            os.getenv("LOAD_PROFILE_MINIMUM_SAMPLES", "3")
+        ),
+    )

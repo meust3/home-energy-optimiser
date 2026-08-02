@@ -64,3 +64,9 @@ telemetry rather than derivation readiness.
 Forecast storage is independent of collection: immutable runs own period points;
 later comparison attaches local actuals and errors. These tables support future
 projected-vs-actual dashboards without implementing a dashboard or optimiser.
+
+The battery reserve estimator is the first advisory consumer of these layers. It
+reads the latest stored observation and telemetry-healthy baseline samples, forecasts
+household demand until a plausible replenishment window, and calculates held versus
+potentially tradable energy. It has no Home Assistant client, executor, or automatic
+action path. Its readiness flag means manual review only.
