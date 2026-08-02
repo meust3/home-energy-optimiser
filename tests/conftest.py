@@ -42,8 +42,8 @@ def healthy_states(now) -> dict[str, HomeAssistantState]:
         ids.AMBER_PRICE_SPIKE: "off",
         ids.SOLCAST_REMAINING_TODAY: "12.5",
         ids.SOLCAST_TOMORROW: "28.0",
-        ids.SOLCAST_NEXT_HOUR: "1.8",
-        ids.SOLCAST_THIS_HOUR: "1.2",
+        ids.SOLCAST_NEXT_HOUR: "1800",
+        ids.SOLCAST_THIS_HOUR: "1200",
         ids.SOLCAST_TODAY: "32.0",
         ids.GOODWE_BATTERY_SOC: "50",
         ids.GOODWE_BATTERY_POWER: "-1200",
@@ -76,4 +76,7 @@ def healthy_states(now) -> dict[str, HomeAssistantState]:
                 "estimate90": 3.0,
             }
         )
+        states[entity_id].attributes["unit_of_measurement"] = "kWh"
+    for entity_id in (ids.SOLCAST_NEXT_HOUR, ids.SOLCAST_THIS_HOUR):
+        states[entity_id].attributes["unit_of_measurement"] = "Wh"
     return states

@@ -12,6 +12,22 @@ class ConfigurationError(ValueError):
     """Raised when required configuration is missing or invalid."""
 
 
+def _optional_env(name: str) -> str | None:
+    return os.getenv(name, "").strip() or None
+
+
+def _env_bool(name: str, default: bool = False) -> bool:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    normalized = value.strip().lower()
+    if normalized in {"1", "true", "yes", "on"}:
+        return True
+    if normalized in {"0", "false", "no", "off"}:
+        return False
+    raise ConfigurationError(f"{name} must be true or false")
+
+
 def load_config(env_file: Path | None = Path(".env")) -> CollectorConfig:
     if env_file is not None:
         load_dotenv(dotenv_path=env_file, override=False)
@@ -56,12 +72,27 @@ def load_config(env_file: Path | None = Path(".env")) -> CollectorConfig:
             os.getenv("SOLCAST_FORECAST_FRESHNESS_MINUTES", "360")
         ),
         weather_freshness_minutes=int(os.getenv("WEATHER_FRESHNESS_MINUTES", "60")),
-        weather_temperature_entity_id=(
-            os.getenv("WEATHER_TEMPERATURE_ENTITY_ID", "").strip() or None
+        weather_temperature_entity_id=_optional_env("WEATHER_TEMPERATURE_ENTITY_ID"),
+        weather_condition_entity_id=_optional_env("WEATHER_CONDITION_ENTITY_ID"),
+        grid_power_sign_convention=os.getenv("GRID_POWER_SIGN", "unknown"),
+        battery_power_sign_convention=os.getenv("BATTERY_POWER_SIGN", "unknown"),
+        sign_convention_confidence=os.getenv(
+            "SIGN_CONVENTION_CONFIDENCE", "unconfirmed"
         ),
-        weather_condition_entity_id=(
-            os.getenv("WEATHER_CONDITION_ENTITY_ID", "").strip() or None
+        sign_convention_supporting_samples=int(
+            os.getenv("SIGN_CONVENTION_SUPPORTING_SAMPLES", "0")
         ),
+        balance_tolerance_w=float(os.getenv("BALANCE_TOLERANCE_W", "250")),
+        ev_charging_active_entity_id=_optional_env("EV_CHARGING_ACTIVE_ENTITY_ID"),
+        ev_charging_power_entity_id=_optional_env("EV_CHARGING_POWER_ENTITY_ID"),
+        ev_plugged_in_entity_id=_optional_env("EV_PLUGGED_IN_ENTITY_ID"),
+        ev_energy_required_entity_id=_optional_env("EV_ENERGY_REQUIRED_ENTITY_ID"),
+        ev_ready_by_entity_id=_optional_env("EV_READY_BY_ENTITY_ID"),
+        ev_inference_enabled=_env_bool("EV_INFERENCE_ENABLED"),
+        ev_plausible_power_min_w=float(os.getenv("EV_PLAUSIBLE_POWER_MIN_W", "1800")),
+        ev_plausible_power_max_w=float(os.getenv("EV_PLAUSIBLE_POWER_MAX_W", "12000")),
+        ev_minimum_session_minutes=int(os.getenv("EV_MINIMUM_SESSION_MINUTES", "30")),
+        forecast_retention_days=int(os.getenv("FORECAST_RETENTION_DAYS", "365")),
         conservative_fallback_household_load_kw=float(
             os.getenv("CONSERVATIVE_FALLBACK_HOUSEHOLD_LOAD_KW", "2.0")
         ),
@@ -84,3 +115,16 @@ def load_timezone_name(env_file: Path | None = Path(".env")) -> str:
     if env_file is not None:
         load_dotenv(dotenv_path=env_file, override=False)
     return os.getenv("TIMEZONE", "Australia/Brisbane")
+
+
+def load_sign_settings(env_file: Path | None = Path(".env")) -> dict[str, str | float]:
+    """Load non-secret flow settings for local inspection tools."""
+    if env_file is not None:
+        load_dotenv(dotenv_path=env_file, override=False)
+    return {
+        "grid_power_sign": os.getenv("GRID_POWER_SIGN", "unknown"),
+        "battery_power_sign": os.getenv("BATTERY_POWER_SIGN", "unknown"),
+        "confidence": os.getenv("SIGN_CONVENTION_CONFIDENCE", "unconfirmed"),
+        "supporting_samples": int(os.getenv("SIGN_CONVENTION_SUPPORTING_SAMPLES", "0")),
+        "balance_tolerance_w": float(os.getenv("BALANCE_TOLERANCE_W", "250")),
+    }

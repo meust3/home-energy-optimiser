@@ -51,12 +51,13 @@ def main() -> int:
         historian.save(observation)
         LOGGER.info(
             "Saved slot %s (telemetry %s, price %s, solar %s, weather %s, "
-            "overall %s). No command was issued.",
+            "flow %s, overall %s). No command was issued.",
             observation.slot_utc.isoformat(),
             observation.data_health.telemetry.score,
             observation.data_health.price.score,
             observation.data_health.solar.score,
             observation.data_health.weather.score,
+            observation.data_health.flow.score,
             observation.data_health.overall.score,
         )
 

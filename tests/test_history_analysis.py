@@ -22,6 +22,9 @@ def test_gap_detection_and_coverage():
     assert report["coverage_percent"] == 80.0
     assert report["longest_gap_slots"] == 1
     assert report["longest_gap_minutes"] == 5
+    assert report["first_missing_period"]["start"].endswith("00:10:00+00:00")
+    assert report["last_missing_period"] == report["first_missing_period"]
+    assert report["longest_missing_period"] == report["first_missing_period"]
 
 
 def test_gap_report_includes_empty_edges_for_explicit_range():
@@ -35,6 +38,8 @@ def test_gap_report_includes_empty_edges_for_explicit_range():
     assert report["collected_slots"] == 1
     assert report["missing_slots"] == 2
     assert report["coverage_percent"] == 33.33
+    assert report["first_missing_period"]["start"].endswith("00:00:00+00:00")
+    assert report["last_missing_period"]["start"].endswith("00:10:00+00:00")
 
 
 def test_health_issue_summary_by_domain():

@@ -348,3 +348,18 @@ Build only:
 Do not build device control yet.
 Do not build an executor yet.
 Do not call Home Assistant services.
+
+## Read-only operational data model
+
+Raw GoodWe PV, household, grid, and battery power must always be preserved exactly
+as reported. Directional energy flows may be derived only when grid and battery sign
+conventions are explicitly configured. Unknown conventions must leave directional
+fields missing and must not make raw telemetry unhealthy.
+
+Optional EV telemetry and Home Assistant helper entities may be read with GET. They
+must never be controlled or created by this project. Baseline household demand may
+subtract direct EV power, but inferred EV power must never be silently subtracted.
+Ambiguous inferred sessions are excluded from baseline training.
+
+Forecast runs and projected-vs-actual points may be stored in local SQLite. Forecast
+storage and comparison are analytical only and must not trigger device actions.

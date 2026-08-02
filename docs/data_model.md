@@ -1,6 +1,6 @@
-# Phase 1 data model
+# Read-only operational data model
 
-SQLite uses schema version 2 and one `observations` row per five-minute UTC slot.
+SQLite uses schema version 4 and one `observations` row per five-minute UTC slot.
 `slot_utc` is the primary key. A repeat collection for a slot uses a last-write-wins
 upsert so a newer snapshot atomically replaces an earlier snapshot without creating
 a duplicate.
@@ -13,7 +13,9 @@ The table stores:
 - current Amber import/export prices and price-spike state;
 - complete Amber interval lists as JSON;
 - Solcast remaining-today, tomorrow, next-hour, this-hour, and today summaries as
-  JSON, preserving `estimate`, `estimate10`, and `estimate90`;
+  explicitly named `*_kwh_json` values. Each summary normalizes `estimate`,
+  `estimate10`, and `estimate90` to kWh while retaining the numeric source values,
+  source unit, and conversion status for audit;
 - optional Solcast power-now, temperature, and weather condition;
 - backward-compatible overall health flag, score, and issue JSON;
 - telemetry, price, solar, and weather health flags and scores;
@@ -58,6 +60,8 @@ inclusive five-minute UTC sequence. Without a requested window, the sequence spa
 the first through last selected observation; `--days` includes empty slots between
 the aligned cutoff and current aligned slot. Coverage is collected distinct slots
 divided by expected slots.
+Contiguous missing slots are grouped into periods; reports expose the first, last,
+and longest period with inclusive endpoints, slot count, and duration.
 
 Health issue summaries parse `health_domains_json` and report average stored score,
 warning/error occurrence counts, and common issue code/entity/severity tuples per
@@ -70,4 +74,35 @@ rows.
 
 Power-sign hypotheses are also derived, never stored. Each complete sample includes
 PV power, house consumption, grid power, battery power, and optional battery-mode
-context.
+context. Every tested grid/battery multiplier pair reports mean absolute, median
+signed, median absolute, and root-mean-square residuals; per-convention fit
+confidence; and representative supporting and contradicting observations.
+
+## Version 3 migration
+
+Version 3 additively extends `observations` with directional flow fields, balance
+residual, sign status/evidence, optional EV fields, baseline training fields, event
+label JSON, and flow-health flag/score. Existing raw columns are unchanged. Legacy
+rows receive `unconfirmed` sign status, NULL directional values, and an ineligible
+baseline rather than reconstructed assumptions.
+
+`forecast_runs` stores source/model/horizon metadata. `forecast_points` stores
+period bounds, expected/lower/upper values, units, nullable actual/error values, and
+metadata. Foreign-key and type/time indexes support comparison queries.
+
+Load-profile samples select `baseline_house_consumption_w` only where telemetry is
+healthy and `baseline_training_eligible=1`.
+
+## Version 4 migration and Solcast units
+
+Version 4 additively creates five unit-explicit Solcast JSON columns. New
+observations store every Solcast energy estimate internally in kWh: Home Assistant
+`Wh` summaries are divided by 1,000 and `kWh` summaries are unchanged. A missing or
+unsupported `unit_of_measurement` leaves normalized values missing; the parser keeps
+the source numbers and unit/conversion status and does not guess.
+
+The five legacy ambiguous `solcast_*_json` columns remain untouched so migration
+cannot reinterpret or destroy existing rows. They may contain mixed representations
+from collectors predating schema version 4 and must not be treated as normalized
+kWh. New writes use only the `solcast_*_kwh_json` columns; legacy rows have `NULL`
+there unless recollected through the normal same-slot upsert policy.

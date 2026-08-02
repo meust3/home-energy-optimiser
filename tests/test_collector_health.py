@@ -13,6 +13,9 @@ def test_timezone_slot_and_battery_estimate(healthy_states, config, now):
     assert observation.battery_energy_estimate_kwh == 20
     assert observation.battery_power_w == -1200
     assert observation.grid_power_w == -900
+    assert observation.solcast_next_hour_kwh.estimate_kwh == 1.8
+    assert observation.solcast_next_hour_kwh.source_unit == "Wh"
+    assert observation.solcast_remaining_today_kwh.estimate_kwh == 12.5
 
 
 def test_alignment_rejects_naive_datetime(now):
@@ -108,3 +111,23 @@ def test_configured_weather_is_collected_but_remains_optional(
     missing_weather = build_observation(healthy_states, config, observed_at=now)
     assert not missing_weather.data_health.weather.is_healthy
     assert missing_weather.data_health.overall.is_healthy
+
+
+def test_unknown_signs_only_block_flow_health(healthy_states, config, now):
+    observation = build_observation(healthy_states, config, observed_at=now)
+    assert observation.data_health.telemetry.is_healthy
+    assert observation.data_health.overall.is_healthy
+    assert not observation.data_health.flow.is_healthy
+    assert observation.energy_flow.sign_convention_status == "unconfirmed"
+
+
+def test_large_balance_residual_only_blocks_flow_health(healthy_states, config, now):
+    config.grid_power_sign_convention = "positive_export"
+    config.battery_power_sign_convention = "positive_discharge"
+    config.balance_tolerance_w = 100
+    observation = build_observation(healthy_states, config, observed_at=now)
+    assert observation.data_health.telemetry.is_healthy
+    assert not observation.data_health.flow.is_healthy
+    assert {issue.code for issue in observation.data_health.flow.issues} == {
+        "balance_residual_too_large"
+    }

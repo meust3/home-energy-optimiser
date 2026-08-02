@@ -27,6 +27,21 @@ SOLCAST_FORECAST_FRESHNESS_MINUTES=360
 WEATHER_TEMPERATURE_ENTITY_ID=sensor.outdoor_temperature
 WEATHER_CONDITION_ENTITY_ID=weather.home
 WEATHER_FRESHNESS_MINUTES=60
+GRID_POWER_SIGN=unknown
+BATTERY_POWER_SIGN=unknown
+SIGN_CONVENTION_CONFIDENCE=unconfirmed
+SIGN_CONVENTION_SUPPORTING_SAMPLES=0
+BALANCE_TOLERANCE_W=250
+EV_CHARGING_ACTIVE_ENTITY_ID=
+EV_CHARGING_POWER_ENTITY_ID=
+EV_PLUGGED_IN_ENTITY_ID=
+EV_ENERGY_REQUIRED_ENTITY_ID=
+EV_READY_BY_ENTITY_ID=
+EV_INFERENCE_ENABLED=false
+EV_PLAUSIBLE_POWER_MIN_W=1800
+EV_PLAUSIBLE_POWER_MAX_W=12000
+EV_MINIMUM_SESSION_MINUTES=30
+FORECAST_RETENTION_DAYS=365
 CONSERVATIVE_FALLBACK_HOUSEHOLD_LOAD_KW=2.0
 LOAD_PROFILE_MINIMUM_SAMPLES=3
 ```
@@ -68,6 +83,17 @@ five-minute slot updates that slot rather than creating a duplicate. The first r
 after upgrading automatically adds domain-health columns without deleting existing
 observations.
 
+Solcast energy summaries are normalized to kWh before they enter an observation.
+In particular, next-hour and this-hour values reported by Home Assistant in Wh are
+divided by 1,000; remaining-today, today, and tomorrow kWh values are retained. The
+stored JSON also records the original numeric values, source unit, and conversion
+status. If Home Assistant omits the unit, the normalized value remains missing
+rather than being guessed.
+
+Schema version 4 adds unit-explicit `solcast_*_kwh_json` columns without deleting or
+rewriting older rows. The older ambiguous Solcast columns are retained only for
+audit compatibility and may contain the pre-version-4 mixed-unit representation.
+
 ## 5. Run the continuous collector
 
 ```powershell
@@ -82,14 +108,17 @@ read failures, and stops with Ctrl+C.
 ```powershell
 python tools/inspect_history.py
 python tools/inspect_history.py --days 7 --limit 20
+python tools/inspect_history.py --days 7 --details
 python tools/inspect_history.py --json
 ```
 
 Inspection reports healthy/unhealthy counts separately for telemetry, price, solar,
 and weather. Overall health follows telemetry during Phase 1. Missing price or solar
 forecasts therefore remain visible but do not discard sound household-load samples.
-The report also shows five-minute collection coverage, its longest missing run,
-average domain scores, warning/error totals, and common structured issues.
+The compact default report shows five-minute coverage, first/last/longest missing
+periods, domain health counts, average scores, warning/error totals, top issues, and
+recent observations. Use `--details` for full issue, missing-value, and load-average
+tables.
 
 Home Assistant may leave `last_updated` unchanged while a value remains stable.
 Freshness warnings consequently apply only to periodically updating powers, SOC,
@@ -107,21 +136,51 @@ python tools/validate_power_signs.py --json
 
 The tool compares PV, household, grid, and battery power against every grid/battery
 sign combination. It reports sample counts, residual errors, battery-mode evidence,
-and confidence. Its leading result is only a hypothesis; no sign convention is
-selected or saved.
+median residuals, per-convention confidence, and supporting/contradicting examples.
+Its leading result is only a hypothesis; no sign convention is selected or saved.
+With high-confidence evidence it prints a suggested `.env` fragment for manual
+review, but never edits configuration. The supplied 175-sample evidence supports
+`positive_export` for grid and `positive_discharge` for battery; defaults remain
+`unknown`.
+
+Inspect configured conventions, raw/derived flows, residuals, EV context, baseline
+eligibility, and event labels:
+
+```powershell
+python tools/inspect_energy_flows.py --days 7 --limit 20
+python tools/inspect_energy_flows.py --days 7 --json
+```
 
 ## 8. Export history to CSV
 
 Dates use the configured local timezone and include the full start and end dates:
 
 ```powershell
-python tools/export_history.py --start 2026-08-01 --end 2026-08-07 `
+python tools/export_history.py --from 2026-08-01 --to 2026-08-07 `
   --output data/exports/history-2026-08-01-to-07.csv
+python tools/export_history.py --days 7 --output data/exports/recent-week.csv
 ```
 
-CSV export reads the selected SQLite rows and does not modify them.
+`--from` and `--to` are inclusive and may be used independently. `--days` selects a
+recent UTC window and cannot be combined with explicit bounds. Omitting all three
+range options exports all observations. CSV export never modifies stored history.
 
-## 9. Run validation
+## 9. Store and compare forecasts
+
+Store a typed JSON run, attach available actual observations, and export the series:
+
+```powershell
+python tools/store_forecast_run.py forecast-run.json
+python tools/compare_forecast_run.py 1
+python tools/export_forecast_comparison.py --forecast-type solar_power `
+  --from 2026-08-01 --to 2026-08-07 --format csv `
+  --output data/exports/solar-comparison.csv
+```
+
+These tools write only forecast data and comparisons to local SQLite/files. They do
+not make recommendations or control devices.
+
+## 10. Run validation
 
 ```powershell
 pytest
@@ -131,4 +190,7 @@ git diff --check
 ```
 
 See [architecture](docs/architecture.md), [data model](docs/data_model.md), and
-[security](docs/security.md) for design details and safety constraints.
+[security](docs/security.md) for design details and safety constraints. Additional
+notes cover [energy-flow conventions](docs/energy_flow_conventions.md),
+[EV handling](docs/ev_handling.md), [forecast storage](docs/forecast_storage.md), and
+the future [Home Assistant add-on plan](docs/home_assistant_addon_plan.md).

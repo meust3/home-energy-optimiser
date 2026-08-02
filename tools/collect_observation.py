@@ -67,10 +67,15 @@ def main() -> int:
                 "Weather health",
                 _health_label(observation.data_health.weather),
             ),
+            ("Flow health", _health_label(observation.data_health.flow)),
             (
                 "Overall health",
                 _health_label(observation.data_health.overall),
             ),
+            ("Sign status", observation.energy_flow.sign_convention_status),
+            ("Balance residual (W)", observation.energy_flow.balance_residual_w),
+            ("EV power (W)", observation.ev_power_w),
+            ("Baseline house (W)", observation.baseline_house_consumption_w),
             ("Saved", not args.no_save),
         ):
             table.add_row(label, "missing" if value is None else str(value))

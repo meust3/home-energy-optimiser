@@ -45,22 +45,33 @@ def _render_gap(console: Console, report: dict[str, Any]) -> None:
         f"Expected: {report['expected_slots']:,}   "
         f"Collected: {report['collected_slots']:,}   "
         f"Missing: {report['missing_slots']:,}\n"
-        f"Coverage: {report['coverage_percent']:.2f}%   "
-        f"Longest gap: {report['longest_gap_slots']} slots "
-        f"({report['longest_gap_minutes']} minutes)"
+        f"Coverage: {report['coverage_percent']:.2f}%\n"
+        f"First missing: {_period_label(report['first_missing_period'])}\n"
+        f"Last missing:  {_period_label(report['last_missing_period'])}\n"
+        f"Longest gap:   {_period_label(report['longest_missing_period'])}"
     )
-    if report["longest_gap_start"]:
-        body += (
-            f"\nLongest gap range: {report['longest_gap_start']} -> "
-            f"{report['longest_gap_end']}"
-        )
     console.print(Panel(body, title="Collection coverage", border_style="blue"))
 
 
-def _render_issue_summary(console: Console, summary: dict[str, Any]) -> None:
+def _period_label(period: dict[str, Any] | None) -> str:
+    if not period:
+        return "none"
+    return (
+        f"{period['start'][:16]} -> {period['end'][:16]} "
+        f"({period['slots']} slots / {period['minutes']} min)"
+    )
+
+
+def _render_health_summary(
+    console: Console,
+    counts: dict[str, Any],
+    summary: dict[str, Any],
+    *,
+    details: bool,
+) -> None:
     rows = []
-    for domain, details in summary.items():
-        common = details["most_common_issues"]
+    for domain, domain_details in summary.items():
+        common = domain_details["most_common_issues"]
         common_label = "N/A"
         if common:
             first = common[0]
@@ -68,46 +79,38 @@ def _render_issue_summary(console: Console, summary: dict[str, Any]) -> None:
         rows.append(
             {
                 "domain": domain,
-                "average_score": details["average_score"],
-                "warnings": details["warning_count"],
-                "errors": details["error_count"],
-                "most_common": common_label,
+                "ok": counts[domain]["healthy"],
+                "bad": counts[domain]["unhealthy"],
+                "warn": domain_details["warning_count"],
+                "err": domain_details["error_count"],
+                "avg": domain_details["average_score"],
+                "top_issue": common_label,
             }
         )
-    _table(console, "Health issue summary", rows)
-    common_rows = [
-        {"domain": domain, **issue}
-        for domain, details in summary.items()
-        for issue in details["most_common_issues"]
-    ]
-    _table(console, "Most common health issues", common_rows, max_rows=20)
-
-
-def _health_cell(row: dict[str, Any], prefix: str) -> str:
-    status = "OK" if row[f"{prefix}_is_healthy"] else "BAD"
-    return f"{status} {row[f'{prefix}_health_score']}"
+    _table(console, "Health by domain", rows)
+    if details:
+        common_rows = [
+            {"domain": domain, **issue}
+            for domain, domain_details in summary.items()
+            for issue in domain_details["most_common_issues"]
+        ]
+        _table(console, "Most common health issues", common_rows, max_rows=20)
 
 
 def _recent_rows(rows: list[dict[str, Any]]) -> list[dict[str, object]]:
     return [
         {
-            "slot_utc": row["slot_utc"],
-            "soc_%": row["battery_soc_percent"],
-            "house_kw": (
+            "utc": row["slot_utc"][5:16].replace("T", " "),
+            "soc": row["battery_soc_percent"],
+            "house": (
                 row["house_consumption_w"] / 1000
                 if row["house_consumption_w"] is not None
                 else None
             ),
-            "pv_kw": (
-                row["pv_power_w"] / 1000 if row["pv_power_w"] is not None else None
-            ),
-            "grid_kw_raw": (
+            "pv": (row["pv_power_w"] / 1000 if row["pv_power_w"] is not None else None),
+            "grid_raw": (
                 row["grid_power_w"] / 1000 if row["grid_power_w"] is not None else None
             ),
-            "telemetry": _health_cell(row, "telemetry"),
-            "price": _health_cell(row, "price"),
-            "solar": _health_cell(row, "solar"),
-            "weather": _health_cell(row, "weather"),
             "overall": (
                 f"{'OK' if row['is_healthy'] else 'BAD'} {row['health_score']}"
             ),
@@ -119,7 +122,10 @@ def _recent_rows(rows: list[dict[str, Any]]) -> list[dict[str, object]]:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--days", type=int, help="Only include this many recent days")
-    parser.add_argument("--limit", type=int, default=10, help="Recent row limit")
+    parser.add_argument("--limit", type=int, default=5, help="Recent row limit")
+    parser.add_argument(
+        "--details", action="store_true", help="Show secondary analytical tables"
+    )
     parser.add_argument("--json", action="store_true", help="Print JSON output")
     args = parser.parse_args()
     if args.days is not None and args.days <= 0:
@@ -141,45 +147,53 @@ def main() -> int:
         )
     )
     _render_gap(console, summary["gap_report"])
-    _table(
+    domain_counts = {
+        **summary["health_domains"],
+        "overall": {
+            "healthy": summary["healthy"],
+            "unhealthy": summary["unhealthy"],
+        },
+    }
+    _render_health_summary(
         console,
-        "Health by domain",
-        [
-            {"domain": domain, **counts}
-            for domain, counts in summary["health_domains"].items()
-        ],
-    )
-    _render_issue_summary(console, summary["health_issue_summary"])
-    _table(
-        console,
-        "Missing values",
-        [{"field": key, "count": value} for key, value in summary["missing"].items()],
-    )
-    _table(
-        console,
-        "Average house consumption by hour",
-        summary["average_house_kw_by_hour"],
-    )
-    _table(
-        console,
-        "Average house consumption by weekday",
-        [
-            {
-                **row,
-                "day_of_week": (
-                    "Monday",
-                    "Tuesday",
-                    "Wednesday",
-                    "Thursday",
-                    "Friday",
-                    "Saturday",
-                    "Sunday",
-                )[row["day_of_week"]],
-            }
-            for row in summary["average_house_kw_by_weekday"]
-        ],
+        domain_counts,
+        summary["health_issue_summary"],
+        details=args.details,
     )
     _table(console, "Recent observations", _recent_rows(summary["recent"]))
+    if args.details:
+        _table(
+            console,
+            "Missing values",
+            [
+                {"field": key, "count": value}
+                for key, value in summary["missing"].items()
+            ],
+        )
+        _table(
+            console,
+            "Average house consumption by hour",
+            summary["average_house_kw_by_hour"],
+        )
+        _table(
+            console,
+            "Average house consumption by weekday",
+            [
+                {
+                    **row,
+                    "day_of_week": (
+                        "Monday",
+                        "Tuesday",
+                        "Wednesday",
+                        "Thursday",
+                        "Friday",
+                        "Saturday",
+                        "Sunday",
+                    )[row["day_of_week"]],
+                }
+                for row in summary["average_house_kw_by_weekday"]
+            ],
+        )
     return 0
 
 

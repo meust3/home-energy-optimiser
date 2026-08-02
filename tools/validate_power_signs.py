@@ -9,23 +9,43 @@ from rich.table import Table
 from energy_optimizer.config import load_database_path, load_timezone_name
 from energy_optimizer.historian import Historian
 from energy_optimizer.power_signs import analyze_power_signs
-from energy_optimizer.time_ranges import parse_range_value
+from energy_optimizer.time_ranges import parse_range_value, resolve_history_range
 
 
 def _metric(value: object, suffix: str = "") -> str:
     return "N/A" if value is None else f"{value}{suffix}"
 
 
+def _example_label(example: dict[str, object] | None) -> str:
+    if not example:
+        return "N/A"
+    slot = str(example.get("slot_utc") or "unknown slot")
+    return f"{slot[:16]} ({_metric(example.get('residual_w'), ' W')})"
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--start", help="Inclusive ISO date or datetime")
     parser.add_argument("--end", help="Inclusive ISO date or datetime")
+    parser.add_argument("--days", type=int, help="Analyze this many recent days")
     parser.add_argument("--json", action="store_true", help="Print JSON output")
     args = parser.parse_args()
     timezone_name = load_timezone_name()
     try:
-        start = parse_range_value(args.start, timezone_name) if args.start else None
-        end = parse_range_value(args.end, timezone_name, end=True) if args.end else None
+        if args.days is not None:
+            start, end = resolve_history_range(
+                from_value=args.start,
+                to_value=args.end,
+                days=args.days,
+                timezone_name=timezone_name,
+            )
+        else:
+            start = parse_range_value(args.start, timezone_name) if args.start else None
+            end = (
+                parse_range_value(args.end, timezone_name, end=True)
+                if args.end
+                else None
+            )
     except ValueError as exc:
         parser.error(str(exc))
     if start and end and end < start:
@@ -52,10 +72,10 @@ def main() -> int:
     for heading in (
         "Grid + means",
         "Battery + means",
-        "Samples",
+        "N",
         "MAE W",
-        "RMSE W",
-        "Bias W",
+        "Median W",
+        "Confidence",
     ):
         table.add_column(heading)
     for hypothesis in result["hypotheses"]:
@@ -64,10 +84,26 @@ def main() -> int:
             hypothesis["battery_positive_likely_means"],
             str(hypothesis["sample_count"]),
             _metric(hypothesis["mean_absolute_residual_w"]),
-            _metric(hypothesis["root_mean_square_residual_w"]),
-            _metric(hypothesis["mean_signed_residual_w"]),
+            _metric(hypothesis["median_residual_w"]),
+            hypothesis["confidence"],
         )
     console.print(table)
+    evidence = Table(title="Residual evidence by convention")
+    for heading in (
+        "Grid +",
+        "Battery +",
+        "Supporting example",
+        "Contradicting example",
+    ):
+        evidence.add_column(heading)
+    for hypothesis in result["hypotheses"]:
+        evidence.add_row(
+            hypothesis["grid_positive_likely_means"],
+            hypothesis["battery_positive_likely_means"],
+            _example_label(next(iter(hypothesis["supporting_examples"]), None)),
+            _example_label(next(iter(hypothesis["contradicting_examples"]), None)),
+        )
+    console.print(evidence)
     mode_table = Table(title="Battery-mode evidence")
     for heading in ("Mode", "Samples", "Average W", "Positive", "Negative", "Zero"):
         mode_table.add_column(heading)
@@ -81,6 +117,11 @@ def main() -> int:
             str(row["zero_samples"]),
         )
     console.print(mode_table)
+    suggestion = result["suggested_configuration"]
+    if suggestion:
+        console.print("Suggested configuration (review before applying):")
+        for name, value in suggestion.items():
+            console.print(f"  {name}={value}")
     return 0
 
 

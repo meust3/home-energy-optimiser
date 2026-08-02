@@ -88,13 +88,42 @@ def parse_solar_summary(
     if state is None or is_missing_state(state.state):
         return None
     attrs = state.attributes
-    estimate = parse_number(attrs.get("estimate"))
-    if estimate is None:
-        estimate = parse_number(state.state)
-    estimate10 = parse_number(attrs.get("estimate10"))
-    estimate90 = parse_number(attrs.get("estimate90"))
-    if estimate is None and estimate10 is None and estimate90 is None:
+    source_estimate = parse_number(attrs.get("estimate"))
+    if source_estimate is None:
+        source_estimate = parse_number(state.state)
+    source_estimate10 = parse_number(attrs.get("estimate10"))
+    source_estimate90 = parse_number(attrs.get("estimate90"))
+    if (
+        source_estimate is None
+        and source_estimate10 is None
+        and source_estimate90 is None
+    ):
         return None
+
+    source_unit = parse_text(attrs.get("unit_of_measurement"))
+    normalized_unit = source_unit.casefold() if source_unit else None
+    if normalized_unit == "wh":
+        factor = 0.001
+        conversion_status = "converted_from_wh"
+    elif normalized_unit == "kwh":
+        factor = 1.0
+        conversion_status = "native_kwh"
+    else:
+        factor = None
+        conversion_status = (
+            "unit_missing" if source_unit is None else "unit_unsupported"
+        )
+
+    def to_kwh(value: float | None) -> float | None:
+        return None if value is None or factor is None else value * factor
+
     return SolarForecastSummary(
-        estimate=estimate, estimate10=estimate10, estimate90=estimate90
+        estimate_kwh=to_kwh(source_estimate),
+        estimate10_kwh=to_kwh(source_estimate10),
+        estimate90_kwh=to_kwh(source_estimate90),
+        source_estimate=source_estimate,
+        source_estimate10=source_estimate10,
+        source_estimate90=source_estimate90,
+        source_unit=source_unit,
+        conversion_status=conversion_status,
     )

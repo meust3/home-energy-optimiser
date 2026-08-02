@@ -7,6 +7,7 @@ from energy_optimizer import entity_ids as ids
 from energy_optimizer.models import (
     CollectorConfig,
     DataHealth,
+    EnergyFlow,
     HealthDomain,
     HealthIssue,
     HealthUse,
@@ -204,11 +205,19 @@ def _solar_health(
                 _issue("missing_entity", "Required entity is absent", entity_id)
             )
             continue
-        if parse_solar_summary(state) is None:
+        summary = parse_solar_summary(state)
+        if summary is None or not any(
+            value is not None
+            for value in (
+                summary.estimate_kwh,
+                summary.estimate10_kwh,
+                summary.estimate90_kwh,
+            )
+        ):
             issues.append(
                 _issue(
                     "missing_solcast_summary",
-                    "Required Solcast summary is missing",
+                    "Required Solcast summary is missing or has no supported unit",
                     entity_id,
                 )
             )
@@ -261,11 +270,57 @@ def _weather_health(
     return _domain(issues, [])
 
 
+def _flow_health(
+    flow: EnergyFlow,
+    config: CollectorConfig,
+    *,
+    ev_active: bool | None,
+    ev_power_w: float | None,
+) -> HealthDomain:
+    issues: list[HealthIssue] = []
+    if flow.sign_convention_status == "unconfirmed":
+        issues.append(
+            _issue(
+                "sign_conventions_unknown",
+                "Grid and battery signs must be explicitly configured",
+            )
+        )
+    elif flow.sign_convention_status == "unavailable":
+        issues.append(
+            _issue("derived_flow_unavailable", "Required raw flow values are missing")
+        )
+    if (
+        flow.balance_residual_w is not None
+        and abs(flow.balance_residual_w) > config.balance_tolerance_w
+    ):
+        issues.append(
+            _issue(
+                "balance_residual_too_large",
+                f"Residual exceeds {config.balance_tolerance_w:g} W tolerance",
+            )
+        )
+    if (
+        ev_active is False
+        and ev_power_w is not None
+        and ev_power_w > config.balance_tolerance_w
+    ):
+        issues.append(
+            _issue(
+                "ev_telemetry_inconsistent",
+                "EV power is positive while charging-active state is false",
+            )
+        )
+    return _domain(issues, ["derived_flow", "grid_charge", "battery_export"])
+
+
 def evaluate_data_health(
     states: dict[str, HomeAssistantState],
     config: CollectorConfig,
     *,
     now: datetime | None = None,
+    energy_flow: EnergyFlow | None = None,
+    ev_active: bool | None = None,
+    ev_power_w: float | None = None,
 ) -> DataHealth:
     """Evaluate independent domains; overall currently follows telemetry integrity."""
     current = (now or datetime.now(UTC)).astimezone(UTC)
@@ -273,6 +328,16 @@ def evaluate_data_health(
     price = _price_health(states, config, current)
     solar = _solar_health(states, config, current)
     weather = _weather_health(states, config, current)
+    flow = _flow_health(
+        energy_flow
+        or EnergyFlow(
+            sign_convention_status="unconfirmed",
+            sign_convention_confidence="unconfirmed",
+        ),
+        config,
+        ev_active=ev_active,
+        ev_power_w=ev_power_w,
+    )
     overall = HealthDomain(
         is_healthy=telemetry.is_healthy,
         score=telemetry.score,
@@ -284,6 +349,7 @@ def evaluate_data_health(
         price=price,
         solar=solar,
         weather=weather,
+        flow=flow,
         overall=overall,
     )
 
@@ -295,7 +361,7 @@ def is_ready_for(health: DataHealth, action: ReadinessAction) -> bool:
     """Return readiness for an advisory consumer; this never executes an action."""
     required = {
         "load_profile": (health.telemetry,),
-        "grid_charge": (health.telemetry, health.price, health.solar),
-        "battery_export": (health.telemetry, health.price, health.solar),
+        "grid_charge": (health.telemetry, health.price, health.solar, health.flow),
+        "battery_export": (health.telemetry, health.price, health.solar, health.flow),
     }
     return all(domain.is_healthy for domain in required[action])

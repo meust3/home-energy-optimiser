@@ -5,7 +5,7 @@ from collections import Counter
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-DOMAIN_NAMES = ("telemetry", "price", "solar", "weather", "overall")
+DOMAIN_NAMES = ("telemetry", "price", "solar", "weather", "flow", "overall")
 SLOT_INTERVAL = timedelta(minutes=5)
 
 
@@ -14,6 +14,15 @@ def _slot(value: datetime) -> datetime:
         raise ValueError("gap analysis requires timezone-aware datetimes")
     utc = value.astimezone(UTC)
     return utc.replace(minute=(utc.minute // 5) * 5, second=0, microsecond=0)
+
+
+def _missing_period(start: datetime, end: datetime, slots: int) -> dict[str, Any]:
+    return {
+        "start": start.isoformat(),
+        "end": end.isoformat(),
+        "slots": slots,
+        "minutes": slots * 5,
+    }
 
 
 def calculate_gap_report(
@@ -38,26 +47,35 @@ def calculate_gap_report(
             "longest_gap_minutes": 0,
             "longest_gap_start": None,
             "longest_gap_end": None,
+            "first_missing_period": None,
+            "last_missing_period": None,
+            "longest_missing_period": None,
         }
     expected = int((range_end - range_start) / SLOT_INTERVAL) + 1
     present = {value for value in normalized if range_start <= value <= range_end}
-    longest_count = current_count = 0
-    longest_start = current_start = None
-    longest_end = None
+    missing_periods: list[dict[str, Any]] = []
+    current_count = 0
+    current_start = None
     cursor = range_start
     while cursor <= range_end:
         if cursor not in present:
             if current_count == 0:
                 current_start = cursor
             current_count += 1
-            if current_count > longest_count:
-                longest_count = current_count
-                longest_start = current_start
-                longest_end = cursor
-        else:
+        elif current_count and current_start is not None:
+            missing_periods.append(
+                _missing_period(current_start, cursor - SLOT_INTERVAL, current_count)
+            )
             current_count = 0
             current_start = None
         cursor += SLOT_INTERVAL
+    if current_count and current_start is not None:
+        missing_periods.append(_missing_period(current_start, range_end, current_count))
+    longest = (
+        max(missing_periods, key=lambda period: period["slots"])
+        if missing_periods
+        else None
+    )
     collected = len(present)
     return {
         "range_start": range_start.isoformat(),
@@ -66,10 +84,13 @@ def calculate_gap_report(
         "collected_slots": collected,
         "missing_slots": expected - collected,
         "coverage_percent": round(collected / expected * 100, 2),
-        "longest_gap_slots": longest_count,
-        "longest_gap_minutes": longest_count * 5,
-        "longest_gap_start": longest_start.isoformat() if longest_start else None,
-        "longest_gap_end": longest_end.isoformat() if longest_end else None,
+        "longest_gap_slots": longest["slots"] if longest else 0,
+        "longest_gap_minutes": longest["minutes"] if longest else 0,
+        "longest_gap_start": longest["start"] if longest else None,
+        "longest_gap_end": longest["end"] if longest else None,
+        "first_missing_period": missing_periods[0] if missing_periods else None,
+        "last_missing_period": missing_periods[-1] if missing_periods else None,
+        "longest_missing_period": longest,
     }
 
 

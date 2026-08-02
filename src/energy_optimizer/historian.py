@@ -12,9 +12,17 @@ from energy_optimizer.history_analysis import (
     calculate_gap_report,
     summarize_health_issues,
 )
-from energy_optimizer.models import EnergyObservation
+from energy_optimizer.models import EnergyObservation, ForecastRun
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 4
+
+SOLCAST_KWH_COLUMNS = {
+    "solcast_remaining_today_kwh_json": "TEXT",
+    "solcast_tomorrow_kwh_json": "TEXT",
+    "solcast_next_hour_kwh_json": "TEXT",
+    "solcast_this_hour_kwh_json": "TEXT",
+    "solcast_today_kwh_json": "TEXT",
+}
 
 DOMAIN_COLUMNS = {
     "telemetry_is_healthy": "INTEGER NOT NULL DEFAULT 0",
@@ -25,7 +33,40 @@ DOMAIN_COLUMNS = {
     "solar_health_score": "INTEGER NOT NULL DEFAULT 0",
     "weather_is_healthy": "INTEGER NOT NULL DEFAULT 1",
     "weather_health_score": "INTEGER NOT NULL DEFAULT 100",
+    "flow_is_healthy": "INTEGER NOT NULL DEFAULT 0",
+    "flow_health_score": "INTEGER NOT NULL DEFAULT 0",
     "health_domains_json": "TEXT",
+}
+
+DERIVED_COLUMNS = {
+    "grid_import_power_w": "REAL",
+    "grid_export_power_w": "REAL",
+    "battery_charge_power_w": "REAL",
+    "battery_discharge_power_w": "REAL",
+    "solar_to_house_power_w": "REAL",
+    "solar_to_battery_power_w": "REAL",
+    "solar_to_grid_power_w": "REAL",
+    "battery_to_house_power_w": "REAL",
+    "battery_to_grid_power_w": "REAL",
+    "grid_to_house_power_w": "REAL",
+    "grid_to_battery_power_w": "REAL",
+    "balance_residual_w": "REAL",
+    "sign_convention_status": "TEXT NOT NULL DEFAULT 'unconfirmed'",
+    "sign_convention_confidence": "TEXT NOT NULL DEFAULT 'unconfirmed'",
+    "sign_supporting_sample_count": "INTEGER NOT NULL DEFAULT 0",
+    "ev_charging_active": "INTEGER",
+    "ev_power_w": "REAL",
+    "ev_session_id": "TEXT",
+    "ev_energy_required_kwh": "REAL",
+    "ev_ready_by_local": "TEXT",
+    "ev_source": "TEXT NOT NULL DEFAULT 'none'",
+    "ev_detection_confidence": "TEXT NOT NULL DEFAULT 'unconfirmed'",
+    "baseline_house_consumption_w": "REAL",
+    "baseline_training_eligible": "INTEGER NOT NULL DEFAULT 0",
+    "baseline_exclusion_reason": "TEXT",
+    "event_labels_json": "TEXT NOT NULL DEFAULT '[\"unknown\"]'",
+    "event_label_confidence": "TEXT NOT NULL DEFAULT 'unconfirmed'",
+    "event_label_evidence_json": "TEXT NOT NULL DEFAULT '{}'",
 }
 
 
@@ -100,14 +141,19 @@ class Historian:
                 row["name"]
                 for row in connection.execute("PRAGMA table_info(observations)")
             }
-            added_domain_columns = False
+            old_domain_names = set(DOMAIN_COLUMNS) - {
+                "flow_is_healthy",
+                "flow_health_score",
+            }
+            missing_old_domain = any(
+                name not in existing_columns for name in old_domain_names
+            )
             for name, declaration in DOMAIN_COLUMNS.items():
                 if name not in existing_columns:
                     connection.execute(
                         f"ALTER TABLE observations ADD COLUMN {name} {declaration}"
                     )
-                    added_domain_columns = True
-            if added_domain_columns:
+            if missing_old_domain:
                 legacy_marker = self._json(
                     {
                         "migration": "legacy_global_health",
@@ -125,10 +171,54 @@ class Historian:
                         solar_health_score=health_score,
                         weather_is_healthy=1,
                         weather_health_score=100,
+                        flow_is_healthy=0,
+                        flow_health_score=0,
                         health_domains_json=?
                     """,
                     (legacy_marker,),
                 )
+            for name, declaration in DERIVED_COLUMNS.items():
+                if name not in existing_columns:
+                    connection.execute(
+                        f"ALTER TABLE observations ADD COLUMN {name} {declaration}"
+                    )
+            for name, declaration in SOLCAST_KWH_COLUMNS.items():
+                if name not in existing_columns:
+                    connection.execute(
+                        f"ALTER TABLE observations ADD COLUMN {name} {declaration}"
+                    )
+            connection.executescript("""
+                CREATE TABLE IF NOT EXISTS forecast_runs (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    created_at_utc TEXT NOT NULL,
+                    forecast_type TEXT NOT NULL,
+                    source TEXT NOT NULL,
+                    horizon_start_utc TEXT NOT NULL,
+                    horizon_end_utc TEXT NOT NULL,
+                    model_version TEXT NOT NULL,
+                    metadata_json TEXT NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS forecast_points (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    forecast_run_id INTEGER NOT NULL,
+                    period_start_utc TEXT NOT NULL,
+                    period_end_utc TEXT NOT NULL,
+                    expected_value REAL NOT NULL,
+                    lower_value REAL,
+                    upper_value REAL,
+                    unit TEXT NOT NULL,
+                    actual_value REAL,
+                    error_value REAL,
+                    metadata_json TEXT NOT NULL,
+                    FOREIGN KEY(forecast_run_id) REFERENCES forecast_runs(id)
+                );
+                CREATE INDEX IF NOT EXISTS idx_forecast_runs_type_created
+                    ON forecast_runs(forecast_type, created_at_utc);
+                CREATE INDEX IF NOT EXISTS idx_forecast_points_run_period
+                    ON forecast_points(forecast_run_id, period_start_utc);
+                CREATE INDEX IF NOT EXISTS idx_observations_baseline_training
+                    ON observations(baseline_training_eligible, slot_utc);
+                """)
             connection.execute(
                 """CREATE INDEX IF NOT EXISTS idx_observations_telemetry_health_time
                 ON observations(telemetry_is_healthy, slot_utc)"""
@@ -177,11 +267,7 @@ class Historian:
             "amber_price_spike",
             "amber_import_forecast_json",
             "amber_export_forecast_json",
-            "solcast_remaining_today_json",
-            "solcast_tomorrow_json",
-            "solcast_next_hour_json",
-            "solcast_this_hour_json",
-            "solcast_today_json",
+            *SOLCAST_KWH_COLUMNS.keys(),
             "solcast_power_now_w",
             "temperature_c",
             "weather_condition",
@@ -196,7 +282,10 @@ class Historian:
             "solar_health_score",
             "weather_is_healthy",
             "weather_health_score",
+            "flow_is_healthy",
+            "flow_health_score",
             "health_domains_json",
+            *DERIVED_COLUMNS.keys(),
         )
         values = (
             observation.slot_utc.isoformat(),
@@ -219,11 +308,11 @@ class Historian:
             ),
             self._json(observation.amber_import_forecast),
             self._json(observation.amber_export_forecast),
-            self._json(observation.solcast_remaining_today),
-            self._json(observation.solcast_tomorrow),
-            self._json(observation.solcast_next_hour),
-            self._json(observation.solcast_this_hour),
-            self._json(observation.solcast_today),
+            self._json(observation.solcast_remaining_today_kwh),
+            self._json(observation.solcast_tomorrow_kwh),
+            self._json(observation.solcast_next_hour_kwh),
+            self._json(observation.solcast_this_hour_kwh),
+            self._json(observation.solcast_today_kwh),
             observation.solcast_power_now_w,
             observation.temperature_c,
             observation.weather_condition,
@@ -238,7 +327,45 @@ class Historian:
             observation.data_health.solar.score,
             int(observation.data_health.weather.is_healthy),
             observation.data_health.weather.score,
+            int(observation.data_health.flow.is_healthy),
+            observation.data_health.flow.score,
             self._json(observation.data_health),
+            observation.energy_flow.grid_import_power_w,
+            observation.energy_flow.grid_export_power_w,
+            observation.energy_flow.battery_charge_power_w,
+            observation.energy_flow.battery_discharge_power_w,
+            observation.energy_flow.solar_to_house_power_w,
+            observation.energy_flow.solar_to_battery_power_w,
+            observation.energy_flow.solar_to_grid_power_w,
+            observation.energy_flow.battery_to_house_power_w,
+            observation.energy_flow.battery_to_grid_power_w,
+            observation.energy_flow.grid_to_house_power_w,
+            observation.energy_flow.grid_to_battery_power_w,
+            observation.energy_flow.balance_residual_w,
+            observation.energy_flow.sign_convention_status,
+            observation.energy_flow.sign_convention_confidence,
+            observation.energy_flow.supporting_sample_count,
+            (
+                None
+                if observation.ev_charging_active is None
+                else int(observation.ev_charging_active)
+            ),
+            observation.ev_power_w,
+            observation.ev_session_id,
+            observation.ev_energy_required_kwh,
+            (
+                observation.ev_ready_by_local.isoformat()
+                if observation.ev_ready_by_local
+                else None
+            ),
+            observation.ev_source,
+            observation.ev_detection_confidence,
+            observation.baseline_house_consumption_w,
+            int(observation.baseline_training_eligible),
+            observation.baseline_exclusion_reason,
+            self._json(observation.event_labels),
+            observation.event_label_confidence,
+            self._json(observation.event_label_evidence),
         )
         placeholders = ",".join("?" for _ in columns)
         updates = ",".join(
@@ -269,6 +396,7 @@ class Historian:
                 "SUM(price_is_healthy) price_healthy, "
                 "SUM(solar_is_healthy) solar_healthy, "
                 "SUM(weather_is_healthy) weather_healthy, "
+                "SUM(flow_is_healthy) flow_healthy, "
                 "MIN(slot_utc) earliest, MAX(slot_utc) latest "
                 f"FROM observations {where}"
             )
@@ -321,7 +449,7 @@ class Historian:
             health_rows = connection.execute(
                 "SELECT health_domains_json, health_score AS overall_health_score, "
                 "telemetry_health_score, price_health_score, "
-                "solar_health_score, weather_health_score "
+                "solar_health_score, weather_health_score, flow_health_score "
                 f"FROM observations {where}",
                 params,
             ).fetchall()
@@ -339,7 +467,7 @@ class Historian:
                     "healthy": counts[f"{domain}_healthy"] or 0,
                     "unhealthy": counts["total"] - (counts[f"{domain}_healthy"] or 0),
                 }
-                for domain in ("telemetry", "price", "solar", "weather")
+                for domain in ("telemetry", "price", "solar", "weather", "flow")
             },
             "earliest": counts["earliest"],
             "latest": counts["latest"],
@@ -369,8 +497,11 @@ class Historian:
     def healthy_load_samples(self, *, days: int | None = None) -> list[sqlite3.Row]:
         self.migrate()
         sql = (
-            "SELECT observed_at_local, house_consumption_w FROM observations "
-            "WHERE telemetry_is_healthy=1 AND house_consumption_w IS NOT NULL"
+            "SELECT observed_at_local, "
+            "baseline_house_consumption_w AS house_consumption_w "
+            "FROM observations WHERE telemetry_is_healthy=1 "
+            "AND baseline_training_eligible=1 "
+            "AND baseline_house_consumption_w IS NOT NULL"
         )
         params: tuple[Any, ...] = ()
         if days is not None:
@@ -423,6 +554,149 @@ class Historian:
             params.append(value.astimezone(UTC).isoformat())
         where = f" WHERE {' AND '.join(clauses)}" if clauses else ""
         sql = f"SELECT {','.join(selected)} FROM observations{where} ORDER BY slot_utc"
+        with self.connect() as connection:
+            return [dict(row) for row in connection.execute(sql, params)]
+
+    def observation_columns(self) -> tuple[str, ...]:
+        """Return persisted observation columns in stable schema order."""
+        self.migrate()
+        return tuple(row["name"] for row in self._table_info())
+
+    def save_forecast_run(self, run: ForecastRun) -> int:
+        """Store one immutable forecast run and its points locally."""
+        self.migrate()
+        with self.connect() as connection:
+            cursor = connection.execute(
+                """
+                INSERT INTO forecast_runs (
+                    created_at_utc, forecast_type, source, horizon_start_utc,
+                    horizon_end_utc, model_version, metadata_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    run.created_at_utc.astimezone(UTC).isoformat(),
+                    run.forecast_type,
+                    run.source,
+                    run.horizon_start_utc.astimezone(UTC).isoformat(),
+                    run.horizon_end_utc.astimezone(UTC).isoformat(),
+                    run.model_version,
+                    self._json(run.metadata),
+                ),
+            )
+            run_id = int(cursor.lastrowid)
+            connection.executemany(
+                """
+                INSERT INTO forecast_points (
+                    forecast_run_id, period_start_utc, period_end_utc,
+                    expected_value, lower_value, upper_value, unit,
+                    actual_value, error_value, metadata_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                [
+                    (
+                        run_id,
+                        point.period_start_utc.astimezone(UTC).isoformat(),
+                        point.period_end_utc.astimezone(UTC).isoformat(),
+                        point.expected_value,
+                        point.lower_value,
+                        point.upper_value,
+                        point.unit,
+                        point.actual_value,
+                        point.error_value,
+                        self._json(point.metadata),
+                    )
+                    for point in run.points
+                ],
+            )
+        return run_id
+
+    def compare_forecast_run(self, run_id: int) -> dict[str, Any]:
+        """Populate actual/error values from observations and return MAE and bias."""
+        self.migrate()
+        actual_columns = {
+            "solar_power": "pv_power_w",
+            "household_load": "house_consumption_w",
+            "baseline_household_load": "baseline_house_consumption_w",
+            "battery_soc": "battery_soc_percent",
+            "grid_import": "grid_import_power_w",
+            "grid_export": "grid_export_power_w",
+            "buy_price": "amber_import_price_per_kwh",
+            "sell_price": "amber_export_price_per_kwh",
+        }
+        with self.connect() as connection:
+            run = connection.execute(
+                "SELECT forecast_type FROM forecast_runs WHERE id=?", (run_id,)
+            ).fetchone()
+            if run is None:
+                raise ValueError(f"Forecast run {run_id} does not exist")
+            actual_column = actual_columns[run["forecast_type"]]
+            points = connection.execute(
+                "SELECT id, period_start_utc, period_end_utc, expected_value "
+                "FROM forecast_points WHERE forecast_run_id=?",
+                (run_id,),
+            ).fetchall()
+            for point in points:
+                actual = connection.execute(
+                    f"SELECT AVG({actual_column}) actual FROM observations "
+                    "WHERE slot_utc >= ? AND slot_utc < ?",
+                    (point["period_start_utc"], point["period_end_utc"]),
+                ).fetchone()["actual"]
+                error = actual - point["expected_value"] if actual is not None else None
+                connection.execute(
+                    "UPDATE forecast_points SET actual_value=?, error_value=? "
+                    "WHERE id=?",
+                    (actual, error, point["id"]),
+                )
+        return self.forecast_metrics(run_id)
+
+    def forecast_metrics(self, run_id: int) -> dict[str, Any]:
+        self.migrate()
+        with self.connect() as connection:
+            row = connection.execute(
+                """
+                SELECT COUNT(error_value) sample_count,
+                       AVG(ABS(error_value)) mae,
+                       AVG(error_value) bias
+                FROM forecast_points WHERE forecast_run_id=?
+                """,
+                (run_id,),
+            ).fetchone()
+        return {
+            "forecast_run_id": run_id,
+            "sample_count": row["sample_count"],
+            "mae": row["mae"],
+            "bias": row["bias"],
+        }
+
+    def forecast_comparison_rows(
+        self,
+        *,
+        forecast_type: str | None = None,
+        start: datetime | None = None,
+        end: datetime | None = None,
+    ) -> list[dict[str, Any]]:
+        self.migrate()
+        clauses: list[str] = []
+        params: list[Any] = []
+        if forecast_type:
+            clauses.append("r.forecast_type=?")
+            params.append(forecast_type)
+        if start:
+            clauses.append("p.period_start_utc>=?")
+            params.append(start.astimezone(UTC).isoformat())
+        if end:
+            clauses.append("p.period_end_utc<=?")
+            params.append(end.astimezone(UTC).isoformat())
+        where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+        sql = (
+            "SELECT r.id forecast_run_id, r.created_at_utc, r.forecast_type, "
+            "r.source, r.model_version, p.period_start_utc, p.period_end_utc, "
+            "p.expected_value, p.lower_value, p.upper_value, p.unit, "
+            "p.actual_value, p.error_value, p.metadata_json "
+            "FROM forecast_runs r JOIN forecast_points p "
+            f"ON p.forecast_run_id=r.id {where} "
+            "ORDER BY p.period_start_utc"
+        )
         with self.connect() as connection:
             return [dict(row) for row in connection.execute(sql, params)]
 

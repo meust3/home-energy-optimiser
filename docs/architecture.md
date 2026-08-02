@@ -43,9 +43,24 @@ the balance `PV + signed grid + signed battery ≈ house`, alongside battery-mod
 groups. It reports residuals and confidence but does not select or persist a sign
 convention.
 
+Operational terminal output is intentionally compact by default for a normal-width
+Windows console. Detailed issue and load tables are opt-in. Sign validation includes
+median residuals and representative low/high-residual examples for every convention,
+so a leading hypothesis remains auditable rather than becoming hidden configuration.
+
 Weather entity IDs are optional configuration. When configured, temperature and
 condition are collected in the existing bulk GET. Missing weather may make only the
 weather domain unhealthy; it cannot affect overall Phase 1 observation health.
 
 The future executor is deliberately absent. Adding it requires a separate safety
 review and explicit approval.
+
+The collector has an explicit derivation stage after raw parsing. It creates an
+`EnergyFlow` only from configured signs, adds optional EV context, calculates a
+baseline-load training value, derives cautious event labels, and evaluates a
+separate flow-readiness health domain. Overall health continues to follow raw
+telemetry rather than derivation readiness.
+
+Forecast storage is independent of collection: immutable runs own period points;
+later comparison attaches local actuals and errors. These tables support future
+projected-vs-actual dashboards without implementing a dashboard or optimiser.

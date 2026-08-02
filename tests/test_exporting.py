@@ -15,3 +15,14 @@ def test_csv_export_preserves_null_and_values(tmp_path):
     assert count == 2
     assert exported[0]["house_consumption_w"] == "1200"
     assert exported[1]["house_consumption_w"] == ""
+
+
+def test_empty_csv_export_writes_requested_headers(tmp_path):
+    output = tmp_path / "empty.csv"
+    count = export_rows_to_csv(
+        [], output, fieldnames=("slot_utc", "house_consumption_w")
+    )
+    assert count == 0
+    assert output.read_text(encoding="utf-8").strip() == (
+        "slot_utc,house_consumption_w"
+    )

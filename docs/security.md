@@ -42,3 +42,8 @@ not authority to control the inverter.
 
 Optional weather entities use the same allowlisted `GET /api/states` call. They do
 not add endpoints or write capabilities and are not mandatory for overall health.
+
+Optional EV sensors and helpers are also GET-only. The project does not create or
+change helpers, charger state, inverter settings, or Modbus registers. Energy-flow
+normalization never overwrites raw power. Forecast comparison writes only derived
+actual/error values to local SQLite.

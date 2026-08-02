@@ -22,8 +22,13 @@ def test_schema_insert_upsert_null_and_queries(healthy_states, config, now):
     assert "health_issues_json" in columns
     assert row["temperature_c"] is None
     assert row["house_consumption_w"] == 2000
-    assert historian.summary()["total"] == 1
-    assert historian.summary()["average_house_kw_by_hour"][0]["average_kw"] == 2
+    summary = historian.summary()
+    assert summary["total"] == 1
+    assert summary["health_domains"]["telemetry"] == {
+        "healthy": 1,
+        "unhealthy": 0,
+    }
+    assert summary["average_house_kw_by_hour"][0]["average_kw"] == 2
 
 
 def test_load_profile_history_and_fallback():
@@ -83,10 +88,12 @@ def test_migrates_existing_schema_without_deleting_rows(config):
             INSERT INTO observations (
                 slot_utc, observed_at_utc, observed_at_local,
                 amber_import_forecast_json, amber_export_forecast_json,
+                solcast_next_hour_json,
                 is_healthy, health_score, health_issues_json
             ) VALUES (
                 '2026-01-01T00:00:00+00:00', '2026-01-01T00:00:01+00:00',
-                '2026-01-01T10:00:01+10:00', '[]', '[]', 1, 65, '[]'
+                '2026-01-01T10:00:01+10:00', '[]', '[]',
+                '{"estimate":6796}', 1, 65, '[]'
             );
             """)
     historian = Historian(config.database_path)
@@ -98,7 +105,12 @@ def test_migrates_existing_schema_without_deleting_rows(config):
     assert row["telemetry_is_healthy"] == 1
     assert row["telemetry_health_score"] == 65
     assert "legacy_global_health" in row["health_domains_json"]
-    assert version["version"] == 2
+    assert version["version"] == 4
+    assert row["solcast_next_hour_kwh_json"] is None
+    assert row["solcast_next_hour_json"] == '{"estimate":6796}'
+    assert row["sign_convention_status"] == "unconfirmed"
+    assert row["grid_import_power_w"] is None
+    assert row["baseline_house_consumption_w"] is None
 
 
 def test_observation_rows_select_inclusive_range(healthy_states, config, now):

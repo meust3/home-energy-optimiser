@@ -30,7 +30,9 @@ class HealthIssue(BaseModel):
     deduction: int = Field(ge=0, le=100)
 
 
-HealthUse = Literal["display", "load_profile", "grid_charge", "battery_export"]
+HealthUse = Literal[
+    "display", "load_profile", "grid_charge", "battery_export", "derived_flow"
+]
 
 
 class HealthDomain(BaseModel):
@@ -45,6 +47,7 @@ class DataHealth(BaseModel):
     price: HealthDomain
     solar: HealthDomain
     weather: HealthDomain
+    flow: HealthDomain
     overall: HealthDomain
 
     @computed_field
@@ -78,9 +81,18 @@ class AmberPriceInterval(BaseModel):
 
 
 class SolarForecastSummary(BaseModel):
-    estimate: float | None = None
-    estimate10: float | None = None
-    estimate90: float | None = None
+    """Solcast energy summary normalized to kWh with its source preserved."""
+
+    estimate_kwh: float | None = None
+    estimate10_kwh: float | None = None
+    estimate90_kwh: float | None = None
+    source_estimate: float | None = None
+    source_estimate10: float | None = None
+    source_estimate90: float | None = None
+    source_unit: str | None = None
+    conversion_status: Literal[
+        "native_kwh", "converted_from_wh", "unit_missing", "unit_unsupported"
+    ]
 
 
 class LoadProfilePoint(BaseModel):
@@ -90,6 +102,94 @@ class LoadProfilePoint(BaseModel):
     sample_count: int = Field(ge=0)
     source: Literal["history", "fallback"]
     explanation: str
+
+
+GridSignConvention = Literal["positive_import", "positive_export", "unknown"]
+BatterySignConvention = Literal["positive_charge", "positive_discharge", "unknown"]
+SignConventionStatus = Literal["confirmed", "unconfirmed", "unavailable"]
+ConfidenceLevel = Literal["high", "medium", "low", "unconfirmed"]
+EVSource = Literal["charger", "home_assistant_helper", "inferred", "none"]
+EventLabel = Literal[
+    "normal_self_consumption",
+    "solar_battery_charge",
+    "grid_battery_charge",
+    "solar_export",
+    "battery_export",
+    "ev_charge_solar",
+    "ev_charge_grid",
+    "ev_charge_mixed",
+    "unknown",
+]
+ForecastType = Literal[
+    "solar_power",
+    "household_load",
+    "baseline_household_load",
+    "battery_soc",
+    "grid_import",
+    "grid_export",
+    "buy_price",
+    "sell_price",
+]
+
+
+class EnergyFlow(BaseModel):
+    raw_pv_power_w: float | None = None
+    raw_house_consumption_w: float | None = None
+    raw_grid_power_w: float | None = None
+    raw_battery_power_w: float | None = None
+    grid_import_power_w: float | None = None
+    grid_export_power_w: float | None = None
+    battery_charge_power_w: float | None = None
+    battery_discharge_power_w: float | None = None
+    solar_to_house_power_w: float | None = None
+    solar_to_battery_power_w: float | None = None
+    solar_to_grid_power_w: float | None = None
+    battery_to_house_power_w: float | None = None
+    battery_to_grid_power_w: float | None = None
+    grid_to_house_power_w: float | None = None
+    grid_to_battery_power_w: float | None = None
+    balance_residual_w: float | None = None
+    sign_convention_status: SignConventionStatus
+    sign_convention_confidence: ConfidenceLevel
+    supporting_sample_count: int = Field(default=0, ge=0)
+
+
+class ForecastPoint(BaseModel):
+    period_start_utc: datetime
+    period_end_utc: datetime
+    expected_value: float
+    lower_value: float | None = None
+    upper_value: float | None = None
+    unit: str
+    actual_value: float | None = None
+    error_value: float | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+    @field_validator("period_start_utc", "period_end_utc")
+    @classmethod
+    def point_times_are_aware(cls, value: datetime) -> datetime:
+        if value.tzinfo is None or value.utcoffset() is None:
+            raise ValueError("forecast point datetimes must be timezone-aware")
+        return value
+
+
+class ForecastRun(BaseModel):
+    id: int | None = None
+    created_at_utc: datetime
+    forecast_type: ForecastType
+    source: str
+    horizon_start_utc: datetime
+    horizon_end_utc: datetime
+    model_version: str
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    points: list[ForecastPoint] = Field(default_factory=list)
+
+    @field_validator("created_at_utc", "horizon_start_utc", "horizon_end_utc")
+    @classmethod
+    def forecast_times_are_aware(cls, value: datetime) -> datetime:
+        if value.tzinfo is None or value.utcoffset() is None:
+            raise ValueError("forecast datetimes must be timezone-aware")
+        return value
 
 
 class CollectorConfig(BaseModel):
@@ -110,6 +210,21 @@ class CollectorConfig(BaseModel):
     weather_freshness_minutes: int = Field(default=60, gt=0)
     weather_temperature_entity_id: str | None = None
     weather_condition_entity_id: str | None = None
+    grid_power_sign_convention: GridSignConvention = "unknown"
+    battery_power_sign_convention: BatterySignConvention = "unknown"
+    sign_convention_confidence: ConfidenceLevel = "unconfirmed"
+    sign_convention_supporting_samples: int = Field(default=0, ge=0)
+    balance_tolerance_w: float = Field(default=250.0, ge=0)
+    ev_charging_active_entity_id: str | None = None
+    ev_charging_power_entity_id: str | None = None
+    ev_plugged_in_entity_id: str | None = None
+    ev_energy_required_entity_id: str | None = None
+    ev_ready_by_entity_id: str | None = None
+    ev_inference_enabled: bool = False
+    ev_plausible_power_min_w: float = Field(default=1800.0, ge=0)
+    ev_plausible_power_max_w: float = Field(default=12000.0, gt=0)
+    ev_minimum_session_minutes: int = Field(default=30, gt=0)
+    forecast_retention_days: int = Field(default=365, gt=0)
     conservative_fallback_household_load_kw: float = Field(default=2.0, ge=0)
     load_profile_minimum_samples: int = Field(default=3, gt=0)
     request_timeout_seconds: float = Field(default=10.0, gt=0)
@@ -132,14 +247,28 @@ class EnergyObservation(BaseModel):
     amber_price_spike: bool | None = None
     amber_import_forecast: list[AmberPriceInterval] = Field(default_factory=list)
     amber_export_forecast: list[AmberPriceInterval] = Field(default_factory=list)
-    solcast_remaining_today: SolarForecastSummary | None = None
-    solcast_tomorrow: SolarForecastSummary | None = None
-    solcast_next_hour: SolarForecastSummary | None = None
-    solcast_this_hour: SolarForecastSummary | None = None
-    solcast_today: SolarForecastSummary | None = None
+    solcast_remaining_today_kwh: SolarForecastSummary | None = None
+    solcast_tomorrow_kwh: SolarForecastSummary | None = None
+    solcast_next_hour_kwh: SolarForecastSummary | None = None
+    solcast_this_hour_kwh: SolarForecastSummary | None = None
+    solcast_today_kwh: SolarForecastSummary | None = None
     solcast_power_now_w: float | None = None
     temperature_c: float | None = None
     weather_condition: str | None = None
+    energy_flow: EnergyFlow
+    ev_charging_active: bool | None = None
+    ev_power_w: float | None = None
+    ev_session_id: str | None = None
+    ev_energy_required_kwh: float | None = None
+    ev_ready_by_local: datetime | None = None
+    ev_source: EVSource = "none"
+    ev_detection_confidence: ConfidenceLevel = "unconfirmed"
+    baseline_house_consumption_w: float | None = None
+    baseline_training_eligible: bool = True
+    baseline_exclusion_reason: str | None = None
+    event_labels: list[EventLabel] = Field(default_factory=lambda: ["unknown"])
+    event_label_confidence: ConfidenceLevel = "unconfirmed"
+    event_label_evidence: dict[str, Any] = Field(default_factory=dict)
     data_health: DataHealth
 
     @field_validator("slot_utc", "observed_at_utc", "observed_at_local")
