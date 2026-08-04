@@ -1,6 +1,6 @@
 # Read-only operational data model
 
-SQLite uses schema version 5 and one `observations` row per five-minute UTC slot.
+SQLite uses schema version 6 and one `observations` row per five-minute UTC slot.
 `slot_utc` is the primary key. A repeat collection for a slot uses a last-write-wins
 upsert so a newer snapshot atomically replaces an earlier snapshot without creating
 a duplicate.
@@ -136,3 +136,12 @@ Historical reprocessing updates only derived flow, event, baseline, and flow-hea
 columns. Raw telemetry is absent from the update statement. Missing raw values,
 invalid residuals, inadequate original telemetry quality, and known EV activity
 without EV power remain baseline-ineligible.
+
+## Version 6 manual EV annotation audit
+
+Version 6 adds local `ev_session_annotations` audit records and per-slot prior-state
+snapshots in `ev_session_annotation_rows`. Manual annotations update only EV and
+baseline derivations. Direct EV power is preserved and subtracted from raw house
+load for an eligible baseline; absent EV power remains NULL and excludes the row.
+Snapshots make session removal reversible, including nested overlapping sessions.
+Raw house, grid, battery, and PV telemetry is never included in annotation updates.

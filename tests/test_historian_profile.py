@@ -105,7 +105,7 @@ def test_migrates_existing_schema_without_deleting_rows(config):
     assert row["telemetry_is_healthy"] == 1
     assert row["telemetry_health_score"] == 65
     assert "legacy_global_health" in row["health_domains_json"]
-    assert version["version"] == 5
+    assert version["version"] == 6
     assert row["solcast_next_hour_kwh_json"] is None
     assert row["solcast_next_hour_json"] == '{"estimate":6796}'
     assert row["sign_convention_status"] == "unconfirmed"

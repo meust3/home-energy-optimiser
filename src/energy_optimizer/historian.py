@@ -14,7 +14,7 @@ from energy_optimizer.history_analysis import (
 )
 from energy_optimizer.models import EnergyObservation, ForecastRun
 
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
 
 SOLCAST_KWH_COLUMNS = {
     "solcast_remaining_today_kwh_json": "TEXT",
@@ -256,6 +256,29 @@ class Historian:
                 );
                 CREATE INDEX IF NOT EXISTS idx_derivations_slot
                     ON observation_derivations(slot_utc, derived_at_utc);
+                CREATE TABLE IF NOT EXISTS ev_session_annotations (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    annotation_timestamp_utc TEXT NOT NULL,
+                    range_start_utc TEXT NOT NULL,
+                    range_end_utc TEXT NOT NULL,
+                    affected_row_count INTEGER NOT NULL,
+                    session_id TEXT NOT NULL,
+                    note TEXT,
+                    previous_eligibility_json TEXT NOT NULL,
+                    new_eligibility_json TEXT NOT NULL,
+                    annotation_source TEXT NOT NULL,
+                    action TEXT NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS ev_session_annotation_rows (
+                    annotation_id INTEGER NOT NULL,
+                    slot_utc TEXT NOT NULL,
+                    previous_state_json TEXT NOT NULL,
+                    PRIMARY KEY(annotation_id, slot_utc),
+                    FOREIGN KEY(annotation_id) REFERENCES ev_session_annotations(id),
+                    FOREIGN KEY(slot_utc) REFERENCES observations(slot_utc)
+                );
+                CREATE INDEX IF NOT EXISTS idx_ev_annotations_session
+                    ON ev_session_annotations(session_id, annotation_timestamp_utc);
                 """)
             connection.execute(
                 """CREATE INDEX IF NOT EXISTS idx_observations_telemetry_health_time
@@ -608,6 +631,7 @@ class Historian:
                 "SELECT slot_utc, observed_at_local, telemetry_is_healthy, "
                 "baseline_training_eligible, baseline_exclusion_reason, "
                 "baseline_house_consumption_w, ev_power_w, ev_source "
+                ", ev_charging_active, ev_session_id "
                 "FROM observations WHERE slot_utc >= ? AND slot_utc <= ? "
                 "ORDER BY slot_utc",
                 (cutoff.isoformat(), end.isoformat()),

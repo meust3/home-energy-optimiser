@@ -274,7 +274,25 @@ python tools/reprocess_observations.py --apply
 Dry-run is the default. Apply updates derived columns only and appends auditable
 derivation history; raw telemetry is never changed. Identical reruns are idempotent.
 
-## 12. Run validation
+## 12. Annotate historical EV sessions
+
+Annotate a known historical EV session locally (dry-run first):
+
+```powershell
+python tools/annotate_ev_session.py --start 2026-08-01T22:00:00+10:00 `
+  --end 2026-08-02T05:00:00+10:00 --session-id overnight-charge
+python tools/annotate_ev_session.py --start 2026-08-01T22:00:00+10:00 `
+  --end 2026-08-02T05:00:00+10:00 --session-id overnight-charge --apply
+python tools/annotate_ev_session.py --remove-session overnight-charge
+python tools/annotate_ev_session.py --remove-session overnight-charge --apply
+```
+
+The tool requires timezone offsets, preserves direct EV power and all raw inverter
+telemetry, never estimates missing EV power, and writes only local derived fields
+plus reversible audit records. Reserve diagnostics report excluded known sessions,
+retained direct-power rows, and remaining unidentified-contamination risk.
+
+## 13. Run validation
 
 ```powershell
 pytest

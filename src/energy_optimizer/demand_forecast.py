@@ -74,6 +74,9 @@ class DemandDiagnostics(BaseModel):
     weak_estimate_share: float = Field(ge=0, le=1)
     independent_ev_telemetry_available: bool
     ev_contamination_risk: str | None
+    known_ev_session_rows_excluded: int = Field(ge=0)
+    direct_ev_power_rows_retained: int = Field(ge=0)
+    unidentified_ev_contamination_risk: bool
     same_partial_day_samples_excluded: int = Field(ge=0)
     future_samples_excluded: int = Field(ge=0)
     prior_forecast_mape: float | None = Field(default=None, ge=0)
@@ -306,6 +309,19 @@ def forecast_household_demand(
             else "No independent EV power telemetry in eligible history; household "
             "demand may contain unidentified EV charging."
         ),
+        known_ev_session_rows_excluded=sum(
+            1
+            for original in rows
+            if dict(original).get("baseline_exclusion_reason")
+            in {"known_ev_session_without_ev_power", "ev_active_power_unknown"}
+        ),
+        direct_ev_power_rows_retained=sum(
+            1
+            for original in rows
+            if dict(original).get("ev_power_w") is not None
+            and bool(dict(original).get("baseline_training_eligible"))
+        ),
+        unidentified_ev_contamination_risk=not independent_ev,
         same_partial_day_samples_excluded=same_day_excluded,
         future_samples_excluded=future_excluded,
         prior_forecast_mape=prior_forecast_mape,

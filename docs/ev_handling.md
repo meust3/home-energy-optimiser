@@ -18,3 +18,12 @@ Suggested future helpers, documented but not automatically created:
 - `input_boolean.energy_optimizer_ev_expected`
 - `input_number.energy_optimizer_ev_required_kwh`
 - `input_datetime.energy_optimizer_ev_ready_by`
+
+Historical sessions can be marked locally with `tools/annotate_ev_session.py`.
+Timezone-aware start/end values select an inclusive UTC-normalized slot range;
+preview is the default and `--apply` is required to write. A supplied session ID is
+used verbatim, otherwise a UUID-based ID is generated. Rows without exact EV power
+are excluded with `known_ev_session_without_ev_power`; no EV power is inferred.
+Existing direct power is preserved and used as `max(house - EV power, 0)` when
+telemetry quality permits. `--remove-session ID` previews or reverses a session
+from its audited prior-state snapshots. These operations affect local SQLite only.
