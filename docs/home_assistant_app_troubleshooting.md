@@ -3,8 +3,14 @@
 Startup is intentionally fail-closed. The App never creates a SQLite production
 database and never migrates PostgreSQL automatically.
 
-- **Missing/invalid option:** correct `/data/options.json` through the App UI. The
-  password is required and the port must be 1-65535.
+- **Options file not found:** confirm the App configuration was saved and restart
+  the App so Supervisor remounts `/data/options.json`.
+- **Options permission denied or unreadable:** use v0.2.1 or newer. Its root
+  bootstrap copies the root-owned `0600` file without modifying the original, then
+  runs Python as UID/GID 10001.
+- **Malformed JSON or schema validation:** correct the configuration through the
+  App UI. The password must be non-empty and the port must be 1-65535. Diagnostics
+  deliberately omit all option values.
 - **PostgreSQL connection/authentication:** verify Synology listener/firewall,
   trusted LAN routing, port 55432, `home_energy`, `energy_app`, and its grants.
 - **Schema mismatch:** back up PostgreSQL, run the reviewed Alembic upgrade from an

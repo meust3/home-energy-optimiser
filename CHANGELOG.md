@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Fixed access to Supervisor's root-owned `0600` options file by copying it into a
+  mode-`0600` ephemeral runtime location during a narrowly scoped root bootstrap.
+- Kept the Python application, collector, and health server at UID/GID 10001 after
+  bootstrap; collector, database, forecast, and read-only behaviour are unchanged.
 - Added a portable SQLite/PostgreSQL persistence architecture and completed the
   application-wide repository refactor.
 - Added production PostgreSQL cutover, adoption, validation, backup, and recovery

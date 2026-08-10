@@ -1,5 +1,5 @@
 name: Home Energy Optimiser
-version: "0.2.0"
+version: "0.2.1"
 slug: home_energy_optimiser
 description: Read-only five-minute energy collector for external PostgreSQL
 url: https://github.com/meust3/home-energy-optimiser

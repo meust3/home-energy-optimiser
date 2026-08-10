@@ -20,8 +20,11 @@ from energy_optimizer.home_assistant import HomeAssistantClient, redact_secret
 from energy_optimizer.persistence import ApplicationRepository, open_repository
 
 SUPERVISOR_CORE_API_URL = "http://supervisor/core/api"
-APP_VERSION = "0.2.0"
+APP_VERSION = "0.2.1"
 HEALTH_PORT = 8099
+OPTIONS_PATH_ENV = "HOME_ENERGY_APP_OPTIONS_PATH"
+SUPERVISOR_OPTIONS_PATH = Path("/data/options.json")
+EPHEMERAL_OPTIONS_PATH = Path("/run/home-energy-optimiser/options.json")
 
 
 class HomeAssistantAppOptions(BaseModel):
@@ -37,19 +40,54 @@ class HomeAssistantAppOptions(BaseModel):
 
 
 def load_app_options(
-    path: Path = Path("/data/options.json"),
+    path: Path | None = None,
 ) -> HomeAssistantAppOptions:
-    """Read App options without reproducing secrets in validation errors."""
+    """Read App options, report safe failure classes, and remove runtime copies."""
+    options_path = path or Path(
+        os.getenv(OPTIONS_PATH_ENV, str(SUPERVISOR_OPTIONS_PATH))
+    )
     try:
-        payload = json.loads(path.read_text(encoding="utf-8"))
-        options = HomeAssistantAppOptions.model_validate(payload)
-    except (OSError, json.JSONDecodeError, ValidationError):
+        raw_options = options_path.read_text(encoding="utf-8")
+    except FileNotFoundError:
         raise ConfigurationError(
-            "Invalid Home Assistant App configuration; check required database "
-            "options (secret values are not shown)"
+            "Unable to read Home Assistant App options file: file not found"
         ) from None
+    except PermissionError:
+        raise ConfigurationError(
+            "Unable to read Home Assistant App options file: permission denied"
+        ) from None
+    except OSError:
+        raise ConfigurationError(
+            "Unable to read Home Assistant App options file: operating system error"
+        ) from None
+
+    try:
+        payload = json.loads(raw_options)
+    except json.JSONDecodeError:
+        raise ConfigurationError(
+            "Home Assistant App options contain malformed JSON"
+        ) from None
+
+    try:
+        options = HomeAssistantAppOptions.model_validate(payload)
+    except ValidationError:
+        raise ConfigurationError(
+            "Home Assistant App options failed schema validation"
+        ) from None
+
     if not options.db_password.get_secret_value():
-        raise ConfigurationError("db_password is required")
+        raise ConfigurationError(
+            "Home Assistant App options require a non-empty database password"
+        )
+
+    if options_path == EPHEMERAL_OPTIONS_PATH:
+        try:
+            options_path.unlink()
+        except OSError:
+            raise ConfigurationError(
+                "Home Assistant App options loaded but the ephemeral copy could "
+                "not be removed"
+            ) from None
     return options
 
 

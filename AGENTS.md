@@ -28,10 +28,11 @@ migration and an end-to-end live observation write have been manually validated.
 SQLite remains supported for local/offline development and as the retained final
 pre-migration backup; it is not a production fallback.
 
-The Home Assistant App package is a release candidate for the amd64 Home Assistant
-OS NUC. It has not yet been installed or proven in that environment. Independent EV
-telemetry is not yet integrated, so EV charging may reduce load-forecast and reserve
-estimate confidence.
+Home Assistant App v0.2.0 was installed on the amd64 Home Assistant OS 18.1 NUC but
+could not read Supervisor's root-owned `0600` options file. Version 0.2.1 is the
+least-privilege startup patch candidate; it has not yet completed an operational
+collection cycle on HAOS. Independent EV telemetry is not yet integrated, so EV
+charging may reduce load-forecast and reserve estimate confidence.
 
 ## Architecture
 

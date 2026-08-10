@@ -1,7 +1,7 @@
 FROM python:3.12.11-slim-bookworm
 
-ARG BUILD_VERSION=0.2.0
-ARG APP_SOURCE_REF=v0.2.0
+ARG BUILD_VERSION=0.2.1
+ARG APP_SOURCE_REF=v0.2.1
 
 LABEL io.hass.name="Home Energy Optimiser" \
       io.hass.description="Read-only Home Assistant energy collector" \
@@ -14,7 +14,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PIP_NO_CACHE_DIR=1
 
 RUN apt-get update \
-    && apt-get install --no-install-recommends --yes ca-certificates curl \
+    && apt-get install --no-install-recommends --yes ca-certificates curl gosu \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /opt/home-energy-optimiser
@@ -32,8 +32,12 @@ RUN curl --fail --location --silent --show-error \
     && apt-get purge --auto-remove --yes curl \
     && rm -rf /root/.cache
 
-RUN useradd --uid 10001 --create-home --shell /usr/sbin/nologin app
+RUN groupadd --gid 10001 app \
+    && useradd --uid 10001 --gid 10001 --create-home \
+      --shell /usr/sbin/nologin app
 
 EXPOSE 8099
-USER 10001:10001
+# Supervisor mounts /data/options.json as root:root 0600. The entrypoint performs
+# one narrowly scoped root bootstrap, then execs the application through gosu.
+USER 0:0
 ENTRYPOINT ["/opt/home-energy-optimiser/home_energy_optimiser/run.sh"]

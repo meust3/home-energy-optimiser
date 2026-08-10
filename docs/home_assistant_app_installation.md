@@ -1,17 +1,18 @@
 # Home Assistant App installation
 
-These are release-candidate instructions. The App has not yet completed its first
-installation and operational validation on the real HAOS NUC, and version `0.2.0`
-has not been tagged or published.
+Version `0.2.0` was installed on Home Assistant OS 18.1 but failed before collection
+because it could not read Supervisor's root-owned `0600` options file. Version
+`0.2.1` fixes that least-privilege bootstrap boundary and is awaiting validation on
+the same host.
 
 ## Publish and install
 
 The repository root contains `repository.yaml` and one App folder,
 `home_energy_optimiser/`, so the GitHub repository can be added directly.
 
-1. After review, push the release-candidate commit and validate a full image build.
+1. After review, push the patch commit and validate a full image build.
 2. Create the immutable tag matching `config.yaml` and the Docker
-   `APP_SOURCE_REF` (planned as `v0.2.0`).
+   `APP_SOURCE_REF` (`v0.2.1`).
 3. In Home Assistant, open **Settings > Apps > App store**.
 4. Open the repository menu, choose **Repositories**, and add
    `https://github.com/meust3/home-energy-optimiser`.
@@ -60,9 +61,23 @@ For an amd64 build test from a committed/pushed ref:
 docker build --platform linux/amd64 `
   --build-arg APP_SOURCE_REF=<git-tag-or-commit> `
   --build-arg BUILD_VERSION=<version> `
+  --tag home-energy-optimiser:<version> `
   home_energy_optimiser
+python tools/test_home_assistant_app_container.py `
+  --image home-energy-optimiser:<version> --use-image-files
 ```
 
 The Dockerfile downloads the canonical application source because Supervisor
 builds with the App folder as its context; this avoids duplicating collector code
 inside the deployment wrapper.
+
+For the installed v0.2.0 App, publish and apply v0.2.1 as follows:
+
+1. Push the reviewed patch commit, create and push tag `v0.2.1`, and verify an amd64
+   image build from that tag.
+2. In **Settings > Apps > App store**, choose **Check for updates** or **Update
+   information** from the repository menu.
+3. Open **Home Energy Optimiser**, confirm version `0.2.1` is offered, and select
+   **Update**. Preserve the existing App configuration.
+4. Start the App if Supervisor does not start it automatically, then verify the
+   startup and first collection using the checklist above.

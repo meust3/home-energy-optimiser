@@ -23,12 +23,14 @@ bearer token for `http://supervisor/core/api`. The existing GET-only client and
 collector are unchanged. Observations are written over the LAN to the external
 Synology PostgreSQL 17 `home_energy` database as `energy_app`.
 
-The deployment wrapper reads `/data/options.json`, constructs one URL-encoded
-PostgreSQL URL, performs explicit database revision/readiness and Home Assistant
-entity checks, starts a small internal health server, then executes the existing
-five-minute collector. Supervisor owns boot, watchdog, restart, and shutdown. No
-cron process, nested restart loop, SQLite production database, or device-control
-layer exists in the App.
+The deployment wrapper copies root-owned `/data/options.json` to a mode-`0600`
+ephemeral file during a minimal root bootstrap, then drops to UID/GID 10001 before
+Python parses and removes the copy. It constructs one URL-encoded PostgreSQL URL,
+performs explicit database revision/readiness and Home Assistant entity checks,
+starts a small internal health server, then executes the existing five-minute
+collector. Supervisor owns boot, watchdog, restart, and shutdown. No cron process,
+nested restart loop, SQLite production database, or device-control layer exists in
+the App.
 
 Health has independent telemetry, price, solar, and optional weather domains. The
 overall display summary currently derives from telemetry because Phase 1 observation

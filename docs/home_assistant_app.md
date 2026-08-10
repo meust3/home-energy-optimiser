@@ -1,9 +1,11 @@
 # Home Assistant App design
 
 Home Energy Optimiser is packaged as a Home Assistant App (formerly called an
-add-on) without changing collector business logic. This is release-candidate
-packaging: it has not yet been installed or proven operational on the real Home
-Assistant OS NUC.
+add-on) without changing collector business logic. Version 0.2.0 was installed on
+the amd64 Home Assistant OS 18.1 NUC but stopped before collection because its
+unprivileged entrypoint could not read Supervisor's root-owned `0600` options file.
+Version 0.2.1 is the narrowly scoped startup patch candidate and has not yet
+completed live collection on that host.
 
 ```text
 Home Assistant Core
@@ -29,9 +31,17 @@ or elevated Linux capabilities. Port 8099 is internal and used by Supervisor onl
 
 ## Startup and runtime
 
-The Python launcher reads Supervisor-managed `/data/options.json`; validates host,
-port, database, username, password, timezone, and health settings; URL-encodes the
-credential components; and exports one explicit `DATABASE_URL`. It then verifies:
+The container entrypoint starts as root solely to read Supervisor-managed
+`/data/options.json`. It creates `/run/home-energy-optimiser`, copies the options to
+`options.json`, assigns that copy to `app:app` with mode `0600`, and exports its path
+as `HOME_ENERGY_APP_OPTIONS_PATH`. It never modifies, changes ownership or mode of,
+or deletes the original `/data/options.json`.
+
+The entrypoint then uses `exec gosu app:app` to run Python as UID/GID 10001 while
+preserving Supervisor's runtime environment. Python validates host, port, database,
+username, password, timezone, and health settings, then immediately unlinks the
+ephemeral copy after successful parsing. It URL-encodes the credential components
+and exports one explicit `DATABASE_URL`. It then verifies:
 
 1. the URL is PostgreSQL, never SQLite;
 2. PostgreSQL connectivity and authentication;
@@ -46,7 +56,8 @@ existing collector. Writes retain bounded retry, transaction rollback, and
 duplicate-slot protection. Supervisor owns crash restart; there is no shell restart
 loop or cron.
 
-`SIGTERM` and `SIGINT` set an interruptible stop event. No new collection starts,
+Because both the shell and `gosu` use `exec`, `SIGTERM` and `SIGINT` reach Python.
+They set an interruptible stop event. No new collection starts,
 an active call/transaction is allowed to return or roll back, database resources
 close in `finally`, and the process exits.
 
@@ -64,11 +75,12 @@ potentially tradable energy. This release creates no Home Assistant entities.
 ## Image and data ownership
 
 The amd64 image uses an explicit Python 3.12 slim base, installs only project
-runtime dependencies from `pyproject.toml`, and executes `run.sh`, which uses
-`exec python tools/run_home_assistant_app.py`. `.git`, `.env`, SQLite files, caches,
+runtime dependencies from `pyproject.toml`, and executes `run.sh`, which performs
+the options bootstrap and then uses `exec gosu app:app python`. `.git`, `.env`, SQLite files, caches,
 tests, logs, and local exports are excluded. `/data` contains Supervisor options,
 not the production datastore.
-The runtime process uses an unprivileged UID. The health server binds to the
+Only the short file-preparation bootstrap runs as root. The Python application,
+collector, and health server run as unprivileged UID/GID 10001. The health server binds to the
 container interface because Supervisor's watchdog must reach `[HOST]`; its port has
 no host publication and exposes only non-secret status JSON on the internal App
 network.

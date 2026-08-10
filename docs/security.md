@@ -37,11 +37,15 @@ and exception redaction and never prints an unredacted URL. Use `energy_app`,
 `energy_dev`, and `energy_readonly` under least privilege. PostgreSQL must remain on
 trusted LAN/Tailscale rather than the public internet.
 
-App database options are read once from Supervisor-managed `/data/options.json`.
-The password is represented as a secret, URL-encoded during connection-string
-construction, and redacted from errors. Startup fails closed on PostgreSQL or
-schema failure and cannot select SQLite. External PostgreSQL backups remain the
-operator's responsibility and are not included in Home Assistant App backups.
+Supervisor mounts App options as root-owned `/data/options.json` with mode `0600`.
+A narrowly scoped root entrypoint copies it to an `app:app`, mode-`0600` file under
+`/run`, then uses `exec gosu` to run Python, the collector, and health server as
+UID/GID 10001. Python removes the ephemeral copy after successful parsing; the
+original Supervisor file is never modified or deleted. The password is represented
+as a secret, URL-encoded during connection-string construction, and redacted from
+errors. Startup fails closed on PostgreSQL or schema failure and cannot select
+SQLite. External PostgreSQL backups remain the operator's responsibility and are
+not included in Home Assistant App backups.
 
 The local database can reveal occupancy patterns, energy use, and household
 behavior. Keep it private, protect backups, and share only deliberately sanitized

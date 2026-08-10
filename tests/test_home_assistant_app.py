@@ -8,11 +8,13 @@ from types import SimpleNamespace
 
 import pytest
 
+import energy_optimizer.home_assistant_app as app_module
 from energy_optimizer.config import ConfigurationError, load_config
 from energy_optimizer.db.engine import DatabaseConnectionError
 from energy_optimizer.db.redaction import redact_database_urls
 from energy_optimizer.home_assistant import HomeAssistantClient
 from energy_optimizer.home_assistant_app import (
+    APP_VERSION,
     SUPERVISOR_CORE_API_URL,
     AppHealth,
     HomeAssistantAppOptions,
@@ -62,8 +64,74 @@ def test_app_configuration_parsing(tmp_path):
 def test_missing_database_password_rejects_startup(tmp_path):
     path = tmp_path / "options.json"
     path.write_text(json.dumps({"db_host": "nas.local"}), encoding="utf-8")
-    with pytest.raises(ConfigurationError, match="secret values are not shown"):
+    with pytest.raises(ConfigurationError, match="schema validation"):
         load_app_options(path)
+
+
+def test_empty_database_password_rejects_startup(tmp_path):
+    path = tmp_path / "options.json"
+    path.write_text(
+        json.dumps({"db_host": "nas.local", "db_password": ""}), encoding="utf-8"
+    )
+    with pytest.raises(ConfigurationError, match="non-empty database password"):
+        load_app_options(path)
+
+
+def test_options_permission_denied_has_secret_safe_diagnostic(monkeypatch, tmp_path):
+    path = tmp_path / "options.json"
+    password = "permission-test-password"
+
+    def deny_read(_self, **_kwargs):
+        raise PermissionError("denied while reading " + password)
+
+    monkeypatch.setattr(Path, "read_text", deny_read)
+    with pytest.raises(ConfigurationError, match="permission denied") as raised:
+        load_app_options(path)
+    assert password not in str(raised.value)
+
+
+def test_missing_options_file_has_specific_diagnostic(tmp_path):
+    with pytest.raises(ConfigurationError, match="file not found"):
+        load_app_options(tmp_path / "missing.json")
+
+
+def test_malformed_options_json_has_specific_secret_safe_diagnostic(tmp_path):
+    path = tmp_path / "options.json"
+    secret_fragment = "malformed-secret"
+    path.write_text('{"db_password":"' + secret_fragment, encoding="utf-8")
+    with pytest.raises(ConfigurationError, match="malformed JSON") as raised:
+        load_app_options(path)
+    assert secret_fragment not in str(raised.value)
+
+
+def test_options_path_environment_override(monkeypatch, tmp_path):
+    path = tmp_path / "overridden-options.json"
+    path.write_text(json.dumps(_options().model_dump(mode="json")), encoding="utf-8")
+    monkeypatch.setenv("HOME_ENERGY_APP_OPTIONS_PATH", str(path))
+    loaded = load_app_options()
+    assert loaded.db_host == "db.example.invalid"
+    assert path.exists()
+
+
+def test_ephemeral_options_copy_is_deleted_after_parsing(monkeypatch, tmp_path):
+    path = tmp_path / "runtime" / "options.json"
+    path.parent.mkdir()
+    path.write_text(json.dumps(_options().model_dump(mode="json")), encoding="utf-8")
+    monkeypatch.setattr(app_module, "EPHEMERAL_OPTIONS_PATH", path)
+    monkeypatch.setenv("HOME_ENERGY_APP_OPTIONS_PATH", str(path))
+    loaded = load_app_options()
+    assert loaded.db_user == "test_user"
+    assert not path.exists()
+
+
+def test_supervisor_options_file_is_never_deleted(monkeypatch, tmp_path):
+    path = tmp_path / "data" / "options.json"
+    path.parent.mkdir()
+    path.write_text(json.dumps(_options().model_dump(mode="json")), encoding="utf-8")
+    monkeypatch.setattr(app_module, "SUPERVISOR_OPTIONS_PATH", path)
+    monkeypatch.delenv("HOME_ENERGY_APP_OPTIONS_PATH", raising=False)
+    load_app_options()
+    assert path.exists()
 
 
 def test_invalid_database_port_rejects_startup():
@@ -330,10 +398,40 @@ def test_app_manifest_uses_least_privilege_and_watchdog():
         assert forbidden not in manifest
 
 
+def test_app_patch_versions_are_consistent():
+    manifest = Path("home_energy_optimiser/config.yaml").read_text(encoding="utf-8")
+    dockerfile = Path("home_energy_optimiser/Dockerfile").read_text(encoding="utf-8")
+    project = Path("pyproject.toml").read_text(encoding="utf-8")
+    assert APP_VERSION == "0.2.1"
+    assert 'version: "0.2.1"' in manifest
+    assert "ARG BUILD_VERSION=0.2.1" in dockerfile
+    assert "ARG APP_SOURCE_REF=v0.2.1" in dockerfile
+    assert 'version = "0.2.1"' in project
+
+
 def test_app_launcher_execs_existing_collector_without_restart_loop():
     launcher = Path("home_energy_optimiser/run.sh").read_text(encoding="utf-8")
-    assert "exec python tools/run_home_assistant_app.py" in launcher
+    assert "exec gosu app:app python tools/run_home_assistant_app.py" in launcher
+    assert 'export HOME_ENERGY_APP_OPTIONS_PATH="${runtime_options}"' in launcher
     assert "while" not in launcher
+
+
+def test_app_bootstrap_copies_options_without_modifying_supervisor_file():
+    launcher = Path("home_energy_optimiser/run.sh").read_text(encoding="utf-8")
+    assert 'source_options="/data/options.json"' in launcher
+    assert 'runtime_options="${runtime_dir}/options.json"' in launcher
+    assert 'install -o app -g app -m 0600 "${source_options}"' in launcher
+    assert "chmod" not in launcher
+    assert "chown" not in launcher
+    assert 'rm -f -- "${source_options}"' not in launcher
+
+
+def test_privilege_drop_preserves_environment_and_exec_signal_delivery():
+    launcher = Path("home_energy_optimiser/run.sh").read_text(encoding="utf-8")
+    assert "env -i" not in launcher
+    assert "exec su " not in launcher
+    assert 'exec gosu app:app "$@"' in launcher
+    assert "exec gosu app:app python" in launcher
 
 
 def test_dockerignore_excludes_sensitive_artifacts():
@@ -375,8 +473,11 @@ def test_root_gitignore_excludes_local_secrets_and_backups():
     assert "!.env.example" in ignored
 
 
-def test_docker_image_uses_unprivileged_runtime_user():
+def test_docker_image_uses_root_only_for_bootstrap_then_drops_privileges():
     dockerfile = Path("home_energy_optimiser/Dockerfile").read_text(encoding="utf-8")
-    assert "USER 10001:10001" in dockerfile
+    assert "gosu" in dockerfile
+    assert "groupadd --gid 10001 app" in dockerfile
+    assert "useradd --uid 10001 --gid 10001" in dockerfile
+    assert "USER 0:0" in dockerfile
     assert "SUPERVISOR_TOKEN" not in dockerfile
     assert "DATABASE_URL" not in dockerfile

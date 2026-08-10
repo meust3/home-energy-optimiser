@@ -10,8 +10,8 @@ collects and analyses data but does not control Home Assistant or energy hardwar
 ## Current status
 
 - **PostgreSQL production:** working and manually validated end to end
-- **Continuous collector:** working on Windows; Home Assistant App packaging ready
-  for its first HAOS test
+- **Continuous collector:** working on Windows; App v0.2.0 installation exposed an
+  options-file permission bug, fixed in the v0.2.1 patch candidate
 - **Reserve forecasting:** working and advisory
 - **Solar and price forecasts:** Solcast and Amber Electric integrated
 - **EV telemetry:** not yet independently integrated
@@ -19,8 +19,11 @@ collects and analyses data but does not control Home Assistant or energy hardwar
 
 PostgreSQL 17 on the Synology NAS is the canonical production source of truth. The
 SQLite-to-PostgreSQL migration and exact validation are complete. The Home
-Assistant App (formerly called an add-on) is a release candidate; it has not yet
-been installed or proven operational on the Home Assistant OS NUC.
+Assistant App (formerly called an add-on) has been installed on Home Assistant OS
+18.1, but v0.2.0 stopped before collection because Supervisor's root-owned options
+file was unreadable by its unprivileged entrypoint. Version 0.2.1 retains an
+unprivileged application process and fixes that bootstrap boundary. It has not yet
+completed live collection on the NUC.
 
 Forecast confidence can remain medium or low while household history is limited,
 and EV charging may still be embedded in historical household demand.
@@ -107,8 +110,8 @@ The amd64 Home Assistant App deployment wrapper:
 - runs the existing five-minute collector as an unprivileged process;
 - exposes a non-secret health endpoint for Supervisor watchdog checks.
 
-The package is ready for release-candidate testing but has not completed live HAOS
-validation. See:
+Version 0.2.1 is ready for patch validation but has not completed live collection
+on HAOS. See:
 
 - [App design](docs/home_assistant_app.md)
 - [Installation](docs/home_assistant_app_installation.md)
