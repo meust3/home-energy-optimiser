@@ -4,15 +4,14 @@ import argparse
 
 from rich.console import Console
 
-from energy_optimizer.config import load_database_path
-from energy_optimizer.historian import Historian
+from energy_optimizer.persistence import open_repository
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("run_id", type=int)
     args = parser.parse_args()
-    metrics = Historian(load_database_path()).compare_forecast_run(args.run_id)
+    metrics = open_repository().compare_forecast_run(args.run_id)
     Console().print_json(data=metrics)
     return 0
 

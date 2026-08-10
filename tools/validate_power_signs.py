@@ -6,10 +6,11 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
-from energy_optimizer.config import load_database_path, load_timezone_name
-from energy_optimizer.historian import Historian
+from energy_optimizer.config import load_timezone_name
+from energy_optimizer.persistence import open_repository
 from energy_optimizer.power_signs import analyze_power_signs
 from energy_optimizer.time_ranges import parse_range_value, resolve_history_range
+from energy_optimizer.timestamps import compact_timestamp, json_safe
 
 
 def _metric(value: object, suffix: str = "") -> str:
@@ -19,8 +20,8 @@ def _metric(value: object, suffix: str = "") -> str:
 def _example_label(example: dict[str, object] | None) -> str:
     if not example:
         return "N/A"
-    slot = str(example.get("slot_utc") or "unknown slot")
-    return f"{slot[:16]} ({_metric(example.get('residual_w'), ' W')})"
+    slot = compact_timestamp(example.get("slot_utc"))
+    return f"{slot} ({_metric(example.get('residual_w'), ' W')})"
 
 
 def main() -> int:
@@ -50,11 +51,11 @@ def main() -> int:
         parser.error(str(exc))
     if start and end and end < start:
         parser.error("--end must not be before --start")
-    historian = Historian(load_database_path())
+    historian = open_repository()
     result = analyze_power_signs(historian.power_sign_samples(start=start, end=end))
     console = Console()
     if args.json:
-        console.print_json(data=result)
+        console.print_json(data=json_safe(result))
         return 0
     console.print(
         Panel(

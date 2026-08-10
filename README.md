@@ -1,7 +1,7 @@
 # Home Energy Optimiser
 
 Phase 1 is a strictly read-only collector for Home Assistant, Amber Electric,
-Solcast, and GoodWe telemetry. It stores five-minute observations in local SQLite,
+Solcast, and GoodWe telemetry. It stores five-minute observations in SQLite or PostgreSQL,
 checks data quality, and builds a simple historical household load profile. It
 cannot issue a Home Assistant service call or hardware command.
 
@@ -15,7 +15,7 @@ Create `.env` in the repository root (it is ignored by Git):
 HA_URL=http://homeassistant.local:8123
 HA_TOKEN=replace-with-a-long-lived-access-token
 TIMEZONE=Australia/Brisbane
-DATABASE_PATH=data/energy_history.db
+DATABASE_URL=sqlite:///data/energy_history.db
 COLLECTION_INTERVAL_SECONDS=300
 USABLE_BATTERY_CAPACITY_KWH=40
 MAXIMUM_PLAUSIBLE_INVERTER_POWER_W=15000
@@ -101,7 +101,10 @@ python tools/collect_observation.py
 python tools/collect_observation.py --json
 ```
 
-The default database is `data/energy_history.db`. Repeating collection in the same
+`DATABASE_URL` selects one backend for the entire process: collector, inspection,
+reserve estimation, forecasts, EV annotation, reprocessing, and exports. When it is
+absent, the backward-compatible default is `sqlite:///data/energy_history.db`.
+Repeating collection in the same
 five-minute slot updates that slot rather than creating a duplicate. The first run
 after upgrading automatically adds domain-health columns without deleting existing
 observations.
@@ -127,6 +130,13 @@ It collects on clock-aligned five-minute boundaries, reconnects after transient
 read failures, and stops with Ctrl+C.
 
 ## 6. Inspect the database
+
+Verify connectivity, migration revision, counts, and integrity:
+
+```powershell
+python tools/check_database.py
+python tools/check_database.py --json
+```
 
 ```powershell
 python tools/inspect_history.py
@@ -200,7 +210,7 @@ python tools/export_forecast_comparison.py --forecast-type solar_power `
   --output data/exports/solar-comparison.csv
 ```
 
-These tools write only forecast data and comparisons to local SQLite/files. They do
+These tools write only forecast data and comparisons to the configured database/files. They do
 not make recommendations or control devices.
 
 ## 10. Estimate a battery reserve
@@ -218,8 +228,8 @@ python tools/estimate_reserve.py --score-run 123
 ```
 
 Interactive use defaults to `--source live`: one allowlisted `GET /api/states`
-collection supplies current SOC and power, while demand still comes from SQLite
-history. The live observation is not saved unless `--save-observation` is supplied.
+collection supplies current SOC and power, while demand comes from history in the
+same configured database. The live observation is not saved unless `--save-observation` is supplied.
 `--source history` uses the latest stored observation, reports its timestamp and
 age, and warns when it is older than ten minutes. `--as-of` provides deterministic
 history replay and must include a timezone offset.

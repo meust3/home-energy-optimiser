@@ -7,8 +7,9 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
-from energy_optimizer.config import load_database_path, load_sign_settings
-from energy_optimizer.historian import Historian
+from energy_optimizer.config import load_sign_settings
+from energy_optimizer.persistence import open_repository
+from energy_optimizer.timestamps import compact_timestamp, json_safe, terminal_value
 
 FLOW_COLUMNS = (
     "slot_utc",
@@ -31,6 +32,10 @@ FLOW_COLUMNS = (
 )
 
 
+def _slot_label(value: object) -> str:
+    return compact_timestamp(value)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--days", type=int, help="Inspect this many recent days")
@@ -42,14 +47,12 @@ def main() -> int:
     if args.limit <= 0:
         parser.error("--limit must be positive")
     start = datetime.now(UTC) - timedelta(days=args.days) if args.days else None
-    rows = Historian(load_database_path()).observation_rows(
-        start=start, columns=FLOW_COLUMNS
-    )
+    rows = open_repository().observation_rows(start=start, columns=FLOW_COLUMNS)
     rows = rows[-args.limit :]
     console = Console()
     if args.json:
         console.print_json(
-            data={"configured_signs": load_sign_settings(), "rows": rows}
+            data=json_safe({"configured_signs": load_sign_settings(), "rows": rows})
         )
         return 0
     settings = load_sign_settings()
@@ -84,7 +87,7 @@ def main() -> int:
         table.add_column(heading)
     for row in reversed(rows):
         table.add_row(
-            row["slot_utc"][5:16].replace("T", " "),
+            _slot_label(row["slot_utc"]),
             _value(row["pv_power_w"]),
             _value(row["house_consumption_w"]),
             _value(row["grid_power_w"]),
@@ -98,7 +101,7 @@ def main() -> int:
             _value(row["ev_power_w"]),
             _value(row["baseline_house_consumption_w"]),
             "yes" if row["baseline_training_eligible"] else "no",
-            row["event_labels_json"],
+            terminal_value(row["event_labels_json"]),
         )
     console.print(table)
     console.print("Read-only inspection complete. Stored values were not modified.")

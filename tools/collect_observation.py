@@ -7,9 +7,9 @@ from rich.table import Table
 
 from energy_optimizer.collector import Collector
 from energy_optimizer.config import load_config
-from energy_optimizer.historian import Historian
 from energy_optimizer.home_assistant import HomeAssistantClient
 from energy_optimizer.models import HealthDomain
+from energy_optimizer.persistence import ObservationStore
 
 
 def _health_label(domain: HealthDomain) -> str:
@@ -30,13 +30,18 @@ def main() -> int:
     ) as client:
         observation = Collector(client, config).collect()
     if not args.no_save:
-        Historian(config.database_path).save(observation)
+        store = ObservationStore()
+        try:
+            duplicate_result = store.save(observation)
+        finally:
+            store.close()
     console = Console()
     if args.json:
         console.print_json(
             data={
                 **observation.model_dump(mode="json"),
                 "saved": not args.no_save,
+                "duplicate_result": duplicate_result if not args.no_save else None,
                 "command_issued": False,
             }
         )
@@ -77,6 +82,7 @@ def main() -> int:
             ("EV power (W)", observation.ev_power_w),
             ("Baseline house (W)", observation.baseline_house_consumption_w),
             ("Saved", not args.no_save),
+            ("Duplicate result", duplicate_result if not args.no_save else "not_saved"),
         ):
             table.add_row(label, "missing" if value is None else str(value))
         console.print(table)

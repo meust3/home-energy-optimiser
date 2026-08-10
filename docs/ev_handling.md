@@ -1,5 +1,10 @@
 # EV handling
 
+Manual session annotation, reversal, prior-state snapshots, and audit records use
+the configured repository backend selected by `DATABASE_URL`. Annotation and
+reversal are single transactions on both SQLite and PostgreSQL; raw telemetry and
+direct EV power are preserved.
+
 All EV entities are optional and read-only. Direct charging-active and power sensors
 are preferred. Required-energy and ready-by helpers provide future planning context
 but are never created or changed by this project.

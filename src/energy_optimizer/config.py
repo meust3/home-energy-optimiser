@@ -112,6 +112,10 @@ def load_config(env_file: Path | None = Path(".env")) -> CollectorConfig:
         reserve_recent_days=int(os.getenv("RESERVE_RECENT_DAYS", "7")),
         reserve_max_horizon_hours=int(os.getenv("RESERVE_MAX_HORIZON_HOURS", "24")),
         reserve_uncertainty_ratio=float(os.getenv("RESERVE_UNCERTAINTY_RATIO", "0.20")),
+        battery_charge_efficiency=float(os.getenv("BATTERY_CHARGE_EFFICIENCY", "0.95")),
+        reserve_max_charge_power_w=float(
+            os.getenv("RESERVE_MAX_CHARGE_POWER_W", "9999")
+        ),
         reserve_fallback_mode=os.getenv("RESERVE_FALLBACK_MODE", "banded"),
         reserve_fallback_overnight_kw=float(
             os.getenv("RESERVE_FALLBACK_OVERNIGHT_KW", "2.0")
@@ -174,6 +178,17 @@ def load_database_path(env_file: Path | None = Path(".env")) -> Path:
     return Path(os.getenv("DATABASE_PATH", "data/energy_history.db"))
 
 
+def load_database_url(env_file: Path | None = Path(".env")) -> str:
+    """Load the canonical database URL, retaining the historical path fallback."""
+    if env_file is not None:
+        load_dotenv(dotenv_path=env_file, override=False)
+    configured = os.getenv("DATABASE_URL", "").strip()
+    if configured:
+        return configured
+    path = Path(os.getenv("DATABASE_PATH", "data/energy_history.db"))
+    return f"sqlite:///{path.as_posix()}"
+
+
 def load_timezone_name(env_file: Path | None = Path(".env")) -> str:
     """Load the configured local timezone without requiring HA credentials."""
     if env_file is not None:
@@ -212,6 +227,10 @@ def load_reserve_config(env_file: Path | None = Path(".env")) -> CollectorConfig
         reserve_recent_days=int(os.getenv("RESERVE_RECENT_DAYS", "7")),
         reserve_max_horizon_hours=int(os.getenv("RESERVE_MAX_HORIZON_HOURS", "24")),
         reserve_uncertainty_ratio=float(os.getenv("RESERVE_UNCERTAINTY_RATIO", "0.20")),
+        battery_charge_efficiency=float(os.getenv("BATTERY_CHARGE_EFFICIENCY", "0.95")),
+        reserve_max_charge_power_w=float(
+            os.getenv("RESERVE_MAX_CHARGE_POWER_W", "9999")
+        ),
         reserve_fallback_mode=os.getenv("RESERVE_FALLBACK_MODE", "banded"),
         reserve_fallback_overnight_kw=float(
             os.getenv("RESERVE_FALLBACK_OVERNIGHT_KW", "2.0")

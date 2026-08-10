@@ -8,7 +8,9 @@ profile. It does not contain an optimiser or executor.
 collection. `Collector` parses the selected Amber, Solcast, and GoodWe entities,
 evaluates domain-specific health, and creates one timezone-aware
 `EnergyObservation` aligned to a five-minute UTC slot. `Historian` persists that
-observation in SQLite. CLI programs only assemble these reusable components.
+observation through a shared persistence layer backed by SQLite or PostgreSQL.
+SQLAlchemy models and Alembic migrations define the portable schema. CLI programs
+only assemble these reusable components.
 
 Health has independent telemetry, price, solar, and optional weather domains. The
 overall display summary currently derives from telemetry because Phase 1 observation

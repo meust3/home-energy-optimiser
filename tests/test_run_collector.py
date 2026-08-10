@@ -27,3 +27,19 @@ def test_keyboard_interrupt_propagates_for_clean_main_handling():
         pass
     else:
         raise AssertionError("KeyboardInterrupt did not propagate")
+
+
+def test_database_connection_retry_is_bounded():
+    module = load_tool()
+    attempts = []
+    delays = []
+
+    def save():
+        attempts.append(1)
+        if len(attempts) < 3:
+            raise module.DatabaseConnectionError("temporary")
+        return "saved"
+
+    assert module.save_with_retry(save, sleep=delays.append) == "saved"
+    assert len(attempts) == 3
+    assert delays == [1, 2]

@@ -195,9 +195,13 @@ Each observation should include, where available:
 - weather condition when configured
 - data-health status
 
-Store data locally in SQLite:
+Store data through the shared persistence layer. SQLite remains the local/offline
+fallback and PostgreSQL supports production/shared access:
 
 - data/energy_history.db
+
+`DATABASE_URL` is canonical and must be redacted in all output. Alembic is the
+canonical deployed-schema migration framework.
 
 Do not commit the database.
 
@@ -361,5 +365,6 @@ must never be controlled or created by this project. Baseline household demand m
 subtract direct EV power, but inferred EV power must never be silently subtracted.
 Ambiguous inferred sessions are excluded from baseline training.
 
-Forecast runs and projected-vs-actual points may be stored in local SQLite. Forecast
+Forecast runs and projected-vs-actual points are stored in the database selected by
+`DATABASE_URL`. Forecast
 storage and comparison are analytical only and must not trigger device actions.

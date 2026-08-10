@@ -4,10 +4,11 @@ import argparse
 import json
 from pathlib import Path
 
-from energy_optimizer.config import load_database_path, load_timezone_name
+from energy_optimizer.config import load_timezone_name
 from energy_optimizer.exporting import export_rows_to_csv
-from energy_optimizer.historian import Historian
+from energy_optimizer.persistence import open_repository
 from energy_optimizer.time_ranges import parse_range_value
+from energy_optimizer.timestamps import json_safe
 
 
 def main() -> int:
@@ -32,12 +33,12 @@ def main() -> int:
         )
     except ValueError as exc:
         parser.error(str(exc))
-    rows = Historian(load_database_path()).forecast_comparison_rows(
+    rows = open_repository().forecast_comparison_rows(
         forecast_type=args.forecast_type, start=start, end=end
     )
     args.output.parent.mkdir(parents=True, exist_ok=True)
     if args.format == "json":
-        args.output.write_text(json.dumps(rows, indent=2), encoding="utf-8")
+        args.output.write_text(json.dumps(json_safe(rows), indent=2), encoding="utf-8")
     else:
         export_rows_to_csv(rows, args.output)
     return 0

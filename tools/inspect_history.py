@@ -8,8 +8,8 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
-from energy_optimizer.config import load_database_path
-from energy_optimizer.historian import Historian
+from energy_optimizer.persistence import open_repository
+from energy_optimizer.timestamps import compact_timestamp, json_safe
 
 
 def _value(value: Any) -> str:
@@ -57,7 +57,7 @@ def _period_label(period: dict[str, Any] | None) -> str:
     if not period:
         return "none"
     return (
-        f"{period['start'][:16]} -> {period['end'][:16]} "
+        f"{compact_timestamp(period['start'])} -> {compact_timestamp(period['end'])} "
         f"({period['slots']} slots / {period['minutes']} min)"
     )
 
@@ -100,7 +100,7 @@ def _render_health_summary(
 def _recent_rows(rows: list[dict[str, Any]]) -> list[dict[str, object]]:
     return [
         {
-            "utc": row["slot_utc"][5:16].replace("T", " "),
+            "utc": compact_timestamp(row["slot_utc"]),
             "soc": row["battery_soc_percent"],
             "house": (
                 row["house_consumption_w"] / 1000
@@ -132,10 +132,10 @@ def main() -> int:
         parser.error("--days must be positive")
     if args.limit <= 0:
         parser.error("--limit must be positive")
-    summary = Historian(load_database_path()).summary(days=args.days, limit=args.limit)
+    summary = open_repository().summary(days=args.days, limit=args.limit)
     console = Console()
     if args.json:
-        console.print_json(data=summary)
+        console.print_json(data=json_safe(summary))
         return 0
     console.print(
         Panel(

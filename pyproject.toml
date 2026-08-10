@@ -9,10 +9,13 @@ description = "Read-only home energy data collection and optimisation for Home A
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
+    "alembic>=1.13",
     "pydantic>=2.8",
+    "psycopg[binary]>=3.2",
     "python-dotenv>=1.0",
     "requests>=2.32",
     "rich>=13.7",
+    "SQLAlchemy>=2.0,<3",
     "tzdata>=2024.1; platform_system == 'Windows'",
 ]
 

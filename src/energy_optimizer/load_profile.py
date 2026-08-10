@@ -1,10 +1,10 @@
 """Simple, explainable weekday/five-minute household load profile."""
 
 from collections import defaultdict
-from datetime import datetime
 from typing import Any
 
 from energy_optimizer.models import LoadProfilePoint
+from energy_optimizer.timestamps import aware_datetime
 
 
 def estimate_load_profile(
@@ -12,7 +12,7 @@ def estimate_load_profile(
 ) -> list[LoadProfilePoint]:
     grouped: dict[tuple[int, int], list[float]] = defaultdict(list)
     for row in rows:
-        local = datetime.fromisoformat(row["observed_at_local"])
+        local = aware_datetime(row["observed_at_local"])
         slot = local.hour * 12 + local.minute // 5
         grouped[(local.weekday(), slot)].append(row["house_consumption_w"] / 1000)
     points: list[LoadProfilePoint] = []

@@ -9,9 +9,9 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+from energy_optimizer.db.repository import DatabaseRepository
 from energy_optimizer.energy_flow import derive_energy_flow, derive_event_labels
 from energy_optimizer.ev import calculate_baseline_load
-from energy_optimizer.historian import Historian
 from energy_optimizer.models import CollectorConfig
 
 DERIVATION_MODEL_VERSION = "energy-flow-v1"
@@ -92,7 +92,7 @@ class ReprocessingReport(BaseModel):
 
 
 def reprocess_observations(
-    historian: Historian,
+    historian: DatabaseRepository,
     config: CollectorConfig,
     *,
     apply: bool = False,
@@ -105,10 +105,18 @@ def reprocess_observations(
     results = [_derive(dict(row), config, timestamp) for row in rows]
     audit_added = 0
     if apply:
-        historian.migrate()
-        with historian.connect() as connection:
-            for result in results:
-                audit_added += _apply_result(connection, result, config, timestamp)
+        audit_added = historian.apply_reprocessing_results(
+            results,
+            model_version=DERIVATION_MODEL_VERSION,
+            conventions={
+                "grid": config.grid_power_sign_convention,
+                "battery": config.battery_power_sign_convention,
+                "confidence": config.sign_convention_confidence,
+                "supporting_samples": config.sign_convention_supporting_samples,
+            },
+            timestamp=timestamp,
+            update_columns=DERIVED_UPDATE_COLUMNS,
+        )
     residuals = [
         abs(result["derived"]["balance_residual_w"])
         for result in results
@@ -147,17 +155,12 @@ def reprocess_observations(
     )
 
 
-def _read_rows(historian: Historian) -> list[Any]:
-    with historian.connect_read_only() as connection:
-        existing = {
-            row["name"] for row in connection.execute("PRAGMA table_info(observations)")
-        }
-        columns = RAW_COLUMNS + (
-            ("originally_legacy",) if "originally_legacy" in existing else ()
-        )
-        return connection.execute(
-            f"SELECT {','.join(columns)} FROM observations ORDER BY slot_utc"
-        ).fetchall()
+def _read_rows(historian: DatabaseRepository) -> list[Any]:
+    existing = set(historian.observation_columns())
+    columns = RAW_COLUMNS + (
+        ("originally_legacy",) if "originally_legacy" in existing else ()
+    )
+    return historian.reprocessing_rows(columns)
 
 
 def _derive(
@@ -277,51 +280,6 @@ def _derive(
         "can_derive": can_derive,
         "originally_legacy": originally_legacy,
     }
-
-
-def _apply_result(
-    connection: Any,
-    result: dict[str, Any],
-    config: CollectorConfig,
-    timestamp: datetime,
-) -> int:
-    previous = {
-        name: result["original"].get(name)
-        for name in DERIVED_UPDATE_COLUMNS
-        if name in result["original"]
-    }
-    cursor = connection.execute(
-        "INSERT OR IGNORE INTO observation_derivations ("
-        "slot_utc, derived_at_utc, model_version, input_fingerprint, "
-        "conventions_json, previous_derived_json, result_derived_json, "
-        "originally_legacy) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-        (
-            result["slot_utc"],
-            timestamp.isoformat(),
-            DERIVATION_MODEL_VERSION,
-            result["fingerprint"],
-            _json(
-                {
-                    "grid": config.grid_power_sign_convention,
-                    "battery": config.battery_power_sign_convention,
-                    "confidence": config.sign_convention_confidence,
-                    "supporting_samples": config.sign_convention_supporting_samples,
-                }
-            ),
-            _json(previous),
-            _json(result["derived"]),
-            int(result["originally_legacy"]),
-        ),
-    )
-    assignments = ",".join(f"{name}=?" for name in DERIVED_UPDATE_COLUMNS)
-    connection.execute(
-        f"UPDATE observations SET {assignments} WHERE slot_utc=?",
-        (
-            *(result["derived"].get(name) for name in DERIVED_UPDATE_COLUMNS),
-            result["slot_utc"],
-        ),
-    )
-    return int(cursor.rowcount > 0)
 
 
 def _validate_conventions(config: CollectorConfig) -> None:

@@ -1,4 +1,4 @@
-"""Store one forecast run from a typed JSON document in local SQLite."""
+"""Store one forecast run in the configured database."""
 
 import argparse
 import json
@@ -6,9 +6,8 @@ from pathlib import Path
 
 from rich.console import Console
 
-from energy_optimizer.config import load_database_path
-from energy_optimizer.historian import Historian
 from energy_optimizer.models import ForecastRun
+from energy_optimizer.persistence import open_repository
 
 
 def main() -> int:
@@ -17,7 +16,7 @@ def main() -> int:
     args = parser.parse_args()
     payload = json.loads(args.input.read_text(encoding="utf-8"))
     run = ForecastRun.model_validate(payload)
-    run_id = Historian(load_database_path()).save_forecast_run(run)
+    run_id = open_repository().save_forecast_run(run)
     Console().print(f"Stored forecast run {run_id} with {len(run.points)} points.")
     return 0
 

@@ -11,7 +11,7 @@ allowlist. The package includes no control entity IDs and no executor.
 
 `HA_TOKEN` is loaded from the environment or local `.env`. Its model field is
 excluded from serialization and representation. It is never printed, logged,
-placed in test fixtures, or stored in SQLite. Network exception messages are
+placed in test fixtures, or stored in any database. Network exception messages are
 redacted before being raised.
 
 ## Ignored local files
@@ -20,6 +20,11 @@ redacted before being raised.
 `git status` before every commit and never add credentials with a force option.
 
 ## Database privacy
+
+`DATABASE_URL` may contain credentials. Diagnostic output uses safe target display
+and exception redaction and never prints an unredacted URL. Use `energy_app`,
+`energy_dev`, and `energy_readonly` under least privilege. PostgreSQL must remain on
+trusted LAN/Tailscale rather than the public internet.
 
 The local database can reveal occupancy patterns, energy use, and household
 behavior. Keep it private, protect backups, and share only deliberately sanitized

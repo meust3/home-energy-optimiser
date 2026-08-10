@@ -1,6 +1,7 @@
 # Read-only operational data model
 
-SQLite uses schema version 6 and one `observations` row per five-minute UTC slot.
+Legacy SQLite uses schema version 6; Alembic revision `20260810_01` is the
+portable SQLite/PostgreSQL baseline. There is one `observations` row per five-minute UTC slot.
 `slot_utc` is the primary key. A repeat collection for a slot uses a last-write-wins
 upsert so a newer snapshot atomically replaces an earlier snapshot without creating
 a duplicate.
@@ -22,9 +23,11 @@ The table stores:
 - the complete typed domain-health result as JSON.
 
 Missing numeric values are SQL `NULL`. Missing forecast summaries are `NULL`; known
-empty interval lists are JSON `[]`. Datetimes use ISO 8601 with UTC offsets. Boolean
-values use SQLite integers 0/1. JSON is produced by the standard library and SQL
-values are always parameterized.
+empty interval lists are JSON `[]`. Application datetimes are timezone-aware Python
+objects on both backends; SQLite persists offset-bearing ISO 8601 text and
+PostgreSQL persists `TIMESTAMPTZ`. ISO strings are produced at serialization and
+display boundaries. Boolean values use SQLite integers 0/1. JSON is produced by the
+standard library and SQL values are always parameterized.
 
 ## Domain health and scoring
 

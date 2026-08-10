@@ -231,6 +231,8 @@ class CollectorConfig(BaseModel):
     reserve_recent_days: int = Field(default=7, gt=0)
     reserve_max_horizon_hours: int = Field(default=24, gt=0)
     reserve_uncertainty_ratio: float = Field(default=0.20, ge=0)
+    battery_charge_efficiency: float = Field(default=0.95, gt=0, le=1)
+    reserve_max_charge_power_w: float = Field(default=9999.0, gt=0)
     reserve_fallback_mode: Literal["banded", "flat"] = "banded"
     reserve_fallback_overnight_kw: float = Field(default=2.0, ge=0)
     reserve_fallback_morning_kw: float = Field(default=2.5, ge=0)

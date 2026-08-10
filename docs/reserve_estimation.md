@@ -1,5 +1,77 @@
 # Battery reserve estimation
 
+## Evaluation-time semantics
+
+Live estimates use the timestamp of the freshly collected GET-only observation as
+their evaluation and forecast start time. History estimates without `--as-of` are
+deterministic snapshots: the selected latest observation timestamp is both the
+evaluation time and the reference used to discover forecast opportunities. With
+`--as-of`, the requested instant is the evaluation time and the newest observation
+at or before it supplies current state; observation age is measured at that replay
+instant. Historical state is therefore never combined silently with wall-clock
+opportunity forecasts.
+
+Demand slots retain their actual start and end boundaries, including partial
+five-minute slots. Reserve output validates slot ordering, timezone awareness,
+total duration, and integrated energy. A failed horizon makes potentially tradable
+energy unavailable and blocks manual-review readiness.
+
+## Active replenishment opportunities
+
+Opportunities are classified as `before_opportunity`, `inside_opportunity`, or
+`waiting_for_next_opportunity`. An active window no longer ends planning at a
+zero-length horizon. Planning continues through the active window to the next
+future opportunity, and the report separates expected replenishment from maximum
+physical capacity.
+
+For active solar, expected generation uses the stored remaining-today
+`estimate10_kwh` bound. This is conservative but coarse because no interval Solcast
+series is currently persisted. If that bound is absent, solar replenishment and
+sufficiency are unknown; the estimator does not invent an intraday curve. Household
+demand is subtracted before applying charge efficiency, then replenishment is
+capped by battery headroom and configured charge power.
+
+For cheap grid, maximum import and usable charging capacity are reported, but
+expected grid replenishment is zero because no automatic charging behaviour or
+command is assumed. Combined windows allocate solar first and grid only against
+remaining headroom, so the two sources cannot be double-counted. If expected
+replenishment cannot establish sufficient energy for the post-window reserve,
+potentially tradable energy is unavailable and manual-review readiness is blocked.
+
+Upcoming opportunities use the same capacity audit before they can terminate the
+reserve horizon. Candidates are evaluated chronologically, but the first candidate
+is accepted only when its expected usable replenishment covers the demand, EV
+requirement, and conservative uncertainty following that window. Cheap-grid
+capacity remains theoretical because expected automatic grid charging is zero.
+Insufficient or unknown candidates are retained in the audit, their expected
+replenishment is applied to sequential battery accounting, and planning continues
+to the next candidate. This includes a currently active but insufficient window.
+If none is sufficient, there is no effective replenishment boundary; demand is
+forecast to the full configured planning horizon and potentially tradable energy is
+unavailable.
+
+Opportunity solar generation and opportunity-period household load are calculated
+independently of demand before the opportunity. Their difference is solar surplus,
+which is then limited by charge power, charge efficiency, usable capacity, and the
+projected battery headroom at the start of the opportunity. Demand before the
+window can therefore change the headroom cap, but it cannot become forecast solar
+or solar surplus. Physical cheap-grid capacity is reported separately and expected
+grid replenishment remains zero unless a future explicit plan supplies it.
+
+The CLI distinguishes the first candidate from the effective reserve boundary and
+lists every evaluated window with maximum capacity, expected replenishment, and
+sufficiency. Partial forecast slots retain their actual duration; a short horizon
+crossing a five-minute bucket boundary can therefore contain two partial slots,
+whose durations still sum exactly to the horizon.
+
+Reserve history uses the shared forecast repository (`forecast_runs` and
+`forecast_points`) on the configured SQLite or PostgreSQL backend. It remains
+analytical and never triggers a device action.
+
+Live mode still obtains current state with allowlisted Home Assistant GET requests.
+Historical demand, prior scoring, and the newly stored forecast run all use the one
+backend selected by `DATABASE_URL`.
+
 The reserve estimator answers one advisory question: how much battery energy should
 be retained for household use before the next plausible replenishment opportunity,
 and how much appears potentially tradable? It never controls equipment and never

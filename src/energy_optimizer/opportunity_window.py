@@ -1,10 +1,11 @@
 """Find the next advisory battery-replenishment opportunity."""
 
-import json
 from datetime import datetime, time, timedelta
 from typing import Any, Literal
 
 from pydantic import BaseModel
+
+from energy_optimizer.timestamps import native_json
 
 
 class ReplenishmentOpportunity(BaseModel):
@@ -13,6 +14,11 @@ class ReplenishmentOpportunity(BaseModel):
     expected_end_local: datetime
     confidence: Literal["low", "medium", "high"]
     explanation: str
+    state: Literal[
+        "before_opportunity",
+        "inside_opportunity",
+        "waiting_for_next_opportunity",
+    ]
 
 
 def find_next_opportunity(
@@ -45,6 +51,7 @@ def find_next_opportunity(
             expected_end_local=horizon,
             confidence="low",
             explanation="No qualifying solar or cheap import window was available.",
+            state="waiting_for_next_opportunity",
         )
     candidates.sort(key=lambda item: item[0])
     start, end, kind, confidence, explanation = candidates[0]
@@ -62,6 +69,15 @@ def find_next_opportunity(
         expected_end_local=end,
         confidence=confidence,
         explanation=explanation,
+        state=(
+            "before_opportunity"
+            if now_local < start
+            else (
+                "inside_opportunity"
+                if now_local < end
+                else "waiting_for_next_opportunity"
+            )
+        ),
     )
 
 
@@ -74,7 +90,11 @@ def _solar_window(
     house = observation.get("house_consumption_w") or 0.0
     sunset = datetime.combine(now_local.date(), time(17, 30), now_local.tzinfo)
     if remaining is not None and remaining >= threshold_kwh and now_local < sunset:
-        start = now_local if pv > house else min(now_local + timedelta(hours=1), sunset)
+        start = (
+            datetime.combine(now_local.date(), time(7), now_local.tzinfo)
+            if pv > house
+            else min(now_local + timedelta(hours=1), sunset)
+        )
         return (
             start,
             sunset,
@@ -99,9 +119,8 @@ def _cheap_grid_window(
     observation: dict[str, Any], *, now_local: datetime, threshold: float
 ) -> tuple[datetime, datetime, str, str, str] | None:
     raw = observation.get("amber_import_forecast_json")
-    try:
-        intervals = json.loads(raw) if raw else []
-    except (TypeError, json.JSONDecodeError):
+    intervals = native_json(raw) if raw else []
+    if not isinstance(intervals, list):
         return None
     candidates = []
     for interval in intervals:
@@ -111,7 +130,7 @@ def _cheap_grid_window(
         if price is None or start is None or end is None or end <= now_local:
             continue
         if float(price) <= threshold:
-            candidates.append((max(start, now_local), end, float(price)))
+            candidates.append((start, end, float(price)))
     if not candidates:
         return None
     start, end, price = min(candidates, key=lambda item: item[0])
@@ -126,8 +145,8 @@ def _cheap_grid_window(
 
 def _summary_estimate(raw: Any) -> float | None:
     try:
-        value = json.loads(raw) if isinstance(raw, str) else raw
-    except json.JSONDecodeError:
+        value = native_json(raw)
+    except TypeError:
         return None
     if not isinstance(value, dict):
         return None

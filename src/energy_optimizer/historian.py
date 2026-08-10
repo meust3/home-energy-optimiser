@@ -83,6 +83,30 @@ class Historian:
     def __init__(self, database_path: Path) -> None:
         self.database_path = database_path
 
+    def _repository(self):
+        """Legacy-test bridge; application code uses configured persistence."""
+        from energy_optimizer.db.engine import create_database_engine
+        from energy_optimizer.db.repository import DatabaseRepository
+
+        return DatabaseRepository(
+            create_database_engine(f"sqlite:///{self.database_path.as_posix()}")
+        )
+
+    def reprocessing_rows(self, columns):
+        return self._repository().reprocessing_rows(columns)
+
+    def apply_reprocessing_results(self, results, **kwargs):
+        return self._repository().apply_reprocessing_results(results, **kwargs)
+
+    def apply_ev_annotation(self, **kwargs):
+        return self._repository().apply_ev_annotation(**kwargs)
+
+    def removable_ev_session_rows(self, session_id):
+        return self._repository().removable_ev_session_rows(session_id)
+
+    def remove_ev_annotation(self, **kwargs):
+        return self._repository().remove_ev_annotation(**kwargs)
+
     @contextmanager
     def connect(self) -> Iterator[sqlite3.Connection]:
         self.database_path.parent.mkdir(parents=True, exist_ok=True)

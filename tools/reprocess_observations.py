@@ -7,7 +7,7 @@ from rich.panel import Panel
 from rich.table import Table
 
 from energy_optimizer.config import load_reprocessing_config
-from energy_optimizer.historian import Historian
+from energy_optimizer.persistence import open_repository
 from energy_optimizer.reprocessing import reprocess_observations
 
 
@@ -17,9 +17,7 @@ def main() -> int:
     parser.add_argument("--json", action="store_true")
     args = parser.parse_args()
     config = load_reprocessing_config()
-    report = reprocess_observations(
-        Historian(config.database_path), config, apply=args.apply
-    )
+    report = reprocess_observations(open_repository(), config, apply=args.apply)
     console = Console()
     if args.json:
         console.print_json(data=report.model_dump(mode="json"))
@@ -34,8 +32,8 @@ def main() -> int:
     else:
         console.print(
             Panel(
-                "Dry run only; the database was not modified. Before --apply, copy "
-                "data/energy_history.db to a timestamped backup file.",
+                "Dry run only; the database was not modified. Before --apply, "
+                "create and verify a backup of the configured database backend.",
                 title="Historical reprocessing dry run",
             )
         )

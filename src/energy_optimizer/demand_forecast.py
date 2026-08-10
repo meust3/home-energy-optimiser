@@ -7,6 +7,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
+from energy_optimizer.timestamps import aware_datetime
+
 FallbackMode = Literal["banded", "flat"]
 ForecastTier = Literal[
     "tier1_exact",
@@ -43,8 +45,11 @@ class TierContribution(BaseModel):
 
 class ForecastSlotDecision(BaseModel):
     period_start_local: datetime
+    period_end_local: datetime
+    duration_minutes: float = Field(gt=0)
     tier: ForecastTier
     estimated_power_kw: float = Field(ge=0)
+    expected_energy_kwh: float = Field(ge=0)
     sample_count: int = Field(ge=0)
     variability: float | None = Field(default=None, ge=0)
     explanation: str
@@ -62,16 +67,16 @@ class DemandDiagnostics(BaseModel):
     legacy_row_policy: str
     samples_available_by_tier: dict[str, int]
     tier_contributions: dict[str, TierContribution]
-    fallback_share: float = Field(ge=0, le=1)
+    fallback_share: float | None = Field(default=None, ge=0, le=1)
     eligible_history_days: int = Field(ge=0)
     history_duration_days: float = Field(ge=0)
     complete_overnight_periods: int = Field(ge=0)
     complete_daily_periods: int = Field(ge=0)
-    exact_history_share: float = Field(ge=0, le=1)
-    grouped_history_share: float = Field(ge=0, le=1)
-    recent_band_share: float = Field(ge=0, le=1)
-    configured_fallback_share: float = Field(ge=0, le=1)
-    weak_estimate_share: float = Field(ge=0, le=1)
+    exact_history_share: float | None = Field(default=None, ge=0, le=1)
+    grouped_history_share: float | None = Field(default=None, ge=0, le=1)
+    recent_band_share: float | None = Field(default=None, ge=0, le=1)
+    configured_fallback_share: float | None = Field(default=None, ge=0, le=1)
+    weak_estimate_share: float | None = Field(default=None, ge=0, le=1)
     independent_ev_telemetry_available: bool
     ev_contamination_risk: str | None
     known_ev_session_rows_excluded: int = Field(ge=0)
@@ -92,6 +97,7 @@ class DemandForecast(BaseModel):
     fallback_mode: FallbackMode
     fallback_contributions: dict[str, FallbackContribution]
     slot_decisions: list[ForecastSlotDecision]
+    partial_slot_count: int = Field(ge=0)
     diagnostics: DemandDiagnostics
     recent_adjustment: float = Field(gt=0)
     confidence: DemandConfidenceRating
@@ -163,6 +169,11 @@ def forecast_household_demand(
     total_energy = 0.0
     while current_utc < end_utc:
         local = current_utc.astimezone(start_local.tzinfo)
+        segment_start = max(current_utc, start_utc)
+        segment_end = min(current_utc + timedelta(minutes=5), end_utc)
+        if segment_end <= segment_start:
+            current_utc += timedelta(minutes=5)
+            continue
         slot = local.hour * 12 + local.minute // 5
         bucket = local.hour * 2 + local.minute // 30
         band = _band_for_time(local.time())
@@ -201,8 +212,6 @@ def forecast_household_demand(
                 max((local - item.local).total_seconds() / 86400, 0.0)
                 for item in selected
             )
-        segment_start = max(current_utc, start_utc)
-        segment_end = min(current_utc + timedelta(minutes=5), end_utc)
         hours = max((segment_end - segment_start).total_seconds() / 3600, 0.0)
         energy = power * hours
         total_energy += energy
@@ -213,9 +222,12 @@ def forecast_household_demand(
             fallback_energy[band] += energy
         decisions.append(
             ForecastSlotDecision(
-                period_start_local=local,
+                period_start_local=segment_start.astimezone(start_local.tzinfo),
+                period_end_local=segment_end.astimezone(start_local.tzinfo),
+                duration_minutes=round(hours * 60, 6),
                 tier=tier,
                 estimated_power_kw=round(power, 3),
+                expected_energy_kwh=round(energy, 6),
                 sample_count=sample_count,
                 variability=None if variability is None else round(variability, 3),
                 explanation=description,
@@ -271,6 +283,12 @@ def forecast_household_demand(
         weak_tier_share_ceiling=weak_tier_share_ceiling,
         prior_forecast_mape=prior_forecast_mape,
     )
+    if total_slots == 0:
+        confidence_score, confidence, ceilings = (
+            70,
+            "medium",
+            ["zero_length_horizon_no_load_samples_required"],
+        )
     diagnostics = DemandDiagnostics(
         total_observations_examined=len(rows),
         eligible_baseline_observations=len(samples),
@@ -292,16 +310,18 @@ def forecast_household_demand(
             "tier5_fallback": 0,
         },
         tier_contributions=contributions,
-        fallback_share=round(fallback_share, 3),
+        fallback_share=None if total_slots == 0 else round(fallback_share, 3),
         eligible_history_days=completeness["eligible_history_days"],
         history_duration_days=completeness["history_duration_days"],
         complete_overnight_periods=completeness["complete_overnight_periods"],
         complete_daily_periods=completeness["complete_daily_periods"],
-        exact_history_share=round(exact_share, 3),
-        grouped_history_share=round(grouped_share, 3),
-        recent_band_share=round(recent_share, 3),
-        configured_fallback_share=round(fallback_share, 3),
-        weak_estimate_share=round(weak_share, 3),
+        exact_history_share=None if total_slots == 0 else round(exact_share, 3),
+        grouped_history_share=None if total_slots == 0 else round(grouped_share, 3),
+        recent_band_share=None if total_slots == 0 else round(recent_share, 3),
+        configured_fallback_share=(
+            None if total_slots == 0 else round(fallback_share, 3)
+        ),
+        weak_estimate_share=None if total_slots == 0 else round(weak_share, 3),
         independent_ev_telemetry_available=independent_ev,
         ev_contamination_risk=(
             None
@@ -348,6 +368,7 @@ def forecast_household_demand(
         fallback_mode=fallback_mode,
         fallback_contributions=fallback_contributions,
         slot_decisions=decisions,
+        partial_slot_count=sum(slot.duration_minutes < 5 for slot in decisions),
         diagnostics=diagnostics,
         recent_adjustment=1.0,
         confidence=confidence,
@@ -356,7 +377,8 @@ def forecast_household_demand(
         explanation=(
             f"Five-minute forecast tiers: {tier_summary or 'no slots'}. "
             f"Tier 2-4 values are broader contextual estimates, not exact household "
-            f"patterns. Configured fallback share was {fallback_share:.1%}."
+            f"patterns. Configured fallback share was "
+            f"{'N/A' if total_slots == 0 else f'{fallback_share:.1%}'}."
         ),
     )
 
@@ -385,10 +407,14 @@ def _eligible_samples(
             continue
         value = row.get("baseline_house_consumption_w", row.get("house_consumption_w"))
         local_value = row.get("observed_at_local")
-        if value is None or not isinstance(local_value, str):
+        if value is None or local_value is None:
             ineligible["missing_baseline_or_timestamp"] += 1
             continue
-        local = datetime.fromisoformat(local_value)
+        try:
+            local = aware_datetime(local_value)
+        except (TypeError, ValueError):
+            ineligible["missing_baseline_or_timestamp"] += 1
+            continue
         if local >= forecast_start:
             future_excluded += 1
             continue

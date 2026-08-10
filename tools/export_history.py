@@ -5,9 +5,9 @@ from pathlib import Path
 
 from rich.console import Console
 
-from energy_optimizer.config import load_database_path, load_timezone_name
+from energy_optimizer.config import load_timezone_name
 from energy_optimizer.exporting import export_rows_to_csv
-from energy_optimizer.historian import Historian
+from energy_optimizer.persistence import open_repository
 from energy_optimizer.time_ranges import resolve_history_range
 
 
@@ -28,7 +28,7 @@ def main() -> int:
         )
     except ValueError as exc:
         parser.error(str(exc))
-    historian = Historian(load_database_path())
+    historian = open_repository()
     rows = historian.observation_rows(start=start, end=end)
     count = export_rows_to_csv(
         rows, args.output, fieldnames=historian.observation_columns()

@@ -1,9 +1,10 @@
 """Pure analysis helpers for collection coverage and persisted health issues."""
 
-import json
 from collections import Counter
 from datetime import UTC, datetime, timedelta
 from typing import Any
+
+from energy_optimizer.timestamps import native_json
 
 DOMAIN_NAMES = ("telemetry", "price", "solar", "weather", "flow", "overall")
 SLOT_INTERVAL = timedelta(minutes=5)
@@ -107,12 +108,7 @@ def summarize_health_issues(records: list[dict[str, Any]]) -> dict[str, Any]:
             if isinstance(score, (int, float)):
                 scores.append(float(score))
             raw = record.get("health_domains_json")
-            if not isinstance(raw, str):
-                continue
-            try:
-                payload = json.loads(raw)
-            except json.JSONDecodeError:
-                continue
+            payload = native_json(raw)
             domain_payload = payload.get(domain) if isinstance(payload, dict) else None
             if not isinstance(domain_payload, dict):
                 continue
