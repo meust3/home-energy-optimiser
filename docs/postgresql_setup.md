@@ -1,8 +1,8 @@
 # PostgreSQL setup
 
 The production `home_energy` cutover is complete and has been manually validated
-with a fresh live observation. The Home Assistant App remains the intended 24/7
-collector deployment but has not yet completed live HAOS validation.
+with a fresh live observation. Home Assistant App v0.2.1 is the active 24/7
+collector. The v0.3.0 Ingress dashboard remains an uninstalled release candidate.
 
 Recommended Synology layout:
 

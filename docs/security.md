@@ -39,7 +39,7 @@ trusted LAN/Tailscale rather than the public internet.
 
 Supervisor mounts App options as root-owned `/data/options.json` with mode `0600`.
 A narrowly scoped root entrypoint copies it to an `app:app`, mode-`0600` file under
-`/run`, then uses `exec gosu` to run Python, the collector, and health server as
+`/run`, then uses `exec gosu` to run Python, the collector, and watchdog/Ingress server as
 UID/GID 10001. Python removes the ephemeral copy after successful parsing; the
 original Supervisor file is never modified or deleted. The password is represented
 as a secret, URL-encoded during connection-string construction, and redacted from
@@ -52,6 +52,27 @@ behavior. Keep it private, protect backups, and share only deliberately sanitize
 exports. The database contains observations, not Home Assistant credentials.
 Schema migration is additive: it preserves existing observation rows and adds local
 health metadata only.
+
+## Ingress dashboard
+
+Version 0.3.0 relies on Home Assistant Ingress authentication and adds no password
+system. Dashboard, API, and static requests are authorized from the actual socket
+peer only: `172.30.32.2` in Home Assistant or loopback in tests. `/health` remains
+available to Supervisor watchdog. `X-Forwarded-For` is ignored, and
+`X-Ingress-Path` is accepted only after peer authorization and only as a normalized
+relative prefix. Home Assistant user identity headers are not logged or persisted.
+
+The server supports only GET. POST, PUT, PATCH, and DELETE return 405; no control,
+configuration, estimator, forecast-runner, or database-write endpoint exists.
+Ranges are capped at 31 days, observation reads at 9,000 rows, and browser series at
+2,500 points. Query columns and ordering are fixed in repository code.
+
+HTML, CSS, and JavaScript are local package assets. Responses use `nosniff`,
+`no-referrer`, a same-origin/local-asset Content Security Policy compatible with
+same-origin Ingress framing, and `no-store` for HTML and APIs. No CORS, analytics,
+remote font, CDN, or external request is configured. Errors use stable messages and
+never return exceptions, SQL, database URLs, options, authorization headers, or
+filesystem paths.
 
 ## Future executor separation
 

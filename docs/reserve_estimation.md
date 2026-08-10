@@ -199,6 +199,14 @@ measured baseline load and reports actual energy, forecast error, percentage err
 where valid, bias, and errors by tier. These analytical writes never contact Home
 Assistant or hardware.
 
+The v0.3.0 dashboard does not invoke this CLI or estimator. It reads only existing
+`reserve_estimator` forecast runs. Current persistence includes projected baseline
+demand plus state source, gross and capacity-capped requirements, demand confidence,
+and overall confidence. It does not persist the complete `ReserveEstimate`, so SOC,
+tradable energy, opportunity analysis, readiness, EV demand, and the full explanation
+remain unavailable in the dashboard. Version 0.3.0 adds no migration to fill that
+gap.
+
 Low and medium confidence increase the configured demand uncertainty ratio. This is
 an explainable safety margin, not a statistical guarantee.
 

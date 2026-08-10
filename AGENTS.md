@@ -28,11 +28,11 @@ migration and an end-to-end live observation write have been manually validated.
 SQLite remains supported for local/offline development and as the retained final
 pre-migration backup; it is not a production fallback.
 
-Home Assistant App v0.2.0 was installed on the amd64 Home Assistant OS 18.1 NUC but
-could not read Supervisor's root-owned `0600` options file. Version 0.2.1 is the
-least-privilege startup patch candidate; it has not yet completed an operational
-collection cycle on HAOS. Independent EV telemetry is not yet integrated, so EV
-charging may reduce load-forecast and reserve estimate confidence.
+Home Assistant App v0.2.1 is installed and collecting successfully on the amd64
+Home Assistant OS 18.1 NUC. Version 0.3.0 adds an experimental administrator-only
+Ingress dashboard and remains a release candidate until installed and verified on
+that host. Independent EV telemetry is not yet integrated, so EV charging may
+reduce load-forecast and reserve estimate confidence.
 
 ## Architecture
 
@@ -56,6 +56,13 @@ The intended architecture contains four separate layers:
    - Future component.
    - Must remain absent or disabled until controls have been manually tested.
 
+5. Presentation
+   - Serves a strictly read-only dashboard through Home Assistant Ingress.
+   - Reads existing persisted observations, forecasts, reserve metadata, and health
+     state only through bounded repository queries.
+   - Must not schedule calculations, persist comparisons, expose credentials, or
+     add configuration/control endpoints.
+
 ## Mandatory safety boundary
 
 The current project is read-only.
@@ -67,6 +74,7 @@ Allowed:
 - Writing observations to the configured PostgreSQL/SQLite repository or JSON files.
 - Producing advisory recommendations.
 - Running simulations and historical replay.
+- Serving administrator-only Home Assistant Ingress pages and GET-only query APIs.
 
 Not allowed:
 
@@ -371,6 +379,9 @@ Build only:
 Do not build device control yet.
 Do not build an executor yet.
 Do not call Home Assistant services.
+
+The v0.3.0 dashboard is presentation only. It must not run estimators, create
+forecasts, persist comparisons, alter configuration, or expose a host/LAN port.
 
 ## Read-only operational data model
 

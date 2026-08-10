@@ -1,7 +1,7 @@
 name: Home Energy Optimiser
-version: "0.2.1"
+version: "0.3.0"
 slug: home_energy_optimiser
-description: Read-only five-minute energy collector for external PostgreSQL
+description: Read-only energy dashboard and five-minute PostgreSQL collector
 url: https://github.com/meust3/home-energy-optimiser
 arch:
   - amd64
@@ -10,8 +10,12 @@ boot: auto
 init: false
 homeassistant_api: true
 watchdog: http://[HOST]:[PORT:8099]/health
-ports:
-  8099/tcp: null
+ingress: true
+ingress_port: 8099
+panel_icon: mdi:home-lightning-bolt
+panel_title: Energy Optimiser
+panel_admin: true
+stage: experimental
 options:
   db_port: 55432
   db_name: home_energy

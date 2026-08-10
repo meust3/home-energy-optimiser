@@ -137,6 +137,37 @@ class DatabaseRepository:
         with Session(self.engine) as session:
             return [dict(row) for row in session.execute(statement).mappings()]
 
+    def dashboard_observation_rows_read_only(
+        self,
+        *,
+        start: datetime,
+        end: datetime,
+        columns: tuple[str, ...],
+        limit: int = 9000,
+    ) -> list[dict[str, Any]]:
+        """Return one explicitly bounded dashboard observation range."""
+        _require_aware(start)
+        _require_aware(end)
+        if start >= end:
+            raise ValueError("dashboard observation start must precede end")
+        if limit < 1 or limit > 9000:
+            raise ValueError("dashboard observation limit must be 1-9000")
+        table = Observation.__table__
+        allowed = set(table.c.keys())
+        if not columns or any(name not in allowed for name in columns):
+            raise ValueError("Unknown or empty dashboard observation columns")
+        statement = (
+            select(*(table.c[name] for name in columns))
+            .where(
+                Observation.slot_utc >= start.astimezone(UTC),
+                Observation.slot_utc <= end.astimezone(UTC),
+            )
+            .order_by(Observation.slot_utc)
+            .limit(limit)
+        )
+        with Session(self.engine) as session:
+            return [dict(row) for row in session.execute(statement).mappings()]
+
     list_observations = observation_rows
     observation_range = observation_rows
 
@@ -362,6 +393,183 @@ class DatabaseRepository:
                 .order_by(ForecastPoint.period_start_utc)
             ).mappings()
             return {**dict(run), "points": [dict(point) for point in points]}
+
+    def forecast_run_summaries_read_only(
+        self,
+        *,
+        forecast_type: str | None = None,
+        after: datetime | None = None,
+        before: datetime | None = None,
+        limit: int = 25,
+    ) -> list[dict[str, Any]]:
+        """List bounded persisted forecast-run metadata without loading points."""
+        if limit < 1 or limit > 100:
+            raise ValueError("forecast run limit must be 1-100")
+        if after is not None:
+            _require_aware(after)
+        if before is not None:
+            _require_aware(before)
+        statement = (
+            select(
+                ForecastRun.id,
+                ForecastRun.created_at_utc,
+                ForecastRun.forecast_type,
+                ForecastRun.source,
+                ForecastRun.horizon_start_utc,
+                ForecastRun.horizon_end_utc,
+                ForecastRun.model_version,
+                func.count(ForecastPoint.id).label("point_count"),
+                func.count(ForecastPoint.actual_value).label("actual_point_count"),
+            )
+            .outerjoin(ForecastPoint, ForecastPoint.forecast_run_id == ForecastRun.id)
+            .group_by(
+                ForecastRun.id,
+                ForecastRun.created_at_utc,
+                ForecastRun.forecast_type,
+                ForecastRun.source,
+                ForecastRun.horizon_start_utc,
+                ForecastRun.horizon_end_utc,
+                ForecastRun.model_version,
+            )
+        )
+        if forecast_type:
+            statement = statement.where(ForecastRun.forecast_type == forecast_type)
+        if after is not None:
+            statement = statement.where(
+                ForecastRun.created_at_utc >= after.astimezone(UTC)
+            )
+        if before is not None:
+            statement = statement.where(
+                ForecastRun.created_at_utc <= before.astimezone(UTC)
+            )
+        statement = statement.order_by(ForecastRun.created_at_utc.desc()).limit(limit)
+        with Session(self.engine) as session:
+            return [dict(row) for row in session.execute(statement).mappings()]
+
+    def forecast_comparison_read_only(
+        self,
+        *,
+        forecast_run_id: int | None = None,
+        forecast_type: str | None = None,
+        start: datetime | None = None,
+        end: datetime | None = None,
+        limit: int = 2500,
+    ) -> dict[str, Any] | None:
+        """Compare one persisted run with observations without materializing writes."""
+        if limit < 1 or limit > 2500:
+            raise ValueError("forecast comparison limit must be 1-2500")
+        if start is not None:
+            _require_aware(start)
+        if end is not None:
+            _require_aware(end)
+        run_statement = select(ForecastRun.__table__)
+        if forecast_run_id is not None:
+            run_statement = run_statement.where(ForecastRun.id == forecast_run_id)
+        if forecast_type:
+            run_statement = run_statement.where(
+                ForecastRun.forecast_type == forecast_type
+            )
+        run_statement = run_statement.order_by(ForecastRun.created_at_utc.desc()).limit(
+            1
+        )
+        with Session(self.engine) as session:
+            run = session.execute(run_statement).mappings().first()
+            if run is None:
+                return None
+            actual_columns = {
+                "solar_power": Observation.pv_power_w,
+                "household_load": Observation.house_consumption_w,
+                "baseline_household_load": Observation.baseline_house_consumption_w,
+                "battery_soc": Observation.battery_soc_percent,
+                "grid_import": Observation.grid_import_power_w,
+                "grid_export": Observation.grid_export_power_w,
+                "buy_price": Observation.amber_import_price_per_kwh,
+                "sell_price": Observation.amber_export_price_per_kwh,
+            }
+            actual_column = actual_columns.get(str(run["forecast_type"]))
+            if actual_column is None:
+                return {**dict(run), "points": [], "unsupported_actual_type": True}
+            actual = (
+                select(func.avg(actual_column))
+                .where(
+                    Observation.slot_utc >= ForecastPoint.period_start_utc,
+                    Observation.slot_utc < ForecastPoint.period_end_utc,
+                )
+                .correlate(ForecastPoint)
+                .scalar_subquery()
+            )
+            statement = select(
+                ForecastPoint.period_start_utc,
+                ForecastPoint.period_end_utc,
+                ForecastPoint.expected_value,
+                ForecastPoint.lower_value,
+                ForecastPoint.upper_value,
+                ForecastPoint.unit,
+                ForecastPoint.metadata_json,
+                actual.label("actual_value"),
+            ).where(ForecastPoint.forecast_run_id == run["id"])
+            if start is not None:
+                statement = statement.where(
+                    ForecastPoint.period_start_utc >= start.astimezone(UTC)
+                )
+            if end is not None:
+                statement = statement.where(
+                    ForecastPoint.period_end_utc <= end.astimezone(UTC)
+                )
+            statement = statement.order_by(ForecastPoint.period_start_utc).limit(limit)
+            points = []
+            for point in session.execute(statement).mappings():
+                item = dict(point)
+                observed = item["actual_value"]
+                item["error_value"] = (
+                    float(observed) - float(item["expected_value"])
+                    if observed is not None
+                    else None
+                )
+                points.append(item)
+            return {**dict(run), "points": points, "unsupported_actual_type": False}
+
+    def latest_reserve_run_read_only(self) -> dict[str, Any] | None:
+        """Return the latest persisted reserve-estimator run and bounded summaries."""
+        statement = (
+            select(ForecastRun.__table__)
+            .where(ForecastRun.source == "reserve_estimator")
+            .order_by(ForecastRun.created_at_utc.desc())
+            .limit(1)
+        )
+        with Session(self.engine) as session:
+            run = session.execute(statement).mappings().first()
+            if run is None:
+                return None
+            points = list(
+                session.execute(
+                    select(
+                        ForecastPoint.period_start_utc,
+                        ForecastPoint.period_end_utc,
+                        ForecastPoint.expected_value,
+                        ForecastPoint.metadata_json,
+                    )
+                    .where(ForecastPoint.forecast_run_id == run["id"])
+                    .order_by(ForecastPoint.period_start_utc)
+                    .limit(2500)
+                ).mappings()
+            )
+        expected_energy_kwh = 0.0
+        tier_counts: dict[str, int] = {}
+        for point in points:
+            start_utc = _as_datetime(point["period_start_utc"])
+            end_utc = _as_datetime(point["period_end_utc"])
+            hours = (end_utc - start_utc).total_seconds() / 3600
+            expected_energy_kwh += float(point["expected_value"]) * hours / 1000
+            metadata = point["metadata_json"] or {}
+            tier = str(metadata.get("tier", "unknown"))
+            tier_counts[tier] = tier_counts.get(tier, 0) + 1
+        return {
+            **dict(run),
+            "point_count": len(points),
+            "expected_household_demand_kwh": expected_energy_kwh,
+            "tier_counts": tier_counts,
+        }
 
     def compare_forecast_run(self, run_id: int) -> dict[str, Any]:
         actual_columns = {

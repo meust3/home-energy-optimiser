@@ -49,6 +49,10 @@ def container_command(
         arguments.extend(
             [
                 "--mount",
+                f"type=bind,source={ROOT / 'src'},target=/tmp/current-src,readonly",
+                "--env",
+                "PYTHONPATH=/tmp/current-src",
+                "--mount",
                 f"type=bind,source={ROOT / 'home_energy_optimiser' / 'run.sh'},"
                 f"target={CONTAINER_RUN_SH},readonly",
                 "--mount",
@@ -210,6 +214,48 @@ def test_sigterm(
         )
 
 
+def test_dashboard(
+    image: str,
+    volume: str,
+    environment: dict[str, str],
+    *,
+    use_image_files: bool,
+) -> None:
+    """Exercise Ingress shell, static, API, direct denial, and watchdog locally."""
+    result = docker(
+        *container_command(
+            image,
+            volume,
+            "python",
+            CONTAINER_PROBE,
+            "dashboard-smoke",
+            use_image_files=use_image_files,
+        ),
+        env=environment,
+    )
+    captured_output = result.stdout + result.stderr
+    if TEST_PASSWORD in captured_output or TEST_TOKEN in captured_output:
+        raise RuntimeError("Dashboard smoke test printed a secret")
+    payload = json.loads(result.stdout.strip())
+    expected = {
+        "api_secret_free": True,
+        "dashboard": "started",
+        "direct_request": "denied",
+        "health": "available",
+        "nested_static": "loaded",
+        "simulated_ingress": "loaded",
+        "uid": 10001,
+        "gid": 10001,
+    }
+    if payload != expected:
+        raise RuntimeError(f"Unexpected dashboard smoke result: {payload!r}")
+    print("PASS dashboard server started as uid=10001 gid=10001")
+    print("PASS /health remained available to watchdog")
+    print("PASS simulated trusted Ingress loaded shell and nested static asset")
+    print("PASS direct request denied even with spoofed forwarding headers")
+    print("PASS dashboard API response contained no secret")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--image", required=True, help="Locally built App image")
@@ -242,6 +288,13 @@ def main() -> int:
                 f"before={before!r} after={after!r}"
             )
         print("PASS original options unchanged owner=root:root mode=0600")
+        write_root_only_options(volume)
+        test_dashboard(
+            args.image,
+            volume,
+            environment,
+            use_image_files=args.use_image_files,
+        )
         write_root_only_options(volume)
         test_sigterm(
             args.image,

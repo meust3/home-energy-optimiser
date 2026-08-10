@@ -10,20 +10,21 @@ collects and analyses data but does not control Home Assistant or energy hardwar
 ## Current status
 
 - **PostgreSQL production:** working and manually validated end to end
-- **Continuous collector:** working on Windows; App v0.2.0 installation exposed an
-  options-file permission bug, fixed in the v0.2.1 patch candidate
+- **Continuous collector:** App v0.2.1 is installed and collecting successfully on
+  the Home Assistant OS 18.1 NUC
+- **Ingress dashboard:** v0.3.0 release candidate is implemented locally and awaits
+  image build plus real-NUC installation verification
 - **Reserve forecasting:** working and advisory
 - **Solar and price forecasts:** Solcast and Amber Electric integrated
 - **EV telemetry:** not yet independently integrated
 - **Automated control or trading:** not enabled
 
 PostgreSQL 17 on the Synology NAS is the canonical production source of truth. The
-SQLite-to-PostgreSQL migration and exact validation are complete. The Home
-Assistant App (formerly called an add-on) has been installed on Home Assistant OS
-18.1, but v0.2.0 stopped before collection because Supervisor's root-owned options
-file was unreadable by its unprivileged entrypoint. Version 0.2.1 retains an
-unprivileged application process and fixes that bootstrap boundary. It has not yet
-completed live collection on the NUC.
+SQLite-to-PostgreSQL migration and exact validation are complete. Home Assistant
+App v0.2.1 fixed Supervisor options-file permissions while retaining an
+unprivileged application process; it is now the working production collector.
+Version 0.3.0 adds a strictly read-only Ingress presentation layer and remains an
+unverified release candidate until installed on that host.
 
 Forecast confidence can remain medium or low while household history is limited,
 and EV charging may still be embedded in historical household demand.
@@ -42,7 +43,7 @@ GoodWe / Amber / Solcast / weather
        |                            |
        v                            v
 Windows development          Home Assistant App
-and current collector        amd64 release candidate
+and offline analysis         v0.2.1 production collector
        |                            |
        +-------------+--------------+
                      v
@@ -69,6 +70,15 @@ annotation, and exports.
 - Stores forecast runs, projected-versus-actual comparisons, and derivation audits.
 - Supports reversible manual EV-session annotation without inventing EV power.
 - Provides database, history, energy-flow, reserve, export, and health tooling.
+- Presents existing stored observations and analytical records through an
+  administrator-only Home Assistant Ingress dashboard and bounded GET-only API in
+  the v0.3.0 release candidate.
+
+The dashboard does not run forecasts or reserve estimation. Persisted data may be
+sparse, and the current schema stores only a subset of the complete reserve result.
+Unavailable values remain unavailable rather than becoming zero. See
+[dashboard architecture](docs/dashboard.md), [API routes](docs/dashboard_api.md),
+and the [data contract](docs/dashboard_data_contract.md).
 
 ## Safety model
 
@@ -108,14 +118,18 @@ The amd64 Home Assistant App deployment wrapper:
 - validates connectivity, Alembic revision, application readiness, and required
   GET-only entity reads before collection;
 - runs the existing five-minute collector as an unprivileged process;
-- exposes a non-secret health endpoint for Supervisor watchdog checks.
+- exposes a non-secret health endpoint for Supervisor watchdog checks;
+- presents existing stored data through administrator-only Ingress and a bounded
+  GET-only API in the v0.3.0 release candidate.
 
-Version 0.2.1 is ready for patch validation but has not completed live collection
-on HAOS. See:
+Version 0.2.1 is the confirmed production collector. Version 0.3.0 is ready for
+release-candidate review and local image validation but has not been installed on
+the production NUC. See:
 
 - [App design](docs/home_assistant_app.md)
 - [Installation](docs/home_assistant_app_installation.md)
 - [Troubleshooting and rollback](docs/home_assistant_app_troubleshooting.md)
+- [Dashboard](docs/dashboard.md)
 
 ## Quick start — development
 

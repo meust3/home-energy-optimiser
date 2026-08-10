@@ -15,7 +15,7 @@ from energy_optimizer.home_assistant_app import (
     app_environment,
     load_app_options,
     redact_runtime_error,
-    start_health_server,
+    start_dashboard_server,
     validate_startup,
 )
 from energy_optimizer.logging_config import configure_logging
@@ -63,7 +63,13 @@ def _run(options) -> int:
         "and read-only Home Assistant entity access"
     )
     health = AppHealth(options.health_max_observation_age_seconds)
-    server, thread = start_health_server(health, port=HEALTH_PORT)
+    server, thread = start_dashboard_server(
+        health, database_url=environment["DATABASE_URL"], port=HEALTH_PORT
+    )
+    LOGGER.info(
+        "Read-only dashboard server ready for Home Assistant Ingress on port %s",
+        HEALTH_PORT,
+    )
     stop_event = threading.Event()
 
     def stop(_signum, _frame) -> None:
@@ -83,6 +89,7 @@ def _run(options) -> int:
         server.shutdown()
         server.server_close()
         thread.join(timeout=5)
+        LOGGER.info("Dashboard server stopped cleanly")
 
 
 if __name__ == "__main__":

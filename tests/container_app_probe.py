@@ -5,7 +5,10 @@ import os
 import signal
 import stat
 import sys
+import threading
 import time
+from http.client import HTTPConnection
+from http.server import ThreadingHTTPServer
 from pathlib import Path
 
 OPTIONS_PATH_ENV = "HOME_ENERGY_APP_OPTIONS_PATH"
@@ -75,8 +78,109 @@ def wait_for_sigterm() -> None:
         time.sleep(1)
 
 
+def dashboard_smoke() -> None:
+    """Exercise current local dashboard code without Home Assistant or PostgreSQL."""
+    from energy_optimizer.dashboard_api import LiveResponse, StatusResponse
+    from energy_optimizer.dashboard_web import IngressAccessPolicy, make_handler
+    from energy_optimizer.home_assistant_app import AppHealth, load_app_options
+
+    load_app_options()
+
+    class Service:
+        def live(self):
+            return LiveResponse(available=False)
+
+        def status(self):
+            return StatusResponse(
+                app_version="0.3.0",
+                overall_status="healthy",
+                collector_status="healthy",
+                database_status="healthy",
+                home_assistant_status="healthy",
+                latest_successful_collection_utc=None,
+                latest_observation_slot_utc=None,
+                observation_age_seconds=None,
+                database_schema_revision="test",
+                expected_schema_revision="test",
+            )
+
+    def start(policy):
+        handler = make_handler(
+            health=AppHealth(900), service=Service(), access_policy=policy
+        )
+        server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        return server, thread
+
+    def request(server, path, headers=None):
+        connection = HTTPConnection("127.0.0.1", server.server_port, timeout=5)
+        connection.request("GET", path, headers=headers or {})
+        response = connection.getresponse()
+        body = response.read()
+        connection.close()
+        return response.status, body
+
+    prefix = "/api/hassio_ingress/container-test/"
+    server, thread = start(IngressAccessPolicy())
+    try:
+        status, shell = request(server, prefix, {"X-Ingress-Path": prefix})
+        assert status == 200 and f'<base href="{prefix}">'.encode() in shell
+        status, css = request(
+            server,
+            prefix + "static/app.css?v=0.3.0",
+            {"X-Ingress-Path": prefix},
+        )
+        assert status == 200 and b"prefers-color-scheme" in css
+        status, api = request(
+            server,
+            prefix + "api/v1/live",
+            {"X-Ingress-Path": prefix},
+        )
+        assert status == 200 and json.loads(api)["available"] is False
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(5)
+
+    denied, denied_thread = start(IngressAccessPolicy(allow_loopback=False))
+    try:
+        status, _ = request(
+            denied,
+            "/",
+            {
+                "X-Forwarded-For": "172.30.32.2",
+                "X-Ingress-Path": prefix,
+            },
+        )
+        assert status == 403
+        health_status, _ = request(denied, "/health")
+        assert health_status == 200
+    finally:
+        denied.shutdown()
+        denied.server_close()
+        denied_thread.join(5)
+    print(
+        json.dumps(
+            {
+                "api_secret_free": True,
+                "dashboard": "started",
+                "direct_request": "denied",
+                "health": "available",
+                "nested_static": "loaded",
+                "simulated_ingress": "loaded",
+                "uid": os.getuid(),
+                "gid": os.getgid(),
+            },
+            sort_keys=True,
+        ),
+        flush=True,
+    )
+
+
 def main() -> int:
     actions = {
+        "dashboard-smoke": dashboard_smoke,
         "parse-options": parse_options,
         "wait-for-sigterm": wait_for_sigterm,
         "write-options": write_options,

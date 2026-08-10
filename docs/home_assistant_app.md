@@ -1,17 +1,17 @@
 # Home Assistant App design
 
 Home Energy Optimiser is packaged as a Home Assistant App (formerly called an
-add-on) without changing collector business logic. Version 0.2.0 was installed on
-the amd64 Home Assistant OS 18.1 NUC but stopped before collection because its
-unprivileged entrypoint could not read Supervisor's root-owned `0600` options file.
-Version 0.2.1 is the narrowly scoped startup patch candidate and has not yet
-completed live collection on that host.
+add-on) without changing collector business logic. Version 0.2.1 is installed and
+collecting successfully on the amd64 Home Assistant OS 18.1 NUC. Version 0.3.0 adds
+an experimental administrator-only read-only Ingress dashboard and remains a
+release candidate until installed and verified on that host.
 
 ```text
 Home Assistant Core
   GET via http://supervisor/core/api + SUPERVISOR_TOKEN
        |
-Home Energy Optimiser App on HAOS amd64 (release candidate)
+Home Energy Optimiser App on HAOS amd64
+  one collector + one internal watchdog/Ingress server
   existing tools/run_collector.py, one process, five-minute boundaries
        |
 Synology PostgreSQL 17
@@ -25,9 +25,11 @@ uses that token as the bearer credential for the internal Core REST proxy, so a
 user-managed long-lived Home Assistant token is unnecessary. The existing client
 allows only `GET /api/`, `GET /api/states`, and entity-state GETs.
 
-The App does not enable `hassio_api`, ingress, host networking, privileged mode,
-device mappings, USB/GPIO, the Docker socket, Home Assistant configuration access,
-or elevated Linux capabilities. Port 8099 is internal and used by Supervisor only.
+The App enables Home Assistant Ingress without `hassio_api`, host networking,
+privileged mode, device mappings, USB/GPIO, the Docker socket, Home Assistant
+configuration access, or elevated Linux capabilities. Port 8099 is internal and has
+no host publication. `panel_admin: true` limits the experimental panel to Home
+Assistant administrators.
 
 ## Startup and runtime
 
@@ -68,9 +70,12 @@ age, and App version. Startup receives one threshold period of grace. One transi
 failure is tolerated; three consecutive component failures or an overdue successful
 collection makes the endpoint return HTTP 503 for Supervisor watchdog recovery.
 
-A later read-only Home Assistant integration may expose collector status, latest
-observation, database status, forecast confidence, recommended reserve, and
-potentially tradable energy. This release creates no Home Assistant entities.
+The same server presents the v0.3.0 dashboard and versioned GET-only API. Dashboard,
+API, and static routes accept only the actual network peer `172.30.32.2`, while
+loopback is available for tests. `/health` remains reachable by Supervisor watchdog.
+`X-Forwarded-For` and Home Assistant identity headers are neither trusted nor
+stored. `X-Ingress-Path` is used only after peer authorization to construct a safe
+relative browser base path. This release creates no Home Assistant entities.
 
 ## Image and data ownership
 
@@ -80,10 +85,15 @@ the options bootstrap and then uses `exec gosu app:app python`. `.git`, `.env`, 
 tests, logs, and local exports are excluded. `/data` contains Supervisor options,
 not the production datastore.
 Only the short file-preparation bootstrap runs as root. The Python application,
-collector, and health server run as unprivileged UID/GID 10001. The health server binds to the
+collector, and web server run as unprivileged UID/GID 10001. The web server binds to the
 container interface because Supervisor's watchdog must reach `[HOST]`; its port has
-no host publication and exposes only non-secret status JSON on the internal App
-network.
+no host publication. Ingress pages and APIs expose only bounded, non-secret,
+read-only presentation data on the internal App network.
+
+The frontend is server-rendered HTML plus package-local CSS and vanilla JavaScript.
+It has no CDN, web font, analytics, chart dependency, CORS, or second authentication
+system. Browser requests use short-lived repositories and cannot change collector
+health. No endpoint runs forecasts, reserve estimation, or device control.
 
 Removing, upgrading, or rebuilding the App does not remove PostgreSQL history.
 Home Assistant backups are not PostgreSQL backups; `home_energy` needs a separate,

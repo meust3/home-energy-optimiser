@@ -5,7 +5,7 @@ import os
 import threading
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from http.server import ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 
@@ -20,7 +20,7 @@ from energy_optimizer.home_assistant import HomeAssistantClient, redact_secret
 from energy_optimizer.persistence import ApplicationRepository, open_repository
 
 SUPERVISOR_CORE_API_URL = "http://supervisor/core/api"
-APP_VERSION = "0.2.1"
+APP_VERSION = "0.3.0"
 HEALTH_PORT = 8099
 OPTIONS_PATH_ENV = "HOME_ENERGY_APP_OPTIONS_PATH"
 SUPERVISOR_OPTIONS_PATH = Path("/data/options.json")
@@ -185,6 +185,7 @@ class AppHealth:
     database: str = "healthy"
     home_assistant: str = "healthy"
     collector: str = "healthy"
+    dashboard: str = "healthy"
     last_successful_collection_utc: datetime | None = None
     last_slot_utc: datetime | None = None
     _started_at_utc: datetime = field(default_factory=lambda: datetime.now(UTC))
@@ -230,6 +231,7 @@ class AppHealth:
                 "database": self.database,
                 "home_assistant": self.home_assistant,
                 "collector": collector,
+                "dashboard": self.dashboard,
                 "last_successful_collection_utc": _iso(
                     self.last_successful_collection_utc
                 ),
@@ -244,28 +246,15 @@ class AppHealth:
         return (200 if healthy else 503), payload
 
 
-def start_health_server(
-    health: AppHealth, *, port: int
+def start_dashboard_server(
+    health: AppHealth, *, database_url: str, port: int
 ) -> tuple[ThreadingHTTPServer, threading.Thread]:
-    """Start a loopback HTTP server; Supervisor reaches it inside the container."""
+    """Start the one internal watchdog and Home Assistant Ingress server."""
+    from energy_optimizer.dashboard_web import create_dashboard_server
 
-    class Handler(BaseHTTPRequestHandler):
-        def do_GET(self) -> None:  # noqa: N802 - stdlib handler API
-            if self.path != "/health":
-                self.send_error(404)
-                return
-            status, payload = health.response()
-            body = json.dumps(payload, separators=(",", ":")).encode()
-            self.send_response(status)
-            self.send_header("Content-Type", "application/json")
-            self.send_header("Content-Length", str(len(body)))
-            self.end_headers()
-            self.wfile.write(body)
-
-        def log_message(self, _format: str, *_args: object) -> None:
-            return
-
-    server = ThreadingHTTPServer(("0.0.0.0", port), Handler)
+    server = create_dashboard_server(
+        health=health, database_url=database_url, port=port
+    )
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     return server, thread

@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <base href="__INGRESS_BASE_PATH__">
+  <title>Energy Optimiser</title>
+  <link rel="stylesheet" href="static/app.css?v=0.3.0">
+  <script type="module" src="static/app.js?v=0.3.0"></script>
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to dashboard content</a>
+  <header class="app-header">
+    <div>
+      <p class="eyebrow">Home Energy Optimiser</p>
+      <h1>Energy dashboard</h1>
+    </div>
+    <div class="header-meta">
+      <span class="badge badge-safe">Read only</span>
+      <span id="latest-data">Waiting for stored data…</span>
+    </div>
+  </header>
+
+  <nav class="tabs" aria-label="Dashboard sections">
+    <a href="#overview" data-tab="overview" aria-current="page">Overview</a>
+    <a href="#history" data-tab="history">History</a>
+    <a href="#forecasts" data-tab="forecasts">Forecasts</a>
+    <a href="#reserve" data-tab="reserve">Reserve</a>
+    <a href="#data-quality" data-tab="data-quality">Data Quality</a>
+  </nav>
+
+  <main id="main">
+    <section id="overview" class="page" aria-labelledby="overview-title">
+      <div class="section-heading">
+        <div><p class="eyebrow">Current state</p><h2 id="overview-title">Overview</h2></div>
+        <p id="overview-state" class="state-message" role="status">Loading latest persisted observation…</p>
+      </div>
+      <div id="status-strip" class="status-strip" aria-label="Application status">
+        <span data-status="collector">Collector · loading</span>
+        <span data-status="database">PostgreSQL · loading</span>
+        <span data-status="home_assistant">Home Assistant · loading</span>
+        <span data-status="age">Last update · loading</span>
+      </div>
+      <div id="kpis" class="kpi-grid" aria-live="polite"></div>
+
+      <div class="overview-grid">
+        <article class="panel flow-panel">
+          <div class="panel-heading"><div><p class="eyebrow">Latest five-minute slot</p><h3>Energy flow</h3></div><span id="flow-confidence" class="badge">Unconfirmed</span></div>
+          <div id="energy-flow" class="energy-flow" aria-label="Latest stored energy flow"></div>
+          <p class="muted">Directions use persisted normalized flow fields. Missing values remain unavailable.</p>
+        </article>
+        <article class="panel" id="overview-reserve">
+          <div class="panel-heading"><div><p class="eyebrow">Existing result</p><h3>Reserve summary</h3></div></div>
+          <div class="loading-block">Loading persisted reserve…</div>
+          <p class="advisory">Advisory only. No command was issued.</p>
+        </article>
+      </div>
+    </section>
+
+    <section id="history" class="page" hidden aria-labelledby="history-title">
+      <div class="section-heading">
+        <div><p class="eyebrow">Stored observations</p><h2 id="history-title">History</h2></div>
+        <label class="range-control">Range
+          <select id="history-range">
+            <option value="6h">6 hours</option><option value="24h" selected>24 hours</option>
+            <option value="48h">48 hours</option><option value="7d">7 days</option>
+            <option value="14d">14 days</option><option value="30d">30 days</option>
+          </select>
+        </label>
+      </div>
+      <p id="history-state" class="state-message" role="status">Select this tab to load history.</p>
+      <div id="history-summary" class="summary-row"></div>
+      <div id="history-charts" class="chart-grid" aria-live="polite"></div>
+    </section>
+
+    <section id="forecasts" class="page" hidden aria-labelledby="forecasts-title">
+      <div class="section-heading"><div><p class="eyebrow">Persisted runs only</p><h2 id="forecasts-title">Forecasts</h2></div></div>
+      <p id="forecast-state" class="state-message" role="status">Select this tab to load persisted forecasts.</p>
+      <div class="forecast-layout">
+        <article class="panel">
+          <label>Forecast run<select id="forecast-run"><option value="">Loading…</option></select></label>
+          <div id="forecast-run-meta" class="definition-grid"></div>
+        </article>
+        <div id="forecast-comparison" class="panel chart-panel"></div>
+      </div>
+    </section>
+
+    <section id="reserve" class="page" hidden aria-labelledby="reserve-title">
+      <div class="section-heading"><div><p class="eyebrow">Persisted advisory result</p><h2 id="reserve-title">Reserve</h2></div></div>
+      <p class="advisory prominent">Advisory only. No command was issued.</p>
+      <p id="reserve-state" class="state-message" role="status">Select this tab to load the latest persisted reserve result.</p>
+      <div id="reserve-content" class="reserve-grid"></div>
+    </section>
+
+    <section id="data-quality" class="page" hidden aria-labelledby="quality-title">
+      <div class="section-heading">
+        <div><p class="eyebrow">Last 30 days</p><h2 id="quality-title">Data quality</h2></div>
+      </div>
+      <p id="quality-state" class="state-message" role="status">Select this tab to load collection quality.</p>
+      <div id="quality-content"></div>
+    </section>
+  </main>
+
+  <footer>
+    <p>Read-only presentation of existing stored data. No control path, forecast scheduler, or command endpoint is present.</p>
+  </footer>
+</body>
+</html>

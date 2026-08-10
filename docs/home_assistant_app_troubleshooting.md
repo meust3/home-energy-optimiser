@@ -24,6 +24,22 @@ database and never migrates PostgreSQL automatically.
 - **No advancing rows:** ensure the App is running, wait for a five-minute boundary,
   check PostgreSQL from a trusted machine, and ensure no Windows collector is also
   running.
+- **Blank Ingress page:** confirm v0.3.0 is installed, `ingress: true` and
+  `ingress_port: 8099` are present in the manifest, then reload through the Home
+  Assistant sidebar. Browser assets are relative to the trusted dynamic Ingress
+  prefix; no host port should be added as a workaround.
+- **Dashboard returns 403:** open it through authenticated Home Assistant Ingress.
+  Direct LAN/container requests are intentionally rejected. A spoofed
+  `X-Forwarded-For` or `X-Ingress-Path` cannot authorize access.
+- **Missing charts:** select a shorter period and check collection coverage. Gaps
+  are intentionally not interpolated. Forecast and reserve panels show empty states
+  when no persisted run exists and never start a calculation.
+- **Stale dashboard values:** compare the status observation age with `/health`,
+  verify the PostgreSQL row advances, and inspect collector logs. Thirty-second
+  browser polling does not change the five-minute collection frequency.
+- **Dashboard API error:** a bounded browser query failure does not stop the
+  collector or make watchdog unhealthy. Check PostgreSQL availability and App logs;
+  errors intentionally omit SQL, paths, options, and credentials.
 
 ## Operational rollback
 

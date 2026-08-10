@@ -15,10 +15,10 @@ only assemble these reusable components.
 
 ## Production deployment
 
-The production deployment target is a Home Assistant App (formerly called an
-add-on) on the amd64 Home Assistant OS NUC. The package is a release candidate and
-has not yet completed live HAOS validation; continuous collection currently works
-from Windows. Supervisor injects `SUPERVISOR_TOKEN`; the App uses it only as a
+The production deployment is Home Assistant App v0.2.1 (formerly called an add-on)
+on the amd64 Home Assistant OS 18.1 NUC, where it is collecting successfully.
+Version 0.3.0 is a dashboard release candidate that has not yet been installed or
+verified on that host. Supervisor injects `SUPERVISOR_TOKEN`; the App uses it only as a
 bearer token for `http://supervisor/core/api`. The existing GET-only client and
 collector are unchanged. Observations are written over the LAN to the external
 Synology PostgreSQL 17 `home_energy` database as `energy_app`.
@@ -27,7 +27,7 @@ The deployment wrapper copies root-owned `/data/options.json` to a mode-`0600`
 ephemeral file during a minimal root bootstrap, then drops to UID/GID 10001 before
 Python parses and removes the copy. It constructs one URL-encoded PostgreSQL URL,
 performs explicit database revision/readiness and Home Assistant entity checks,
-starts a small internal health server, then executes the existing five-minute
+starts one internal watchdog/Ingress web server, then executes the existing five-minute
 collector. Supervisor owns boot, watchdog, restart, and shutdown. No cron process,
 nested restart loop, SQLite production database, or device-control layer exists in
 the App.
@@ -77,6 +77,26 @@ weather domain unhealthy; it cannot affect overall Phase 1 observation health.
 The future executor is deliberately absent. Adding it requires a separate safety
 review and explicit approval.
 
+## Read-only presentation layer
+
+Version 0.3.0 extends the existing standard-library health server into one coherent
+threaded web application on internal port 8099. The collector remains in the main
+thread, uses its original five-minute schedule, and shares only thread-safe health
+state with the web layer. Browser requests open short-lived repositories and use
+fixed, bounded query methods; a request failure cannot stop or mark the collector
+unhealthy.
+
+Supervisor watchdog continues to call `/health`. All dashboard, static, and
+`/api/v1` routes require the actual socket peer to be `172.30.32.2`, the Home
+Assistant Ingress gateway; loopback is permitted for tests. Forwarded identity and
+`X-Forwarded-For` never authorize access. A trusted `X-Ingress-Path` supplies only
+the dynamic browser base path.
+
+The local HTML/CSS/vanilla-JavaScript frontend presents existing observations,
+forecast runs, request-time read-only comparisons, limited persisted reserve
+metadata, and data quality. It creates no forecast, estimator run, entity, command,
+or database record. Unsupported mutation HTTP methods return 405.
+
 The collector has an explicit derivation stage after raw parsing. It creates an
 `EnergyFlow` only from configured signs, adds optional EV context, calculates a
 baseline-load training value, derives cautious event labels, and evaluates a
@@ -84,8 +104,9 @@ separate flow-readiness health domain. Overall health continues to follow raw
 telemetry rather than derivation readiness.
 
 Forecast storage is independent of collection: immutable runs own period points;
-later comparison attaches local actuals and errors. These tables support future
-projected-vs-actual dashboards without implementing a dashboard or optimiser.
+existing CLI comparison may attach local actuals and errors. The v0.3.0 dashboard
+uses a separate request-time read-only comparison and never materializes those
+values.
 
 The battery reserve estimator is the first advisory consumer of these layers. It
 reads the latest stored observation and telemetry-healthy baseline samples, forecasts
