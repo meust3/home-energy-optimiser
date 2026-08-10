@@ -434,6 +434,16 @@ def test_privilege_drop_preserves_environment_and_exec_signal_delivery():
     assert "exec gosu app:app python" in launcher
 
 
+def test_container_validation_avoids_shell_quoted_probe_commands():
+    validator = Path("tools/test_home_assistant_app_container.py").read_text(
+        encoding="utf-8"
+    )
+    assert '"sh",' not in validator
+    assert '"python", "-c"' not in validator
+    assert 'probe = """' not in validator
+    assert "container_app_probe.py" in validator
+
+
 def test_dockerignore_excludes_sensitive_artifacts():
     ignored = Path("home_energy_optimiser/.dockerignore").read_text(encoding="utf-8")
     for pattern in (

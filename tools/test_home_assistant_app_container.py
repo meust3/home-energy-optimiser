@@ -13,7 +13,10 @@ CONTAINER_RUN_SH = "/opt/home-energy-optimiser/home_energy_optimiser/run.sh"
 CONTAINER_APP_MODULE = (
     "/usr/local/lib/python3.12/site-packages/energy_optimizer/" "home_assistant_app.py"
 )
+CONTAINER_PROBE = "/tmp/home-energy-app-probe.py"
+HOST_PROBE = ROOT / "tests" / "container_app_probe.py"
 TEST_TOKEN = "container-test-supervisor-token"
+TEST_PASSWORD = "container-test-password"
 
 
 def docker(*arguments: str, **kwargs) -> subprocess.CompletedProcess[str]:
@@ -39,6 +42,8 @@ def container_command(
         "linux/amd64",
         "--volume",
         f"{volume}:/data",
+        "--mount",
+        f"type=bind,source={HOST_PROBE},target={CONTAINER_PROBE},readonly",
     ]
     if not use_image_files:
         arguments.extend(
@@ -73,7 +78,7 @@ def write_root_only_options(volume: str) -> None:
             "db_port": 55432,
             "db_name": "home_energy",
             "db_user": "energy_app",
-            "db_password": "container-test-password",
+            "db_password": TEST_PASSWORD,
             "timezone": "Australia/Brisbane",
             "health_max_observation_age_seconds": 900,
         }
@@ -84,52 +89,19 @@ def write_root_only_options(volume: str) -> None:
         "--volume",
         f"{volume}:/data",
         "--interactive",
+        "--mount",
+        f"type=bind,source={HOST_PROBE},target={CONTAINER_PROBE},readonly",
         "python:3.12.11-slim-bookworm",
-        "sh",
-        "-c",
-        "umask 077; cat > /data/options.json; chown 0:0 /data/options.json; "
-        "chmod 0600 /data/options.json",
+        "python",
+        CONTAINER_PROBE,
+        "write-options",
         input=payload,
     )
 
 
-def test_options_and_identity(
-    image: str,
-    volume: str,
-    environment: dict[str, str],
-    *,
-    use_image_files: bool,
-) -> None:
-    """Confirm parsing, cleanup, credential preservation, and runtime identity."""
-    probe = """
-import json
-import os
-from pathlib import Path
-from energy_optimizer.home_assistant_app import load_app_options
-
-options_path = Path(os.environ["HOME_ENERGY_APP_OPTIONS_PATH"])
-options = load_app_options()
-assert options.db_host == "db.example.invalid"
-assert os.environ.get("SUPERVISOR_TOKEN")
-assert not options_path.exists()
-print(json.dumps({"status": "ok", "uid": os.getuid(), "gid": os.getgid()}))
-"""
-    result = docker(
-        *container_command(
-            image,
-            volume,
-            "python",
-            "-c",
-            probe,
-            use_image_files=use_image_files,
-        ),
-        env=environment,
-    )
-    payload = json.loads(result.stdout.strip())
-    if payload != {"status": "ok", "uid": 10001, "gid": 10001}:
-        raise RuntimeError(f"Unexpected unprivileged process identity: {payload!r}")
-
-    metadata = docker(
+def options_metadata(volume: str) -> str:
+    """Return source owner/group and mode from inside a Linux container."""
+    return docker(
         "run",
         "--rm",
         "--volume",
@@ -140,8 +112,49 @@ print(json.dumps({"status": "ok", "uid": os.getuid(), "gid": os.getgid()}))
         "%u:%g %a",
         "/data/options.json",
     ).stdout.strip()
-    if metadata != "0:0 600":
-        raise RuntimeError(f"Supervisor options metadata changed: {metadata!r}")
+
+
+def test_options_and_identity(
+    image: str,
+    volume: str,
+    environment: dict[str, str],
+    *,
+    use_image_files: bool,
+) -> None:
+    """Confirm parsing, cleanup, credential preservation, and runtime identity."""
+    result = docker(
+        *container_command(
+            image,
+            volume,
+            "python",
+            CONTAINER_PROBE,
+            "parse-options",
+            use_image_files=use_image_files,
+        ),
+        env=environment,
+    )
+    captured_output = result.stdout + result.stderr
+    if TEST_PASSWORD in captured_output or TEST_TOKEN in captured_output:
+        raise RuntimeError("Container probe printed a secret")
+    payload = json.loads(result.stdout.strip())
+    expected = {
+        "configuration": "parsed",
+        "ephemeral_removed": True,
+        "gid": 10001,
+        "runtime_copy_gid": 10001,
+        "runtime_copy_mode": "0600",
+        "runtime_copy_uid": 10001,
+        "status": "ok",
+        "token_present": True,
+        "uid": 10001,
+    }
+    if payload != expected:
+        raise RuntimeError(f"Unexpected sanitized probe result: {payload!r}")
+    print("PASS bootstrap copied options as app:app mode=0600")
+    print("PASS configuration parsing succeeded")
+    print("PASS application process uid=10001 gid=10001")
+    print("PASS ephemeral options copy removed")
+    print("PASS no secret printed")
 
 
 def test_sigterm(
@@ -153,26 +166,12 @@ def test_sigterm(
 ) -> None:
     """Confirm exec-based privilege drop delivers SIGTERM directly to Python."""
     name = f"home-energy-signal-{uuid.uuid4().hex[:12]}"
-    probe = """
-import signal
-import sys
-import time
-
-def stop(_signum, _frame):
-    print("SIGTERM_RECEIVED", flush=True)
-    sys.exit(0)
-
-signal.signal(signal.SIGTERM, stop)
-print("READY", flush=True)
-while True:
-    time.sleep(1)
-"""
     command = container_command(
         image,
         volume,
         "python",
-        "-c",
-        probe,
+        CONTAINER_PROBE,
+        "wait-for-sigterm",
         use_image_files=use_image_files,
     )
     command.remove("--rm")
@@ -181,7 +180,7 @@ while True:
         docker(*command, env=environment)
         deadline = time.monotonic() + 15
         while time.monotonic() < deadline:
-            if "READY" in docker("logs", name).stdout:
+            if "PYTHON_READY" in docker("logs", name).stdout:
                 break
             time.sleep(0.2)
         else:
@@ -195,9 +194,13 @@ while True:
                 f"state={state!r}, output={diagnostic!r}"
             )
         docker("stop", "--time", "5", name)
-        logs = docker("logs", name).stdout
-        if "SIGTERM_RECEIVED" not in logs:
+        log_result = docker("logs", name)
+        logs = log_result.stdout + log_result.stderr
+        if TEST_PASSWORD in logs or TEST_TOKEN in logs:
+            raise RuntimeError("Signal probe printed a secret")
+        if "SIGTERM_REACHED_PYTHON" not in logs:
             raise RuntimeError("SIGTERM did not reach the unprivileged Python process")
+        print("PASS SIGTERM reached Python")
     finally:
         subprocess.run(
             ["docker", "rm", "--force", name],
@@ -222,12 +225,23 @@ def main() -> int:
     docker("volume", "create", volume)
     try:
         write_root_only_options(volume)
+        before = options_metadata(volume)
+        if before != "0:0 600":
+            raise RuntimeError(f"Unexpected source options metadata: {before!r}")
+        print("PASS original options before bootstrap owner=root:root mode=0600")
         test_options_and_identity(
             args.image,
             volume,
             environment,
             use_image_files=args.use_image_files,
         )
+        after = options_metadata(volume)
+        if after != before:
+            raise RuntimeError(
+                "Supervisor options metadata changed: "
+                f"before={before!r} after={after!r}"
+            )
+        print("PASS original options unchanged owner=root:root mode=0600")
         write_root_only_options(volume)
         test_sigterm(
             args.image,
