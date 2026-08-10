@@ -1,12 +1,16 @@
 # PostgreSQL setup
 
+The production `home_energy` cutover is complete and has been manually validated
+with a fresh live observation. The Home Assistant App remains the intended 24/7
+collector deployment but has not yet completed live HAOS validation.
+
 Recommended Synology layout:
 
 ```text
 Synology NAS
   PostgreSQL: home_energy, home_energy_dev
 Home Assistant NUC
-  future production collector -> home_energy as energy_app
+  Home Assistant App production collector -> home_energy as energy_app
 Developer computers
   -> home_energy_dev as energy_dev
   -> home_energy as energy_readonly for production analysis

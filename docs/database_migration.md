@@ -1,12 +1,16 @@
 # SQLite to PostgreSQL migration
 
+Production migration to `home_energy` has completed and exact validation passed.
+This document remains the operational reference for development migrations,
+recovery exercises, and audit validation; it is not a pending production task.
+
 The source database is opened read-only. The tool traverses tables in foreign-key-safe order, uses batches and transactions, preserves keys/NULL/JSON/boolean/timestamp values, and reports unequal existing rows as conflicts. Dry run is default; writing requires `--apply`. A database named `home_energy` additionally requires `--confirm-production`.
 
 ```powershell
-python tools/migrate_sqlite_to_postgres.py --source-sqlite data/energy_history.db --target-database-url "postgresql+psycopg://energy_dev:PASSWORD@NAS:5432/home_energy_dev"
-python tools/migrate_sqlite_to_postgres.py --source-sqlite data/energy_history.db --target-database-url "postgresql+psycopg://energy_dev:PASSWORD@NAS:5432/home_energy_dev" --apply
-python tools/migrate_sqlite_to_postgres.py --source-sqlite data/energy_history.db --target-database-url "postgresql+psycopg://energy_dev:PASSWORD@NAS:5432/home_energy_dev" --validate-only --validation-mode exact
-python tools/migrate_sqlite_to_postgres.py --source-sqlite data/energy_history.db --target-database-url "postgresql+psycopg://energy_dev:PASSWORD@NAS:5432/home_energy_dev" --validate-only --validation-mode source-preserved
+python tools/migrate_sqlite_to_postgres.py --source-sqlite data/energy_history.db --target-database-url "postgresql+psycopg://energy_dev:YOUR_DB_PASSWORD@YOUR_NAS_HOST:55432/home_energy_dev"
+python tools/migrate_sqlite_to_postgres.py --source-sqlite data/energy_history.db --target-database-url "postgresql+psycopg://energy_dev:YOUR_DB_PASSWORD@YOUR_NAS_HOST:55432/home_energy_dev" --apply
+python tools/migrate_sqlite_to_postgres.py --source-sqlite data/energy_history.db --target-database-url "postgresql+psycopg://energy_dev:YOUR_DB_PASSWORD@YOUR_NAS_HOST:55432/home_energy_dev" --validate-only --validation-mode exact
+python tools/migrate_sqlite_to_postgres.py --source-sqlite data/energy_history.db --target-database-url "postgresql+psycopg://energy_dev:YOUR_DB_PASSWORD@YOUR_NAS_HOST:55432/home_energy_dev" --validate-only --validation-mode source-preserved
 ```
 
 `exact` is the conservative default: the whole target must mirror the source, so

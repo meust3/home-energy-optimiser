@@ -1,0 +1,28 @@
+name: Home Energy Optimiser
+version: "0.2.0"
+slug: home_energy_optimiser
+description: Read-only five-minute energy collector for external PostgreSQL
+url: https://github.com/meust3/home-energy-optimiser
+arch:
+  - amd64
+startup: application
+boot: auto
+init: false
+homeassistant_api: true
+watchdog: http://[HOST]:[PORT:8099]/health
+ports:
+  8099/tcp: null
+options:
+  db_port: 55432
+  db_name: home_energy
+  db_user: energy_app
+  timezone: Australia/Brisbane
+  health_max_observation_age_seconds: 900
+schema:
+  db_host: str
+  db_port: port
+  db_name: str
+  db_user: str
+  db_password: password
+  timezone: str
+  health_max_observation_age_seconds: int(300,3600)

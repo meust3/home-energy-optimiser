@@ -1,4 +1,5 @@
 import importlib.util
+import threading
 from pathlib import Path
 
 
@@ -43,3 +44,12 @@ def test_database_connection_retry_is_bounded():
     assert module.save_with_retry(save, sleep=delays.append) == "saved"
     assert len(attempts) == 3
     assert delays == [1, 2]
+
+
+def test_stop_event_prevents_future_collection_attempts():
+    module = load_tool()
+    stop = threading.Event()
+    stop.set()
+    calls = []
+    module.run(lambda: calls.append(1), interval=300, stop_event=stop)
+    assert calls == []

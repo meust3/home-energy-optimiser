@@ -1,0 +1,22 @@
+configuration:
+  db_host:
+    name: PostgreSQL host
+    description: DNS name or LAN address of the external PostgreSQL server.
+  db_port:
+    name: PostgreSQL port
+    description: External PostgreSQL TCP port.
+  db_name:
+    name: Database name
+    description: Canonical production database.
+  db_user:
+    name: Database user
+    description: Least-privilege application role.
+  db_password:
+    name: Database password
+    description: Password for the application role; never written to logs.
+  timezone:
+    name: Local timezone
+    description: IANA timezone used for local observation timestamps.
+  health_max_observation_age_seconds:
+    name: Maximum observation age
+    description: Age after which collector health becomes unhealthy.

@@ -66,18 +66,23 @@ class HomeAssistantClient:
         if not allowed or path.startswith("/api/services"):
             raise ReadOnlyViolation(f"Path is not allowed by read-only client: {path}")
         try:
-            response = self._session.get(
-                f"{self._base_url}{path}", timeout=self._timeout
-            )
+            response = self._session.get(self._request_url(path), timeout=self._timeout)
             response.raise_for_status()
             return response.json()
         except requests.RequestException as exc:
             message = redact_secret(str(exc), self._token)
-            raise HomeAssistantConnectionError(message) from exc
+            # Suppress the original exception because third-party request details
+            # can include an Authorization header even when our message is redacted.
+            raise HomeAssistantConnectionError(message) from None
         except ValueError as exc:
             raise HomeAssistantResponseError(
                 "Home Assistant returned invalid JSON"
             ) from exc
+
+    def _request_url(self, path: str) -> str:
+        if self._base_url.endswith("/api") and path.startswith("/api"):
+            return f"{self._base_url}{path[4:]}"
+        return f"{self._base_url}{path}"
 
     def check_api(self) -> dict[str, Any]:
         payload = self._get_json("/api/")

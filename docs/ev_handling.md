@@ -1,5 +1,10 @@
 # EV handling
 
+Independent EV telemetry is not currently integrated in the deployed data source.
+Until it is available, EV charging can contaminate measured household load and
+reduce forecast and reserve-estimate confidence. The rules below describe the
+implemented handling when direct telemetry or explicit local annotations exist.
+
 Manual session annotation, reversal, prior-state snapshots, and audit records use
 the configured repository backend selected by `DATABASE_URL`. Annotation and
 reversal are single transactions on both SQLite and PostgreSQL; raw telemetry and
@@ -31,4 +36,5 @@ used verbatim, otherwise a UUID-based ID is generated. Rows without exact EV pow
 are excluded with `known_ev_session_without_ev_power`; no EV power is inferred.
 Existing direct power is preserved and used as `max(house - EV power, 0)` when
 telemetry quality permits. `--remove-session ID` previews or reverses a session
-from its audited prior-state snapshots. These operations affect local SQLite only.
+from its audited prior-state snapshots. These operations affect only the configured
+database and never contact Home Assistant or hardware.

@@ -9,4 +9,11 @@ pg_restore --clean --if-exists --dbname home_energy_restore home_energy.dump
 
 Restore a plain SQL dump with `psql --dbname home_energy_restore --file dump.sql`. Test restores.
 
-Rollback cutover by stopping the PostgreSQL-backed collector, restoring the prior SQLite `DATABASE_URL` (or removing it for fallback), restarting, verifying the latest slot with `inspect_history.py`, and preserving PostgreSQL unchanged for investigation.
+After production cutover, rollback means moving collection back to Windows while
+keeping PostgreSQL authoritative: stop the App, ensure no other collector is
+running, set Windows `DATABASE_URL` to `home_energy`, run
+`python tools/run_collector.py`, and verify advancing slots. Do not resume
+production collection against SQLite.
+
+Home Assistant App backups cover App configuration, not the external PostgreSQL
+history. Back up and test-restore `home_energy` independently on the Synology.

@@ -11,7 +11,7 @@ collector / forecasts / reserve / audits / inspection
                   persistence API
                    /             \
               SQLite          PostgreSQL
-          local/offline     production/shared
+       offline/tests only   production/shared
 ```
 
 `DATABASE_URL` is canonical. If absent, the effective default is
@@ -20,6 +20,19 @@ been selected: connection failure is explicit. Transactions are owned by cohesiv
 repository operations and sessions never escape into business logic.
 
 SQLAlchemy models are the portable schema and Alembic is the deployment migration mechanism. Generic JSON becomes JSONB on PostgreSQL. Timestamps are timezone-aware and UTC is used for internal keys.
+
+Production has completed its PostgreSQL cutover. Synology `home_energy` is
+authoritative and the Home Assistant App always supplies an explicit
+`postgresql+psycopg://` URL assembled from protected App options. App startup
+rejects absent credentials, connection/authentication failure, and any revision
+other than `20260810_01`; it does not migrate automatically or create local tables.
+Removing or rebuilding the App cannot delete production history because the
+database is external.
+
+The migration from the final production SQLite backup completed with exact
+validation, and the shared repository has been manually validated against
+production PostgreSQL with a fresh live observation. All application workflows now
+respect the same `DATABASE_URL` selection.
 
 ## Timestamp contract
 

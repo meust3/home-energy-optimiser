@@ -1,0 +1,382 @@
+import importlib.util
+import json
+import logging
+import sys
+from datetime import UTC, datetime, timedelta
+from pathlib import Path
+from types import SimpleNamespace
+
+import pytest
+
+from energy_optimizer.config import ConfigurationError, load_config
+from energy_optimizer.db.engine import DatabaseConnectionError
+from energy_optimizer.db.redaction import redact_database_urls
+from energy_optimizer.home_assistant import HomeAssistantClient
+from energy_optimizer.home_assistant_app import (
+    SUPERVISOR_CORE_API_URL,
+    AppHealth,
+    HomeAssistantAppOptions,
+    app_environment,
+    load_app_options,
+    postgresql_url,
+    redact_runtime_error,
+    validate_startup,
+)
+
+
+def _options(**updates):
+    values = {
+        "db_host": "db.example.invalid",
+        "db_port": 55432,
+        "db_name": "home_energy",
+        "db_user": "test_user",
+        "db_password": "test-password@:/",
+    }
+    values.update(updates)
+    return HomeAssistantAppOptions.model_validate(values)
+
+
+def _load_app_tool():
+    tools_path = Path(__file__).parents[1] / "tools"
+    sys.path.insert(0, str(tools_path))
+    try:
+        spec = importlib.util.spec_from_file_location(
+            "run_home_assistant_app_security_test",
+            tools_path / "run_home_assistant_app.py",
+        )
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module
+    finally:
+        sys.path.remove(str(tools_path))
+
+
+def test_app_configuration_parsing(tmp_path):
+    path = tmp_path / "options.json"
+    path.write_text(json.dumps(_options().model_dump(mode="json")), encoding="utf-8")
+    loaded = load_app_options(path)
+    assert loaded.db_host == "db.example.invalid"
+    assert loaded.db_port == 55432
+
+
+def test_missing_database_password_rejects_startup(tmp_path):
+    path = tmp_path / "options.json"
+    path.write_text(json.dumps({"db_host": "nas.local"}), encoding="utf-8")
+    with pytest.raises(ConfigurationError, match="secret values are not shown"):
+        load_app_options(path)
+
+
+def test_invalid_database_port_rejects_startup():
+    with pytest.raises(ValueError):
+        _options(db_port=70000)
+
+
+def test_postgresql_url_encodes_credentials():
+    url = postgresql_url(_options())
+    assert "test_user:test-password%40%3A%2F@db.example.invalid:55432" in url
+
+
+def test_app_environment_uses_supervisor_proxy_and_never_sqlite():
+    environment = app_environment(_options(), supervisor_token="example-token")
+    assert environment["HA_URL"] == SUPERVISOR_CORE_API_URL
+    assert environment["HA_TOKEN"] == "example-token"
+    assert environment["DATABASE_URL"].startswith("postgresql+psycopg://")
+    assert "sqlite" not in environment["DATABASE_URL"]
+
+
+def test_app_requires_supervisor_token(monkeypatch):
+    monkeypatch.delenv("SUPERVISOR_TOKEN", raising=False)
+    with pytest.raises(ConfigurationError, match="SUPERVISOR_TOKEN"):
+        app_environment(_options())
+
+
+def test_supervisor_proxy_url_does_not_duplicate_api_path():
+    session = SimpleNamespace(headers={}, calls=[])
+
+    def get(url, timeout):
+        session.calls.append((url, timeout))
+        return SimpleNamespace(
+            raise_for_status=lambda: None,
+            json=lambda: [],
+        )
+
+    session.get = get
+    client = HomeAssistantClient(SUPERVISOR_CORE_API_URL, "token", session=session)
+    client.get_states([])
+    assert session.calls[0][0] == "http://supervisor/core/api/states"
+
+
+def test_app_startup_rejects_sqlite_before_connecting():
+    with pytest.raises(ConfigurationError, match="SQLite fallback is disabled"):
+        validate_startup(
+            database_url="sqlite:///data/energy_history.db",
+            ha_url=SUPERVISOR_CORE_API_URL,
+            ha_token="token",
+            repository_factory=lambda _url: pytest.fail("must not connect"),
+        )
+
+
+def test_postgresql_connection_failure_rejects_startup():
+    def fail(_url):
+        raise DatabaseConnectionError("unreachable")
+
+    with pytest.raises(DatabaseConnectionError, match="unreachable"):
+        validate_startup(
+            database_url="postgresql+psycopg://user:secret@nas/db",
+            ha_url=SUPERVISOR_CORE_API_URL,
+            ha_token="token",
+            repository_factory=fail,
+        )
+
+
+def test_wrong_alembic_revision_rejects_startup(monkeypatch):
+    repository = SimpleNamespace(
+        engine=object(),
+        ping=lambda: True,
+        close=lambda: None,
+    )
+    monkeypatch.setattr(
+        "energy_optimizer.home_assistant_app.current_revision", lambda _engine: "old"
+    )
+    monkeypatch.setattr(
+        "energy_optimizer.home_assistant_app.expected_revision",
+        lambda: "20260810_01",
+    )
+    with pytest.raises(ConfigurationError, match="20260810_01 expected; found old"):
+        validate_startup(
+            database_url="postgresql+psycopg://user:secret@nas/db",
+            ha_url=SUPERVISOR_CORE_API_URL,
+            ha_token="token",
+            repository_factory=lambda _url: repository,
+        )
+
+
+def test_startup_home_assistant_check_is_get_only(monkeypatch):
+    class Repository:
+        engine = object()
+
+        def ping(self):
+            return True
+
+        def table_counts(self):
+            return SimpleNamespace(
+                observations=1,
+                forecast_runs=0,
+                forecast_points=0,
+                observation_derivations=0,
+                ev_session_annotations=0,
+                ev_session_annotation_rows=0,
+            )
+
+        def close(self):
+            return None
+
+    class Client:
+        def __init__(self, *_args, **_kwargs):
+            self.calls = []
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return None
+
+        def check_api(self):
+            self.calls.append("GET /api/")
+            return {}
+
+        def get_states(self, ids):
+            self.calls.append("GET /api/states")
+            return dict.fromkeys(ids, object())
+
+    monkeypatch.setattr(
+        "energy_optimizer.home_assistant_app.current_revision",
+        lambda _engine: "20260810_01",
+    )
+    monkeypatch.setattr(
+        "energy_optimizer.home_assistant_app.expected_revision",
+        lambda: "20260810_01",
+    )
+    validate_startup(
+        database_url="postgresql+psycopg://user:secret@nas/db",
+        ha_url=SUPERVISOR_CORE_API_URL,
+        ha_token="token",
+        repository_factory=lambda _url: Repository(),
+        client_factory=Client,
+    )
+    assert not hasattr(Client, "post")
+
+
+def test_database_url_and_supervisor_token_are_not_logged(caplog):
+    secret_url = (
+        "postgresql+psycopg://test_user:test-password@db.example.invalid/test_db"
+    )
+    token = "example-supervisor-token"
+    with caplog.at_level(logging.INFO):
+        logging.getLogger("test").info("%s %s", redact_database_urls(secret_url), "ok")
+    assert "test-password" not in caplog.text
+    assert token not in caplog.text
+
+
+def test_runtime_error_redacts_database_password_token_and_authorization_header():
+    password = "example-database-password"
+    token = "example-supervisor-token"
+    error = (
+        "authentication failed for postgresql+psycopg://test_user:"
+        f"{password}@db.example.invalid/test_db; Authorization: Bearer {token}"
+    )
+    redacted = redact_runtime_error(error, password, token)
+    assert password not in redacted
+    assert token not in redacted
+    assert "***" in redacted
+
+
+@pytest.mark.parametrize("failure_kind", ["startup", "database_authentication"])
+def test_app_failure_logs_never_contain_runtime_secrets(
+    monkeypatch, caplog, failure_kind
+):
+    module = _load_app_tool()
+    options = _options(db_password="example-database-password")
+    token = "example-supervisor-token"
+    monkeypatch.setenv("SUPERVISOR_TOKEN", token)
+    monkeypatch.setattr(module, "load_app_options", lambda: options)
+
+    def fail(_options):
+        raise DatabaseConnectionError(
+            f"{failure_kind}: postgresql+psycopg://test_user:"
+            "example-database-password@db.example.invalid/test_db "
+            f"Authorization: Bearer {token}"
+        )
+
+    monkeypatch.setattr(module, "_run", fail)
+    with caplog.at_level(logging.ERROR):
+        assert module.main() == 1
+    assert "example-database-password" not in caplog.text
+    assert token not in caplog.text
+    assert "Authorization: Bearer [REDACTED]" in caplog.text
+
+
+def test_invalid_options_error_never_dumps_options_json(tmp_path):
+    password = "example-database-password"
+    path = tmp_path / "options.json"
+    path.write_text(
+        json.dumps({"db_host": "", "db_password": password}), encoding="utf-8"
+    )
+    with pytest.raises(ConfigurationError) as raised:
+        load_app_options(path)
+    assert password not in str(raised.value)
+    assert "db_password" not in str(raised.value)
+
+
+def test_health_response_contains_no_secrets_and_uses_age_threshold():
+    health = AppHealth(max_observation_age_seconds=900)
+    success = datetime(2026, 8, 10, 1, tzinfo=UTC)
+    health.last_successful_collection_utc = success
+    health.last_slot_utc = success
+    health.collector = "healthy"
+    status, payload = health.response(now=success + timedelta(seconds=901))
+    assert status == 503
+    assert payload["collector"] == "unhealthy"
+    serialized = json.dumps(payload)
+    assert "password" not in serialized.lower()
+    assert "token" not in serialized.lower()
+    assert "database_url" not in serialized.lower()
+
+
+def test_health_tolerates_one_transient_failure():
+    health = AppHealth(max_observation_age_seconds=900)
+    now = datetime.now(UTC)
+    health.record_failure("home_assistant")
+    status, payload = health.response(now=now)
+    assert status == 200
+    assert payload["home_assistant"] == "healthy"
+    health.record_failure("home_assistant")
+    health.record_failure("home_assistant")
+    status, payload = health.response(now=now)
+    assert status == 503
+    assert payload["home_assistant"] == "unhealthy"
+
+
+def test_windows_environment_configuration_remains_unchanged(monkeypatch):
+    monkeypatch.setenv("HA_URL", "http://homeassistant.local:8123")
+    monkeypatch.setenv("HA_TOKEN", "windows-token")
+    config = load_config(env_file=None)
+    assert config.ha_url == "http://homeassistant.local:8123"
+    assert config.ha_token == "windows-token"
+
+
+def test_app_client_has_no_home_assistant_write_methods():
+    source = Path("src/energy_optimizer/home_assistant.py").read_text(encoding="utf-8")
+    lowered = source.lower()
+    for method in (".post(", ".put(", ".patch(", ".delete("):
+        assert method not in lowered
+
+
+def test_app_manifest_uses_least_privilege_and_watchdog():
+    manifest = Path("home_energy_optimiser/config.yaml").read_text(encoding="utf-8")
+    assert "homeassistant_api: true" in manifest
+    assert "watchdog: http://[HOST]:[PORT:8099]/health" in manifest
+    assert "boot: auto" in manifest
+    for forbidden in (
+        "hassio_api: true",
+        "host_network",
+        "privileged",
+        "docker_api",
+        "map:",
+        "devices:",
+        "SYS_ADMIN",
+        "NET_ADMIN",
+    ):
+        assert forbidden not in manifest
+
+
+def test_app_launcher_execs_existing_collector_without_restart_loop():
+    launcher = Path("home_energy_optimiser/run.sh").read_text(encoding="utf-8")
+    assert "exec python tools/run_home_assistant_app.py" in launcher
+    assert "while" not in launcher
+
+
+def test_dockerignore_excludes_sensitive_artifacts():
+    ignored = Path("home_energy_optimiser/.dockerignore").read_text(encoding="utf-8")
+    for pattern in (
+        ".env",
+        "*.db",
+        "*.sqlite*",
+        "*.dump",
+        "*.sql",
+        "*.pem",
+        "*.key",
+        "data",
+        "logs",
+        "captures",
+        "exports",
+        ".git",
+    ):
+        assert pattern in ignored.splitlines()
+
+
+def test_root_gitignore_excludes_local_secrets_and_backups():
+    ignored = Path(".gitignore").read_text(encoding="utf-8").splitlines()
+    for pattern in (
+        ".env",
+        ".env.*",
+        "data/*.db",
+        "data/*.sqlite*",
+        "data/backups/",
+        "data/exports/",
+        "logs/",
+        "captures/",
+        "*.dump",
+        "*.sql",
+        "*.pem",
+        "*.key",
+    ):
+        assert pattern in ignored
+    assert "!.env.example" in ignored
+
+
+def test_docker_image_uses_unprivileged_runtime_user():
+    dockerfile = Path("home_energy_optimiser/Dockerfile").read_text(encoding="utf-8")
+    assert "USER 10001:10001" in dockerfile
+    assert "SUPERVISOR_TOKEN" not in dockerfile
+    assert "DATABASE_URL" not in dockerfile

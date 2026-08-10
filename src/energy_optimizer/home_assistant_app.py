@@ -1,0 +1,237 @@
+"""Home Assistant App configuration, readiness checks, and secret-safe health."""
+
+import json
+import os
+import threading
+from dataclasses import dataclass, field
+from datetime import UTC, datetime
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
+from typing import Any
+
+from pydantic import BaseModel, Field, SecretStr, ValidationError
+from sqlalchemy.engine import URL
+
+from energy_optimizer import entity_ids
+from energy_optimizer.config import ConfigurationError
+from energy_optimizer.db.migrations import current_revision, expected_revision
+from energy_optimizer.db.redaction import redact_database_urls
+from energy_optimizer.home_assistant import HomeAssistantClient, redact_secret
+from energy_optimizer.persistence import ApplicationRepository, open_repository
+
+SUPERVISOR_CORE_API_URL = "http://supervisor/core/api"
+APP_VERSION = "0.2.0"
+HEALTH_PORT = 8099
+
+
+class HomeAssistantAppOptions(BaseModel):
+    """Validated values read from Supervisor-managed ``/data/options.json``."""
+
+    db_host: str = Field(min_length=1)
+    db_port: int = Field(default=55432, ge=1, le=65535)
+    db_name: str = Field(default="home_energy", min_length=1)
+    db_user: str = Field(default="energy_app", min_length=1)
+    db_password: SecretStr
+    timezone: str = "Australia/Brisbane"
+    health_max_observation_age_seconds: int = Field(default=900, ge=300)
+
+
+def load_app_options(
+    path: Path = Path("/data/options.json"),
+) -> HomeAssistantAppOptions:
+    """Read App options without reproducing secrets in validation errors."""
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        options = HomeAssistantAppOptions.model_validate(payload)
+    except (OSError, json.JSONDecodeError, ValidationError):
+        raise ConfigurationError(
+            "Invalid Home Assistant App configuration; check required database "
+            "options (secret values are not shown)"
+        ) from None
+    if not options.db_password.get_secret_value():
+        raise ConfigurationError("db_password is required")
+    return options
+
+
+def postgresql_url(options: HomeAssistantAppOptions) -> str:
+    """Build the sole App database URL with SQLAlchemy URL encoding."""
+    return URL.create(
+        "postgresql+psycopg",
+        username=options.db_user,
+        password=options.db_password.get_secret_value(),
+        host=options.db_host,
+        port=options.db_port,
+        database=options.db_name,
+    ).render_as_string(hide_password=False)
+
+
+def app_environment(
+    options: HomeAssistantAppOptions, *, supervisor_token: str | None = None
+) -> dict[str, str]:
+    """Create the App process environment without any SQLite fallback."""
+    token = (supervisor_token or os.getenv("SUPERVISOR_TOKEN", "")).strip()
+    if not token:
+        raise ConfigurationError(
+            "SUPERVISOR_TOKEN is unavailable; homeassistant_api must be enabled"
+        )
+    return {
+        "HA_URL": SUPERVISOR_CORE_API_URL,
+        "HA_TOKEN": token,
+        "DATABASE_URL": postgresql_url(options),
+        "TIMEZONE": options.timezone,
+    }
+
+
+def redact_runtime_error(value: Any, *secrets: str | None) -> str:
+    """Redact database URLs and runtime-only credentials from an error."""
+    message = redact_database_urls(value)
+    for secret in secrets:
+        message = redact_secret(message, secret or "")
+    return message
+
+
+def validate_startup(
+    *,
+    database_url: str,
+    ha_url: str,
+    ha_token: str,
+    request_timeout_seconds: float = 10.0,
+    repository_factory=open_repository,
+    client_factory=HomeAssistantClient,
+) -> None:
+    """Fail closed unless PostgreSQL, schema, and read-only HA access are ready."""
+    if not database_url.startswith("postgresql+psycopg://"):
+        raise ConfigurationError(
+            "Home Assistant App requires PostgreSQL; SQLite fallback is disabled"
+        )
+    repository: ApplicationRepository = repository_factory(database_url)
+    try:
+        repository.ping()
+        found = current_revision(repository.engine)
+        wanted = expected_revision()
+        if found != wanted:
+            raise ConfigurationError(
+                f"Database schema revision {wanted} expected; found {found or 'none'}. "
+                "Run database migration before restarting the App."
+            )
+        required_tables = {
+            "observations",
+            "forecast_runs",
+            "forecast_points",
+            "observation_derivations",
+            "ev_session_annotations",
+            "ev_session_annotation_rows",
+        }
+        if not required_tables.issubset(repository.table_counts().__dict__):
+            raise ConfigurationError("Database application-readiness check failed")
+    finally:
+        repository.close()
+    with client_factory(
+        ha_url, ha_token, timeout_seconds=request_timeout_seconds
+    ) as client:
+        client.check_api()
+        states = client.get_states(entity_ids.REQUIRED_ENTITY_IDS)
+    missing = sorted(set(entity_ids.REQUIRED_ENTITY_IDS) - set(states))
+    if missing:
+        raise ConfigurationError(
+            "Required Home Assistant entities are unavailable: " + ", ".join(missing)
+        )
+
+
+@dataclass
+class AppHealth:
+    """Thread-safe, non-secret collector heartbeat exposed to Supervisor."""
+
+    max_observation_age_seconds: int
+    version: str = APP_VERSION
+    database: str = "healthy"
+    home_assistant: str = "healthy"
+    collector: str = "healthy"
+    last_successful_collection_utc: datetime | None = None
+    last_slot_utc: datetime | None = None
+    _started_at_utc: datetime = field(default_factory=lambda: datetime.now(UTC))
+    _database_failures: int = 0
+    _home_assistant_failures: int = 0
+    _lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
+
+    def record_success(self, observation: Any) -> None:
+        with self._lock:
+            self.database = "healthy"
+            self.home_assistant = "healthy"
+            self.collector = "healthy"
+            self._database_failures = 0
+            self._home_assistant_failures = 0
+            self.last_successful_collection_utc = datetime.now(UTC)
+            self.last_slot_utc = observation.slot_utc.astimezone(UTC)
+
+    def record_failure(self, component: str) -> None:
+        with self._lock:
+            if component == "database":
+                self._database_failures += 1
+                if self._database_failures >= 3:
+                    self.database = "unhealthy"
+            elif component == "home_assistant":
+                self._home_assistant_failures += 1
+                if self._home_assistant_failures >= 3:
+                    self.home_assistant = "unhealthy"
+
+    def response(self, *, now: datetime | None = None) -> tuple[int, dict[str, Any]]:
+        current = (now or datetime.now(UTC)).astimezone(UTC)
+        with self._lock:
+            reference = self.last_successful_collection_utc or self._started_at_utc
+            age = (current - reference).total_seconds()
+            stale = age > self.max_observation_age_seconds
+            collector = "unhealthy" if stale else self.collector
+            healthy = (
+                self.database == "healthy"
+                and self.home_assistant == "healthy"
+                and collector == "healthy"
+            )
+            payload = {
+                "status": "healthy" if healthy else "unhealthy",
+                "database": self.database,
+                "home_assistant": self.home_assistant,
+                "collector": collector,
+                "last_successful_collection_utc": _iso(
+                    self.last_successful_collection_utc
+                ),
+                "last_slot_utc": _iso(self.last_slot_utc),
+                "observation_age_seconds": (
+                    round(age, 1)
+                    if self.last_successful_collection_utc is not None
+                    else None
+                ),
+                "version": self.version,
+            }
+        return (200 if healthy else 503), payload
+
+
+def start_health_server(
+    health: AppHealth, *, port: int
+) -> tuple[ThreadingHTTPServer, threading.Thread]:
+    """Start a loopback HTTP server; Supervisor reaches it inside the container."""
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_GET(self) -> None:  # noqa: N802 - stdlib handler API
+            if self.path != "/health":
+                self.send_error(404)
+                return
+            status, payload = health.response()
+            body = json.dumps(payload, separators=(",", ":")).encode()
+            self.send_response(status)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, _format: str, *_args: object) -> None:
+            return
+
+    server = ThreadingHTTPServer(("0.0.0.0", port), Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    return server, thread
+
+
+def _iso(value: datetime | None) -> str | None:
+    return value.astimezone(UTC).isoformat() if value is not None else None

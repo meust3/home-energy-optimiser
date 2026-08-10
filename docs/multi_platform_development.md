@@ -7,3 +7,10 @@ Each machine keeps its own `.env`; GitHub contains source and migrations only. R
 Do not mix backends within one shell/process. Changing `DATABASE_URL` changes the
 collector, reserve estimator, inspection, forecasts, annotations, reprocessing, and
 exports together.
+
+The Home Assistant App is the production wrapper only. It obtains Home Assistant
+authentication from `SUPERVISOR_TOKEN` and refuses SQLite. Windows workflows remain
+unchanged and continue to use `HA_URL`, `HA_TOKEN`, and `DATABASE_URL` from the
+local environment or `.env`. Development must target `home_energy_dev` as
+`energy_dev`; production analysis should use `energy_readonly` unless collection is
+being deliberately rolled back to Windows.

@@ -81,10 +81,11 @@ returns execution readiness.
 
 The CLI makes its current-state source explicit. `--source live` is the default and
 performs one GET-only Home Assistant collection without saving it. Only
-`--save-observation` persists that snapshot. `--source history` reads SQLite in
-read-only mode, prints the stored observation timestamp and age, and warns after ten
-minutes. A timezone-aware `--as-of` selects the last observation at or before that
-instant and excludes later load samples, enabling deterministic replay.
+`--save-observation` persists that snapshot. `--source history` reads the configured
+database without modifying observations, prints the stored observation timestamp
+and age, and warns after ten minutes. A timezone-aware `--as-of` selects the last
+observation at or before that instant and excludes later load samples, enabling
+deterministic replay.
 
 Every result includes the source, observation timestamp and age, SOC used, usable
 capacity assumption, and calculated battery energy. This prevents a stored SOC from
@@ -192,11 +193,11 @@ at most Medium-Low, no exact-slot coverage cannot be High, and more than half Ti
 3–5 cannot exceed Medium. Missing independent EV telemetry is disclosed as possible
 contamination rather than treated as proof of clean household demand.
 
-Each CLI estimate stores its immutable five-minute demand projection in the local
-forecast tables. After its horizon, `--score-run ID` attaches eligible measured
-baseline load and reports actual energy, forecast error, percentage error where
-valid, bias, and errors by tier. These local writes never contact Home Assistant or
-hardware.
+Each CLI estimate stores its immutable five-minute demand projection in the
+configured forecast tables. After its horizon, `--score-run ID` attaches eligible
+measured baseline load and reports actual energy, forecast error, percentage error
+where valid, bias, and errors by tier. These analytical writes never contact Home
+Assistant or hardware.
 
 Low and medium confidence increase the configured demand uncertainty ratio. This is
 an explainable safety margin, not a statistical guarantee.

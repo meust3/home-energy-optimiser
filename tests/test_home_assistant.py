@@ -65,3 +65,18 @@ def test_network_error_redacts_token():
     with pytest.raises(HomeAssistantConnectionError, match="REDACTED") as raised:
         client.check_api()
     assert "very-secret" not in str(raised.value)
+    assert raised.value.__cause__ is None
+
+
+def test_authorization_header_is_redacted_without_exception_chain():
+    token = "example-authorization-token"
+
+    class Broken(Session):
+        def get(self, url, timeout):
+            raise requests.ConnectionError(f"Authorization: Bearer {token}")
+
+    client = HomeAssistantClient("http://ha", token, session=Broken({}))
+    with pytest.raises(HomeAssistantConnectionError) as raised:
+        client.check_api()
+    assert token not in str(raised.value)
+    assert raised.value.__cause__ is None

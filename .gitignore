@@ -3,11 +3,29 @@ __pycache__/
 *.py[cod]
 *$py.class
 .env
+.env.*
+!.env.example
 .venv/
 __pycache__/
 *.pyc
 data/*.db
+data/*.sqlite*
+data/backups/
+data/exports/
 logs/
+captures/
+exports/
+secrets/
+credentials/
+*.jsonl
+*.dump
+*.backup
+*.bak
+*.sql
+*.pem
+*.key
+*.p12
+*.pfx
 
 # C extensions
 *.so
@@ -175,6 +193,16 @@ cython_debug/
 
 # Ruff stuff:
 .ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# Container/build and temporary artifacts
+.docker/
+*.tmp
+*.temp
+*.swp
+*.swo
 
 # PyPI configuration file
 .pypirc

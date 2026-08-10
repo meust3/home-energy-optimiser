@@ -1,8 +1,9 @@
 # Phase 1 architecture
 
 The project keeps collection, forecasting, optimisation, and execution as separate
-layers. Phase 1 implements only read-only collection and a basic historical load
-profile. It does not contain an optimiser or executor.
+layers. The current read-only phase implements collection, explainable forecasting,
+and advisory reserve estimation. It does not contain an executor or device-control
+path.
 
 `HomeAssistantClient` performs one allowlisted `GET /api/states` request per
 collection. `Collector` parses the selected Amber, Solcast, and GoodWe entities,
@@ -11,6 +12,23 @@ evaluates domain-specific health, and creates one timezone-aware
 observation through a shared persistence layer backed by SQLite or PostgreSQL.
 SQLAlchemy models and Alembic migrations define the portable schema. CLI programs
 only assemble these reusable components.
+
+## Production deployment
+
+The production deployment target is a Home Assistant App (formerly called an
+add-on) on the amd64 Home Assistant OS NUC. The package is a release candidate and
+has not yet completed live HAOS validation; continuous collection currently works
+from Windows. Supervisor injects `SUPERVISOR_TOKEN`; the App uses it only as a
+bearer token for `http://supervisor/core/api`. The existing GET-only client and
+collector are unchanged. Observations are written over the LAN to the external
+Synology PostgreSQL 17 `home_energy` database as `energy_app`.
+
+The deployment wrapper reads `/data/options.json`, constructs one URL-encoded
+PostgreSQL URL, performs explicit database revision/readiness and Home Assistant
+entity checks, starts a small internal health server, then executes the existing
+five-minute collector. Supervisor owns boot, watchdog, restart, and shutdown. No
+cron process, nested restart loop, SQLite production database, or device-control
+layer exists in the App.
 
 Health has independent telemetry, price, solar, and optional weather domains. The
 overall display summary currently derives from telemetry because Phase 1 observation
@@ -93,7 +111,7 @@ sample variability and age, EV telemetry, and completed-run error. Training rows
 must precede forecast creation, and the current partial local day is excluded from
 broad tiers so live and replay results are leakage-safe.
 
-Each reserve CLI run writes only its advisory demand projection to the existing
-local forecast tables. Completed horizons can be scored against eligible stored
+Each reserve CLI run writes only its advisory demand projection to the configured
+forecast tables. Completed horizons can be scored against eligible stored
 actuals by tier. This analytical feedback path has no executor or Home Assistant
 write capability.

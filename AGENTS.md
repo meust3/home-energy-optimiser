@@ -23,6 +23,16 @@ The project should eventually optimise:
 
 The current phase is strictly read-only.
 
+The canonical production database is PostgreSQL 17 on Synology. The production
+migration and an end-to-end live observation write have been manually validated.
+SQLite remains supported for local/offline development and as the retained final
+pre-migration backup; it is not a production fallback.
+
+The Home Assistant App package is a release candidate for the amd64 Home Assistant
+OS NUC. It has not yet been installed or proven in that environment. Independent EV
+telemetry is not yet integrated, so EV charging may reduce load-forecast and reserve
+estimate confidence.
+
 ## Architecture
 
 The intended architecture contains four separate layers:
@@ -53,7 +63,7 @@ Allowed:
 
 - HTTP GET requests to Home Assistant.
 - Reading entity states and attributes.
-- Writing observations to local SQLite or JSON files.
+- Writing observations to the configured PostgreSQL/SQLite repository or JSON files.
 - Producing advisory recommendations.
 - Running simulations and historical replay.
 
@@ -195,8 +205,9 @@ Each observation should include, where available:
 - weather condition when configured
 - data-health status
 
-Store data through the shared persistence layer. SQLite remains the local/offline
-fallback and PostgreSQL supports production/shared access:
+Store data through the shared persistence layer. PostgreSQL `home_energy` on the
+Synology NAS is the canonical production source of truth. SQLite remains available
+only for local/offline compatibility and tests:
 
 - data/energy_history.db
 
@@ -204,6 +215,13 @@ fallback and PostgreSQL supports production/shared access:
 canonical deployed-schema migration framework.
 
 Do not commit the database.
+
+The Home Assistant OS production collector is packaged as a Home Assistant App
+(formerly called an add-on). It authenticates to the Supervisor Core API proxy with
+`SUPERVISOR_TOKEN`, requires an explicit external PostgreSQL configuration, and
+must fail rather than fall back to SQLite. App packaging must not request host
+networking, privileged mode, device access, the Docker socket, or Supervisor API
+access.
 
 Prevent duplicate five-minute observation timestamps.
 

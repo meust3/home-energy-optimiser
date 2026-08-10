@@ -15,14 +15,17 @@ from energy_optimizer.persistence import open_repository
 
 
 def test_database_url_display_and_exception_redaction_hide_password():
-    value = "postgresql+psycopg://energy_dev:s3cr%40t@nas:5432/home_energy_dev"
+    value = (
+        "postgresql+psycopg://test_user:test-password%40example.invalid"
+        "@db.example.invalid:5432/test_db"
+    )
     display = display_database_url(value)
-    assert "energy_dev" in display
-    assert "nas" in display
-    assert "home_energy_dev" in display
-    assert "s3cr" not in display
+    assert "test_user" in display
+    assert "db.example.invalid" in display
+    assert "test_db" in display
+    assert "test-password" not in display
     redacted = redact_database_urls(f"failed at {value}")
-    assert "s3cr" not in redacted
+    assert "test-password" not in redacted
     assert "***" in redacted
 
 
@@ -182,14 +185,14 @@ def test_postgresql_database_url_never_falls_back_to_sqlite(monkeypatch, tmp_pat
     fallback = tmp_path / "must-not-exist.db"
     monkeypatch.setenv(
         "DATABASE_URL",
-        "postgresql+psycopg://energy_dev:secret@127.0.0.1:1/home_energy_dev",
+        "postgresql+psycopg://test_user:test-password@127.0.0.1:1/test_db",
     )
     monkeypatch.setenv("DATABASE_PATH", str(fallback))
     repository = open_repository()
     try:
         assert repository.backend == "postgresql"
-        assert repository.database_name == "home_energy_dev"
-        assert "secret" not in repository.target_display
+        assert repository.database_name == "test_db"
+        assert "test-password" not in repository.target_display
         assert not fallback.exists()
     finally:
         repository.close()

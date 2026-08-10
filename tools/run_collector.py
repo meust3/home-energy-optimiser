@@ -1,6 +1,7 @@
 """Run the drift-free, read-only five-minute collector."""
 
 import logging
+import threading
 import time
 from collections.abc import Callable
 from datetime import UTC, datetime
@@ -44,33 +45,53 @@ def save_with_retry(
 
 
 def run(
-    collect_once: Callable[[], None],
+    collect_once: Callable[[], object],
     *,
     interval: int,
     sleep: Callable[[float], None] = time.sleep,
     clock: Callable[[], float] = time.time,
+    stop_event: threading.Event | None = None,
+    on_success: Callable[[object], None] | None = None,
+    on_failure: Callable[[str], None] | None = None,
 ) -> None:
-    while True:
+    while stop_event is None or not stop_event.is_set():
         delay = seconds_to_next_boundary(clock(), interval)
-        sleep(delay)
+        if stop_event is not None:
+            if stop_event.wait(delay):
+                break
+        else:
+            sleep(delay)
         try:
-            collect_once()
+            result = collect_once()
+            if on_success is not None:
+                on_success(result)
         except HomeAssistantError as exc:
             LOGGER.error("Transient Home Assistant read failed: %s", exc)
+            if on_failure is not None:
+                on_failure("home_assistant")
         except DatabaseConnectionError as exc:
             LOGGER.error(
                 "Database connection failed; next boundary will retry: %s", exc
             )
+            if on_failure is not None:
+                on_failure("database")
         except DatabaseTransactionError as exc:
             LOGGER.error("Database transaction failed; write was rolled back: %s", exc)
+            if on_failure is not None:
+                on_failure("database")
 
 
-def main() -> int:
+def main(
+    *,
+    stop_event: threading.Event | None = None,
+    on_success: Callable[[object], None] | None = None,
+    on_failure: Callable[[str], None] | None = None,
+) -> int:
     configure_logging()
     config = load_config()
     store = ObservationStore()
 
-    def collect_once() -> None:
+    def collect_once() -> object:
         with HomeAssistantClient(
             config.ha_url,
             config.ha_token,
@@ -92,12 +113,19 @@ def main() -> int:
             observation.data_health.overall.score,
             result,
         )
+        return observation
 
     LOGGER.info(
         "Starting strictly read-only collector. No hardware commands are available."
     )
     try:
-        run(collect_once, interval=config.collection_interval_seconds)
+        run(
+            collect_once,
+            interval=config.collection_interval_seconds,
+            stop_event=stop_event,
+            on_success=on_success,
+            on_failure=on_failure,
+        )
     except KeyboardInterrupt:
         LOGGER.info("Collector stopped cleanly. No command was issued.")
     finally:

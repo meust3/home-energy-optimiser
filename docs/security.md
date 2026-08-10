@@ -14,10 +14,21 @@ excluded from serialization and representation. It is never printed, logged,
 placed in test fixtures, or stored in any database. Network exception messages are
 redacted before being raised.
 
+Inside the Home Assistant App, no long-lived token is configured. Supervisor
+provides `SUPERVISOR_TOKEN` because `homeassistant_api: true` is declared. The App
+maps it in memory to the existing secret-excluded collector configuration and uses
+the internal Core proxy. It never writes it to `/data`, logs, health output, or the
+database. `hassio_api`, host networking, privileged mode, the Docker socket, Home
+Assistant configuration access, devices, USB, GPIO, `SYS_ADMIN`, and `NET_ADMIN`
+are not requested.
+
 ## Ignored local files
 
 `.env`, `.venv`, SQLite files under `data/`, and `logs/` are ignored by Git. Check
 `git status` before every commit and never add credentials with a force option.
+The pre-publication audit found no real credential or sensitive data file in the
+tracked tree or reachable Git history. The local `.env` remains private and was
+never committed.
 
 ## Database privacy
 
@@ -25,6 +36,12 @@ redacted before being raised.
 and exception redaction and never prints an unredacted URL. Use `energy_app`,
 `energy_dev`, and `energy_readonly` under least privilege. PostgreSQL must remain on
 trusted LAN/Tailscale rather than the public internet.
+
+App database options are read once from Supervisor-managed `/data/options.json`.
+The password is represented as a secret, URL-encoded during connection-string
+construction, and redacted from errors. Startup fails closed on PostgreSQL or
+schema failure and cannot select SQLite. External PostgreSQL backups remain the
+operator's responsibility and are not included in Home Assistant App backups.
 
 The local database can reveal occupancy patterns, energy use, and household
 behavior. Keep it private, protect backups, and share only deliberately sanitized
@@ -51,4 +68,4 @@ not add endpoints or write capabilities and are not mandatory for overall health
 Optional EV sensors and helpers are also GET-only. The project does not create or
 change helpers, charger state, inverter settings, or Modbus registers. Energy-flow
 normalization never overwrites raw power. Forecast comparison writes only derived
-actual/error values to local SQLite.
+actual/error values to the configured database.
