@@ -1,6 +1,7 @@
 import importlib.util
 import json
 import logging
+import re
 import sys
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -409,11 +410,11 @@ def test_app_patch_versions_are_consistent():
     manifest = Path("home_energy_optimiser/config.yaml").read_text(encoding="utf-8")
     dockerfile = Path("home_energy_optimiser/Dockerfile").read_text(encoding="utf-8")
     project = Path("pyproject.toml").read_text(encoding="utf-8")
-    assert APP_VERSION == "0.3.0"
-    assert 'version: "0.3.0"' in manifest
-    assert "ARG BUILD_VERSION=0.3.0" in dockerfile
-    assert "ARG APP_SOURCE_REF=v0.3.0" in dockerfile
-    assert 'version = "0.3.0"' in project
+    assert APP_VERSION == "0.3.1"
+    assert 'version: "0.3.1"' in manifest
+    assert "ARG BUILD_VERSION=0.3.1" in dockerfile
+    assert "ARG APP_SOURCE_REF=v0.3.1" in dockerfile
+    assert 'version = "0.3.1"' in project
 
 
 def test_app_launcher_execs_existing_collector_without_restart_loop():
@@ -498,3 +499,88 @@ def test_docker_image_uses_root_only_for_bootstrap_then_drops_privileges():
     assert "USER 0:0" in dockerfile
     assert "SUPERVISOR_TOKEN" not in dockerfile
     assert "DATABASE_URL" not in dockerfile
+
+
+def test_app_page_documentation_and_changelog_are_packaged():
+    app_directory = Path("home_energy_optimiser")
+    changelog = app_directory / "CHANGELOG.md"
+    documentation = app_directory / "DOCS.md"
+    assert changelog.is_file()
+    assert documentation.is_file()
+    changelog_text = changelog.read_text(encoding="utf-8")
+    assert "## 0.3.1" in changelog_text
+    assert "## 0.3.0" in changelog_text
+
+
+def test_app_documentation_contains_only_placeholder_connection_details():
+    documentation = Path("home_energy_optimiser/DOCS.md").read_text(encoding="utf-8")
+    private_ipv4 = re.compile(
+        r"\b(?:10(?:\.\d{1,3}){3}|192\.168(?:\.\d{1,3}){2}|"
+        r"172\.(?:1[6-9]|2\d|3[01])(?:\.\d{1,3}){2})\b"
+    )
+    credential_url = re.compile(r"[a-z][a-z0-9+.-]*://[^\s/:]+:[^\s/@]+@", re.I)
+    secret_assignment = re.compile(
+        r"(?:db_password|ha_token)\s*[:=]\s*['\"]?[^\s<'\"]+", re.I
+    )
+    assert "YOUR_NAS_HOST" in documentation
+    assert not private_ipv4.search(documentation)
+    assert not credential_url.search(documentation)
+    assert not secret_assignment.search(documentation)
+    assert "-----BEGIN PRIVATE KEY-----" not in documentation
+
+
+def test_home_assistant_image_label_uses_app_type():
+    dockerfile = Path("home_energy_optimiser/Dockerfile").read_text(encoding="utf-8")
+    assert 'io.hass.type="app"' in dockerfile
+    assert 'io.hass.type="addon"' not in dockerfile
+
+
+def test_app_package_contains_no_sensitive_artifacts():
+    app_directory = Path("home_energy_optimiser")
+    forbidden_names = {
+        ".env",
+        "backups",
+        "captures",
+        "credentials",
+        "data",
+        "exports",
+        "logs",
+        "secrets",
+    }
+    forbidden_suffixes = {
+        ".backup",
+        ".bak",
+        ".db",
+        ".dump",
+        ".jsonl",
+        ".key",
+        ".p12",
+        ".pem",
+        ".pfx",
+        ".sql",
+        ".sqlite",
+        ".sqlite3",
+    }
+    offenders = [
+        path
+        for path in app_directory.rglob("*")
+        if path.name.lower() in forbidden_names
+        or path.name.lower().startswith(".env.")
+        or (path.is_file() and path.suffix.lower() in forbidden_suffixes)
+    ]
+    assert offenders == []
+
+    sensitive_content = re.compile(
+        r"-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----|"
+        r"\b(?:10(?:\.\d{1,3}){3}|192\.168(?:\.\d{1,3}){2}|"
+        r"172\.(?:1[6-9]|2\d|3[01])(?:\.\d{1,3}){2})\b|"
+        r"[a-z][a-z0-9+.-]*://[^\s/:]+:[^\s/@]+@|"
+        r"\bgh[pousr]_[A-Za-z0-9]{20,}\b|\bAKIA[A-Z0-9]{16}\b",
+        re.I,
+    )
+    content_offenders = [
+        path
+        for path in app_directory.rglob("*")
+        if path.is_file() and sensitive_content.search(path.read_text(encoding="utf-8"))
+    ]
+    assert content_offenders == []

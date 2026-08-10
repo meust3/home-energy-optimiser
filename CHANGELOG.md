@@ -1,6 +1,15 @@
 # Changelog
 
-## 0.3.0 release candidate (Unreleased)
+## 0.3.1
+
+- Added the Home Assistant App's detailed App-page documentation and user-facing
+  package changelog.
+- Updated the Home Assistant image type label from the legacy `addon` value to
+  `app`.
+- Made no dashboard, API, collector, database, forecast, reserve, security,
+  Ingress, Home Assistant service, or device-control changes.
+
+## 0.3.0
 
 - Added an experimental, administrator-only Home Assistant Ingress dashboard with
   live energy overview, historical charts, persisted forecast-versus-actual views,
@@ -18,8 +27,8 @@
 - Made no household-demand, confidence-tier, reserve-estimation, database-schema,
   Home Assistant entity, forecast-worker, scheduler, or device-control changes.
 
-Version 0.3.0 remains a release candidate until built, installed, and verified on
-the production Home Assistant OS NUC.
+Version 0.3.0 was not installed on the production Home Assistant OS NUC. Version
+0.3.1 supersedes its App packaging metadata and remains unverified on that host.
 
 ## 0.2.1
 

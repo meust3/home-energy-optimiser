@@ -12,8 +12,8 @@ collects and analyses data but does not control Home Assistant or energy hardwar
 - **PostgreSQL production:** working and manually validated end to end
 - **Continuous collector:** App v0.2.1 is installed and collecting successfully on
   the Home Assistant OS 18.1 NUC
-- **Ingress dashboard:** v0.3.0 release candidate is implemented locally and awaits
-  image build plus real-NUC installation verification
+- **Ingress dashboard:** v0.3.1 release candidate passes local image validation and
+  awaits real-NUC installation verification
 - **Reserve forecasting:** working and advisory
 - **Solar and price forecasts:** Solcast and Amber Electric integrated
 - **EV telemetry:** not yet independently integrated
@@ -23,7 +23,8 @@ PostgreSQL 17 on the Synology NAS is the canonical production source of truth. T
 SQLite-to-PostgreSQL migration and exact validation are complete. Home Assistant
 App v0.2.1 fixed Supervisor options-file permissions while retaining an
 unprivileged application process; it is now the working production collector.
-Version 0.3.0 adds a strictly read-only Ingress presentation layer and remains an
+Version 0.3.0 added a strictly read-only Ingress presentation layer. Version 0.3.1
+corrects App packaging metadata and documentation; the dashboard remains an
 unverified release candidate until installed on that host.
 
 Forecast confidence can remain medium or low while household history is limited,
@@ -72,7 +73,7 @@ annotation, and exports.
 - Provides database, history, energy-flow, reserve, export, and health tooling.
 - Presents existing stored observations and analytical records through an
   administrator-only Home Assistant Ingress dashboard and bounded GET-only API in
-  the v0.3.0 release candidate.
+  the dashboard introduced in v0.3.0.
 
 The dashboard does not run forecasts or reserve estimation. Persisted data may be
 sparse, and the current schema stores only a subset of the complete reserve result.
@@ -120,9 +121,9 @@ The amd64 Home Assistant App deployment wrapper:
 - runs the existing five-minute collector as an unprivileged process;
 - exposes a non-secret health endpoint for Supervisor watchdog checks;
 - presents existing stored data through administrator-only Ingress and a bounded
-  GET-only API in the v0.3.0 release candidate.
+  GET-only API introduced in v0.3.0.
 
-Version 0.2.1 is the confirmed production collector. Version 0.3.0 is ready for
+Version 0.2.1 is the confirmed production collector. Version 0.3.1 is ready for
 release-candidate review and local image validation but has not been installed on
 the production NUC. See:
 
@@ -130,6 +131,9 @@ the production NUC. See:
 - [Installation](docs/home_assistant_app_installation.md)
 - [Troubleshooting and rollback](docs/home_assistant_app_troubleshooting.md)
 - [Dashboard](docs/dashboard.md)
+- [App Store introduction](home_energy_optimiser/README.md)
+- [App page documentation](home_energy_optimiser/DOCS.md)
+- [App changelog](home_energy_optimiser/CHANGELOG.md)
 
 ## Quick start — development
 
