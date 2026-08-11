@@ -92,7 +92,7 @@ def dashboard_smoke() -> None:
 
         def status(self):
             return StatusResponse(
-                app_version="0.3.0",
+                app_version="0.3.2",
                 overall_status="healthy",
                 collector_status="healthy",
                 database_status="healthy",
@@ -128,7 +128,7 @@ def dashboard_smoke() -> None:
         assert status == 200 and f'<base href="{prefix}">'.encode() in shell
         status, css = request(
             server,
-            prefix + "static/app.css?v=0.3.0",
+            prefix + "static/app.css?v=0.3.2",
             {"X-Ingress-Path": prefix},
         )
         assert status == 200 and b"prefers-color-scheme" in css

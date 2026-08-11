@@ -2,9 +2,10 @@
 
 Home Energy Optimiser is packaged as a Home Assistant App (formerly called an
 add-on) without changing collector business logic. Version 0.2.1 is installed and
-collecting successfully on the amd64 Home Assistant OS 18.1 NUC. Version 0.3.0 adds
-an experimental administrator-only read-only Ingress dashboard and remains a
-release candidate until installed and verified on that host.
+collecting successfully on the amd64 Home Assistant OS 18.1 NUC. Version 0.3.0 added
+an experimental administrator-only read-only Ingress dashboard, and version 0.3.2
+adds resilient sparse-data presentation. It remains a release candidate until
+installed and verified on that host.
 
 ```text
 Home Assistant Core

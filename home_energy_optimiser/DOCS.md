@@ -5,7 +5,7 @@ five-minute intervals, stores it in an external PostgreSQL database, and present
 the stored information in an administrator-only Ingress dashboard. It provides
 explainable, advisory analysis; it does not operate energy equipment.
 
-Version 0.3.1 is a release candidate and has not been verified on the production
+Version 0.3.2 is a release candidate and has not been verified on the production
 Home Assistant OS host.
 
 ## Read-only safety boundary
@@ -127,5 +127,5 @@ Before rollback, take and verify a PostgreSQL backup and preserve the current Ap
 configuration securely. Install version 0.2.1 through the supported Home Assistant
 App version workflow, restart it, and verify database and collection health.
 Version 0.2.1 retains the read-only collector but does not provide the v0.3.0
-Ingress dashboard. The v0.3.1 release makes no database schema change, so no
+Ingress dashboard. The v0.3.2 release makes no database schema change, so no
 database downgrade is required.

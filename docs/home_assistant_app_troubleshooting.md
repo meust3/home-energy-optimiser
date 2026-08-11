@@ -24,7 +24,7 @@ database and never migrates PostgreSQL automatically.
 - **No advancing rows:** ensure the App is running, wait for a five-minute boundary,
   check PostgreSQL from a trusted machine, and ensure no Windows collector is also
   running.
-- **Blank Ingress page:** confirm v0.3.0 is installed, `ingress: true` and
+- **Blank Ingress page:** confirm v0.3.2 is installed, `ingress: true` and
   `ingress_port: 8099` are present in the manifest, then reload through the Home
   Assistant sidebar. Browser assets are relative to the trusted dynamic Ingress
   prefix; no host port should be added as a workaround.
