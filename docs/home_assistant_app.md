@@ -4,8 +4,9 @@ Home Energy Optimiser is packaged as a Home Assistant App (formerly called an
 add-on) without changing collector business logic. Version 0.2.1 is installed and
 collecting successfully on the amd64 Home Assistant OS 18.1 NUC. Version 0.3.0 added
 an experimental administrator-only read-only Ingress dashboard, and version 0.3.2
-adds resilient sparse-data presentation. It remains a release candidate until
-installed and verified on that host.
+adds resilient sparse-data presentation. Unreleased v0.4.0 adds optional
+privacy-minimized vehicle telemetry and requires an explicit additive database
+migration before the App update. It is not operational on that host.
 
 ```text
 Home Assistant Core
@@ -48,7 +49,7 @@ and exports one explicit `DATABASE_URL`. It then verifies:
 
 1. the URL is PostgreSQL, never SQLite;
 2. PostgreSQL connectivity and authentication;
-3. Alembic revision `20260810_01`;
+3. the exact expected Alembic revision (`20260811_01` for the v0.4.0 candidate);
 4. tables needed for collection and analytical consumers;
 5. the Core API through the Supervisor proxy;
 6. all required collector entities through GET requests.
@@ -77,6 +78,12 @@ loopback is available for tests. `/health` remains reachable by Supervisor watch
 `X-Forwarded-For` and Home Assistant identity headers are neither trusted nor
 stored. `X-Ingress-Path` is used only after peer authorization to construct a safe
 relative browser base path. This release creates no Home Assistant entities.
+
+Optional v0.4.0 vehicle entity IDs are supplied through App options and mapped to
+normal environment configuration. Empty values are unconfigured. The collector
+reads configured states through the same bulk GET; optional failures remain in the
+EV readiness result and cannot fail startup or core collection. See
+[vehicle integration](byd_vehicle_integration.md).
 
 ## Image and data ownership
 

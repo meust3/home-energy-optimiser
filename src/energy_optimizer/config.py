@@ -28,6 +28,16 @@ def _env_bool(name: str, default: bool = False) -> bool:
     raise ConfigurationError(f"{name} must be true or false")
 
 
+def _positive_env_int(name: str, default: int) -> int:
+    try:
+        value = int(os.getenv(name, str(default)))
+    except ValueError as exc:
+        raise ConfigurationError(f"{name} must be a positive integer") from exc
+    if value <= 0:
+        raise ConfigurationError(f"{name} must be a positive integer")
+    return value
+
+
 def _weekend_days() -> set[int]:
     raw = os.getenv("DEMAND_WEEKEND_DAYS", "5,6")
     try:
@@ -105,6 +115,18 @@ def load_config(env_file: Path | None = Path(".env")) -> CollectorConfig:
         ev_plausible_power_min_w=float(os.getenv("EV_PLAUSIBLE_POWER_MIN_W", "1800")),
         ev_plausible_power_max_w=float(os.getenv("EV_PLAUSIBLE_POWER_MAX_W", "12000")),
         ev_minimum_session_minutes=int(os.getenv("EV_MINIMUM_SESSION_MINUTES", "30")),
+        ev_vehicle_enabled=_env_bool("EV_VEHICLE_ENABLED"),
+        ev_vehicle_charging_entity_id=_optional_env("EV_CHARGING_ENTITY"),
+        ev_vehicle_plugged_entity_id=_optional_env("EV_PLUGGED_ENTITY"),
+        ev_vehicle_online_entity_id=_optional_env("EV_ONLINE_ENTITY"),
+        ev_vehicle_soc_entity_id=_optional_env("EV_SOC_ENTITY"),
+        ev_vehicle_battery_power_entity_id=_optional_env("EV_BATTERY_POWER_ENTITY"),
+        ev_vehicle_telemetry_updated_entity_id=_optional_env(
+            "EV_TELEMETRY_UPDATED_ENTITY"
+        ),
+        ev_vehicle_location_entity_id=_optional_env("EV_LOCATION_ENTITY"),
+        ev_home_state=os.getenv("EV_HOME_STATE", "home").strip() or "home",
+        ev_telemetry_stale_seconds=_positive_env_int("EV_TELEMETRY_STALE_SECONDS", 900),
         forecast_retention_days=int(os.getenv("FORECAST_RETENTION_DAYS", "365")),
         minimum_soc_percent=float(os.getenv("MINIMUM_SOC_PERCENT", "20")),
         emergency_reserve_kwh=float(os.getenv("EMERGENCY_RESERVE_KWH", "6")),

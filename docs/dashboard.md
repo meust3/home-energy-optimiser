@@ -1,9 +1,9 @@
 # Read-only Ingress dashboard
 
-Version 0.3.2 is an experimental release candidate that presents existing stored
-energy data through Home Assistant Ingress. It has not yet been installed or
-verified on the production NUC. Home Assistant App v0.2.1 remains the confirmed
-working collector.
+Version 0.3.2 publishes the experimental dashboard but has not yet been verified on
+the production NUC. Unreleased v0.4.0 adds read-only vehicle presentation after an
+explicit database migration. Home Assistant App v0.2.1 remains the confirmed
+working production collector.
 
 ## Architecture
 
@@ -15,8 +15,9 @@ SIGINT set its existing stop event, then shut down the web server. Browser threa
 use short-lived repositories and cannot stop or mark the collector unhealthy.
 
 The implementation deliberately adds no Uvicorn/Gunicorn worker, second collector,
-cron process, forecast worker, reserve scheduler, Node build pipeline, or database
-migration. The frontend has no runtime or third-party chart dependency and therefore
+cron process, forecast worker, reserve scheduler, or Node build pipeline. The
+v0.4.0 migration is an explicit pre-update operator step and never runs from the
+dashboard or App startup. The frontend has no runtime or third-party chart dependency and therefore
 adds no separate licence obligation beyond the repository licence.
 
 ## Ingress and access
@@ -36,10 +37,12 @@ Ingress origin.
 ## Pages and refresh
 
 - **Overview** shows collector/PostgreSQL/Home Assistant state, latest stored KPIs,
-  normalized flow directions, and a limited persisted reserve summary. Missing
+  normalized flow directions, a limited persisted reserve summary, and optional
+  vehicle SOC/home/plugged/charging/online/freshness/raw-power context. Missing
   normalized directions produce one explanation instead of repeated labels.
 - **History** charts house/baseline, PV, grid, battery, SOC, and Amber prices over
-  6 hours through 30 days. Missing buckets remain gaps, wholly missing series use
+  6 hours through 30 days, plus optional vehicle SOC and fresh plugged/charging
+  markers. Missing buckets remain gaps, wholly missing series use
   explicit empty states, and partially available series remain chartable.
 - **Forecasts** selects existing persisted runs and compares their stored expected
   values with observations at request time without a database write.
@@ -47,7 +50,8 @@ Ingress origin.
   `reserve_estimator` run and distinguishes unavailable run values from fields not
   stored by the current schema.
 - **Data Quality** summarizes coverage, gaps, domain health, baseline eligibility,
-  forecast tiers, EV limitations, sign confidence, and balance residuals.
+  forecast tiers, optional vehicle availability/freshness, known charging-row
+  exclusions, the lack of charger AC power, sign confidence, and balance residuals.
 
 Status and live data refresh no faster than every 30 seconds. Loaded analytical
 pages refresh every five minutes. Polling pauses while the document is hidden, and
@@ -58,8 +62,9 @@ superseded requests are aborted. Collection remains five-minute resolution.
 The dashboard is presentation only. It has no settings page, buttons that apply an
 action, mutation route, Home Assistant service call, control entity, Modbus write,
 forecast trigger, or reserve trigger. Sparse forecast data receives an explicit
-empty state. Independent EV telemetry is not available in production, so no EV
-power is inferred for display and a contamination warning remains visible.
+empty state. Vehicle raw battery power is labelled as raw supporting telemetry and
+never displayed as charger AC demand. EV energy separation remains incomplete
+until direct charger power exists, so the contamination limitation remains visible.
 
 Current reserve persistence is intentionally incomplete. The dashboard cannot show
 unpersisted SOC, tradable energy, opportunity reasoning, EV demand, or readiness and

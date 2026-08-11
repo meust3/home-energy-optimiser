@@ -12,11 +12,12 @@ collects and analyses data but does not control Home Assistant or energy hardwar
 - **PostgreSQL production:** working and manually validated end to end
 - **Continuous collector:** App v0.2.1 is installed and collecting successfully on
   the Home Assistant OS 18.1 NUC
-- **Ingress dashboard:** v0.3.2 release candidate passes local image validation and
-  awaits real-NUC installation verification
+- **Ingress dashboard:** v0.3.2 is published and awaits real-NUC installation
+  verification
 - **Reserve forecasting:** working and advisory
 - **Solar and price forecasts:** Solcast and Amber Electric integrated
-- **EV telemetry:** not yet independently integrated
+- **EV telemetry:** optional read-only vehicle-cloud integration is implemented for
+  the unreleased v0.4.0 release candidate
 - **Automated control or trading:** not enabled
 
 PostgreSQL 17 on the Synology NAS is the canonical production source of truth. The
@@ -27,7 +28,9 @@ Version 0.3.0 added a strictly read-only Ingress presentation layer, and version
 0.3.1 corrected App packaging metadata and documentation. Version 0.3.2 makes
 sparse forecast, reserve, and normalized-flow data look intentional rather than
 broken. The dashboard remains unverified on the production host until installation
-testing is complete.
+testing is complete. Version 0.4.0 adds optional vehicle status, SOC, freshness,
+home/away, and confirmed-charging detection without pretending raw vehicle battery
+power is charger AC demand. It is not released or operational in production.
 
 Forecast confidence can remain medium or low while household history is limited,
 and EV charging may still be embedded in historical household demand.
@@ -71,7 +74,8 @@ annotation, and exports.
   energy for manual review.
 - Integrates Solcast solar forecasts and Amber import/export pricing.
 - Stores forecast runs, projected-versus-actual comparisons, and derivation audits.
-- Supports reversible manual EV-session annotation without inventing EV power.
+- Supports reversible manual EV-session annotation and optional fresh
+  vehicle-reported charging detection without inventing EV power.
 - Provides database, history, energy-flow, reserve, export, and health tooling.
 - Presents existing stored observations and analytical records through an
   administrator-only Home Assistant Ingress dashboard and bounded GET-only API in
@@ -131,13 +135,14 @@ The amd64 Home Assistant App deployment wrapper:
   GET-only API introduced in v0.3.0.
 
 Version 0.2.1 is the confirmed production collector. Version 0.3.2 is ready for
-release-candidate review and local image validation but has not been installed on
-the production NUC. See:
+installation but has not been verified on the production NUC. Version 0.4.0 is an
+unreleased schema-changing release candidate. See:
 
 - [App design](docs/home_assistant_app.md)
 - [Installation](docs/home_assistant_app_installation.md)
 - [Troubleshooting and rollback](docs/home_assistant_app_troubleshooting.md)
 - [Dashboard](docs/dashboard.md)
+- [Read-only vehicle telemetry](docs/byd_vehicle_integration.md)
 - [App Store introduction](home_energy_optimiser/README.md)
 - [App page documentation](home_energy_optimiser/DOCS.md)
 - [App changelog](home_energy_optimiser/CHANGELOG.md)
@@ -179,6 +184,14 @@ retained for development, recovery, and audit use; dry-run is the default and
 production writes require explicit confirmation. See
 [database migration](docs/database_migration.md).
 
+For v0.4.0, commit, push, build, container-test, tag, and validate the immutable
+release before changing production PostgreSQL. Refresh Home Assistant and confirm
+the update is discoverable before stopping v0.3.2 for the short migration/update
+window. If the v0.4.0 App then fails, prefer the reviewed Windows v0.4.0 collector
+against PostgreSQL revision `20260811_01`; rollback to v0.3.2 requires either a
+physical `alembic downgrade 20260810_01` or restoration of the verified pre-release
+dump. Never substitute `alembic stamp` for a physical schema downgrade.
+
 ## Documentation
 
 - [Architecture](docs/architecture.md)
@@ -196,7 +209,8 @@ production writes require explicit confirmation. See
 1. Validate the App on the live Home Assistant OS NUC.
 2. Move continuous 24/7 collection to the NUC.
 3. Add read-only Home Assistant health/status entities and a dashboard.
-4. Integrate independent EV charger telemetry.
+4. Validate read-only vehicle telemetry, then integrate independent EV charger AC
+   power.
 5. Improve the demand model with longer household history.
 6. Add a decision engine in advisory/shadow mode.
 7. Introduce controlled automation only after explicit validation.

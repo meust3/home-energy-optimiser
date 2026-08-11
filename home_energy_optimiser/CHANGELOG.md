@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.4.0 — release candidate (unreleased)
+
+- Added optional read-only vehicle charging, plugged, online, SOC, home/away, and
+  freshness telemetry configured through App options.
+- Added a vehicle status card, SOC history, state markers, reserve context, and EV
+  data-quality warnings without adding controls.
+- Excluded fresh confirmed charging from household baseline learning when direct
+  charger AC power is unavailable; measured house load remains unchanged and no EV
+  power is invented.
+- Stored vehicle battery power only as explicitly labelled raw vehicle-side data,
+  never as charger AC demand.
+- Requires additive database migration `20260811_01` before App update; migration
+  remains an explicit operator step and is not run at startup.
+- Retained GET-only Home Assistant access, UID/GID 10001 runtime, protected App
+  options, PostgreSQL fail-closed startup, and no device-control path.
+- This package is not yet released or verified on the production Home Assistant
+  OS host.
+
 ## 0.3.2
 
 - Fixed forecast metadata wrapping and introduced a stable responsive key/value

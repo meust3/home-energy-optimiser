@@ -30,6 +30,7 @@ function energy(value) { return value == null ? "Unavailable" : `${number(value,
 function price(value) { return value == null ? "Unavailable" : `${number(value, 3)} AUD/kWh`; }
 function percent(value) { return value == null ? "Unavailable" : `${number(value, 1)}%`; }
 function age(seconds) { if (seconds == null) return "Unavailable"; if (seconds < 60) return `${Math.round(seconds)} sec`; return `${Math.round(seconds / 60)} min`; }
+function yesNoUnknown(value, yes, no) { return value == null ? "Unknown" : value ? yes : no; }
 function safeText(value) {
   const text = value == null || value === "" ? "Unavailable" : String(value);
   return text.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;").replaceAll("'", "&#39;");
@@ -90,6 +91,7 @@ async function loadLive() {
       $("#kpis").innerHTML = '<div class="empty-state">Waiting for the first persisted observation.</div>';
       $("#energy-flow").innerHTML = '<div class="empty-state flow-empty">Waiting for normalized flow data.</div>';
       $("#flow-note").textContent = missingDirectionalFlowMessage;
+      $("#overview-ev").querySelector(".loading-block")?.replaceWith(Object.assign(document.createElement("div"), { className: "empty-state", textContent: "Waiting for the first persisted observation." }));
       return;
     }
     setState("#overview-state", `Stored slot ${localTime(data.slot_utc)}`);
@@ -130,6 +132,26 @@ async function loadLive() {
       : missingFlowCount
         ? "Some detailed directional flow values are unavailable for this slot."
         : "Directions use persisted normalized flow fields.";
+    const evCard = $("#overview-ev");
+    evCard.querySelector(".loading-block")?.remove(); evCard.querySelector("dl")?.remove(); evCard.querySelector(".empty-state")?.remove(); evCard.querySelector(".ev-help")?.remove();
+    const freshness = $("#ev-freshness");
+    if (!data.ev_vehicle_configured) {
+      freshness.textContent = "Disabled"; freshness.className = "badge badge-muted";
+      evCard.insertAdjacentHTML("beforeend", '<div class="empty-state">Vehicle telemetry is disabled or not configured.</div>');
+    } else {
+      freshness.textContent = data.ev_telemetry_fresh ? "Fresh" : data.ev_vehicle_status === "stale" ? "Stale" : "Unavailable";
+      freshness.className = `badge ${data.ev_telemetry_fresh ? "badge-safe" : "badge-muted"}`;
+      evCard.insertAdjacentHTML("beforeend", definition([
+        ["Vehicle SOC", percent(data.ev_vehicle_soc_percent)],
+        ["Location", yesNoUnknown(data.ev_at_home, "At home", "Away")],
+        ["Connection", yesNoUnknown(data.ev_plugged_in, "Plugged in", "Unplugged")],
+        ["Charging", yesNoUnknown(data.ev_charging_active, "Charging", "Not charging")],
+        ["Vehicle cloud", yesNoUnknown(data.ev_vehicle_online, "Online", "Offline")],
+        ["Telemetry age", age(data.ev_telemetry_age_seconds)],
+        ["Vehicle battery power (raw)", power(data.ev_vehicle_battery_power_w_raw)],
+      ]));
+      evCard.insertAdjacentHTML("beforeend", '<p class="ev-help">Vehicle battery power is vehicle-side/raw telemetry and is not treated as charger AC demand.</p>');
+    }
   } catch (error) { setState("#overview-state", error.message, "error-state"); }
 }
 
@@ -158,7 +180,7 @@ async function loadReserve() {
       ["Demand", "Only demand values recorded with this forecast run can be shown.", [reserveRow("Expected household", data.expected_household_demand_kwh, energy), notStoredRow("Expected EV"), reserveRow("State source", data.state_source)]],
       ["Reserve", "Stored reserve requirements remain advisory.", [reserveRow("Gross requirement", data.gross_reserve_requirement_kwh, energy), reserveRow("Capacity-capped", data.capacity_capped_reserve_kwh, energy), notStoredRow("Readiness")]],
       ["Opportunity", "Opportunity reasoning is not stored by the current schema.", [reserveRow("Horizon start", data.horizon_start_utc, localTime), reserveRow("Effective boundary", data.horizon_end_utc, localTime), notStoredRow("Opportunity details")]],
-      ["Confidence", "Independent EV telemetry is not persisted with the reserve result.", [reserveRow("Overall", confidence), reserveRow("Tier usage", tierUsage), notStoredRow("Independent EV telemetry")]],
+      ["Confidence", "Vehicle SOC is context only and does not change the reserve algorithm.", [reserveRow("Overall", confidence), reserveRow("Tier usage", tierUsage), reserveRow("Vehicle SOC (context only)", data.ev_vehicle_soc_percent, percent)]],
       ["Persistence", "The complete ReserveEstimate output is not stored by the current schema.", [reserveRow("Stored fields", storedFields), ["Command issued", "No", "available"], ["Full estimate", null, "not-stored"]]],
     ];
     content.innerHTML = `<aside class="panel schema-notice" role="note"><strong>Stored result coverage</strong><p>This dashboard shows only fields persisted by the current reserve-result schema. Missing stored values are labelled separately from fields the schema does not store.</p></aside>${sections.map(([title, help, rows]) => `<article class="panel reserve-card"><h3>${title}</h3><p class="section-help">${help}</p>${definition(rows)}</article>`).join("")}`;
@@ -171,6 +193,7 @@ const chartDefinitions = [
   ["Grid import / export", "Power (kW)", [["Import", "grid_import_power_w"], ["Export", "grid_export_power_w"]], v => v / 1000, "No grid import/export data is available for this period."],
   ["Battery charge / discharge", "Power (kW)", [["Charge", "battery_charge_power_w"], ["Discharge", "battery_discharge_power_w"]], v => v / 1000, "No battery charge/discharge data is available for this period."],
   ["Battery state of charge", "Percent", [["SOC", "battery_soc_percent"]], v => v],
+  ["EV state of charge", "Percent", [["Vehicle SOC", "ev_vehicle_soc_percent"]], v => v, "No vehicle SOC data is available for this period."],
   ["Amber prices", "AUD/kWh", [["Buy", "amber_buy_price_aud_per_kwh"], ["Sell", "amber_sell_price_aud_per_kwh"]], v => v],
 ];
 
@@ -219,13 +242,25 @@ function makeChart(title, unit, series, points, transform = value => value, empt
   return article;
 }
 
+function makeEVTimeline(points) {
+  const article = document.createElement("article"); article.className = "panel chart-panel";
+  article.innerHTML = '<h3>EV connection history</h3><p class="muted">Fresh vehicle-reported charging and plugged states only. Missing states remain unknown.</p>';
+  const marked = points.filter(point => point.ev_charging_active === true || point.ev_plugged_in === true);
+  if (!marked.length) {
+    article.insertAdjacentHTML("beforeend", '<div class="empty-state chart-empty" role="status"><strong>No EV state markers</strong><span>No fresh plugged or charging state is stored for this period.</span></div>');
+    return article;
+  }
+  article.insertAdjacentHTML("beforeend", `<div class="ev-timeline">${marked.map(point => `<span class="ev-marker ${point.ev_charging_active ? "charging" : "plugged"}">${safeText(localTime(point.timestamp_utc))} · ${point.ev_charging_active ? "Charging" : "Plugged idle"}</span>`).join("")}</div>`);
+  return article;
+}
+
 async function loadHistory() {
   const range = $("#history-range").value; setState("#history-state", "Loading bounded history…"); $("#history-charts").innerHTML = "";
   try {
     const data = await request("history", "timeseries", { range, resolution: "auto" });
     setState("#history-state", `Stored observations from ${localTime(data.requested_start_utc)} to ${localTime(data.requested_end_utc)}.`);
     $("#history-summary").innerHTML = `<span>${data.actual_resolution} resolution</span><span>${data.point_count} chart points</span><span>${number(data.coverage_percent, 1)}% coverage</span><span>${data.missing_slot_count} missing five-minute slots</span>`;
-    const root = $("#history-charts"); chartDefinitions.forEach(def => root.append(makeChart(def[0], def[1], def[2], data.points, def[3], def[4])));
+    const root = $("#history-charts"); chartDefinitions.forEach(def => root.append(makeChart(def[0], def[1], def[2], data.points, def[3], def[4]))); root.append(makeEVTimeline(data.points));
   } catch (error) { setState("#history-state", error.message, "error-state"); $("#history-charts").innerHTML = `<div class="panel error-state">${safeText(error.message)}</div>`; }
 }
 
@@ -262,11 +297,13 @@ async function loadQuality() {
       ["Missing slots", data.missing_slots, `Longest gap ${data.longest_gap_minutes} min`],
       ["Complete days", data.complete_calendar_days, `${data.complete_overnight_periods} complete overnights`],
       ["Baseline training", data.eligible_baseline_rows, `${Object.values(data.ineligible_baseline_rows_by_reason).reduce((a,b) => a+b,0)} ineligible rows`],
-      ["EV telemetry", data.independent_ev_telemetry_available ? "Available" : "Unavailable", data.ev_contamination_warning ? "House load may include EV charging" : "Independent charger power present"],
+      ["EV telemetry", data.ev_integration_configured ? data.ev_telemetry_fresh ? "Fresh" : "Needs attention" : "Disabled", data.ev_telemetry_available ? "Vehicle telemetry available" : "Vehicle telemetry unavailable"],
+      ["Charger AC power", data.independent_ac_charger_power_available ? "Available" : "No", `${data.known_charging_rows_excluded} known charging rows excluded`],
       ["Balance residual", power(data.average_absolute_balance_residual_w), `Signs: ${Object.entries(data.sign_convention_confidence).map(([k,v]) => `${k} ${v}`).join(", ")}`],
     ];
     const domains = Object.entries(data.domain_health).map(([name, value]) => `<article class="panel"><h3>${safeText(name[0].toUpperCase()+name.slice(1))}</h3>${definition([["Healthy", value.healthy_count], ["Unhealthy", value.unhealthy_count], ["Average score", percent(value.average_score)], ["Warnings", value.warning_count], ["Errors", value.error_count]])}<ul class="issue-list">${value.most_common_issues.slice(0,3).map(issue => `<li>${safeText(issue.code)} · ${issue.count}</li>`).join("") || "<li>No persisted issues</li>"}</ul></article>`).join("");
-    $("#quality-content").innerHTML = `<div class="quality-grid">${cards.map(([label,value,detail]) => `<article class="panel"><p class="eyebrow">${safeText(label)}</p><div class="quality-metric">${safeText(value)}</div><p class="muted">${safeText(detail)}</p></article>`).join("")}</div><h3>Domain health</h3><div class="quality-grid">${domains}</div>`;
+    const evWarning = data.ev_contamination_warning ? '<aside class="panel schema-notice" role="note"><strong>EV contamination warning</strong><p>Confirmed fresh charging rows are excluded, but EV energy separation is incomplete until independent charger AC power is measured and validated.</p></aside>' : "";
+    $("#quality-content").innerHTML = `<div class="quality-grid">${cards.map(([label,value,detail]) => `<article class="panel"><p class="eyebrow">${safeText(label)}</p><div class="quality-metric">${safeText(value)}</div><p class="muted">${safeText(detail)}</p></article>`).join("")}${evWarning}</div><h3>Domain health</h3><div class="quality-grid">${domains}</div>`;
   } catch (error) { setState("#quality-state", error.message, "error-state"); }
 }
 

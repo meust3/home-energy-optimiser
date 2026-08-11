@@ -1,6 +1,6 @@
 # Dashboard data contract
 
-Pydantic response models define the v0.3.0 API. Timestamps are timezone-aware UTC
+Pydantic response models define the versioned API. Timestamps are timezone-aware UTC
 ISO 8601 values with `+00:00`; the browser displays them in Australia/Brisbane.
 Unavailable data is JSON `null`, never zero. Non-finite numbers are converted to
 null before validation, and Pydantic rejects NaN/Infinity.
@@ -24,8 +24,9 @@ persisted. Unhealthy observations are retained and marked, not silently discarde
 
 The latest observation supports raw telemetry, normalized flows, battery energy,
 Amber prices, modes, balance residual, sign confidence, event labels, domain health,
-baseline eligibility, and optional genuine charger EV power. Historical queries use
-the same columns over a bounded range.
+baseline eligibility, optional genuine charger EV power, and v0.4.0 nullable
+vehicle SOC/status/freshness context. Historical queries use the same columns over
+a bounded range.
 
 Forecast tables support run creation/horizon/model metadata, expected points,
 optional stored lower/upper bounds, point metadata, and request-time actual/error
@@ -48,15 +49,20 @@ The current schema does not store a complete reserve result. A persisted
 Battery SOC/energy at calculation, EV demand, technical/emergency reserve split,
 unmet requirement, shortfall, potentially tradable energy, opportunity state,
 effective boundary reasoning, sufficiency, readiness, and complete explanation are
-not persisted. Their typed fields remain null. The dashboard does not run the
-estimator or add a migration to derive them.
+not persisted. Their typed fields remain null. Latest vehicle SOC may be displayed
+as current context only; it is not a reserve-run input or persisted result. The
+dashboard does not run the estimator or derive missing values.
 
 ## EV limitation
 
 EV power is returned only when a stored observation has `ev_source="charger"` and a
 real `ev_power_w`. Helper or inferred state is not displayed as measured EV power.
-Until independent production telemetry exists, `ev_contamination_warning=true`
-because household and baseline history may contain charging demand.
+Vehicle-cloud battery power is returned only as
+`ev_vehicle_battery_power_w_raw`; it is never charger AC power. Vehicle location is
+only `ev_at_home=true|false|null`. VIN, coordinates, full attributes, and exact
+location are absent. `ev_contamination_warning` remains true without independently
+measured charger AC power because complete energy separation is not available,
+even when fresh confirmed charging rows are excluded from baseline training.
 
 ## Read-only guarantee
 

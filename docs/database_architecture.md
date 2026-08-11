@@ -25,9 +25,17 @@ Production has completed its PostgreSQL cutover. Synology `home_energy` is
 authoritative and the Home Assistant App always supplies an explicit
 `postgresql+psycopg://` URL assembled from protected App options. App startup
 rejects absent credentials, connection/authentication failure, and any revision
-other than `20260810_01`; it does not migrate automatically or create local tables.
-Removing or rebuilding the App cannot delete production history because the
-database is external.
+other than the application head (`20260811_01` for the unreleased v0.4.0
+candidate); it does not migrate automatically or create local tables.
+
+Revision `20260811_01` is additive: it appends nullable, privacy-minimized vehicle
+telemetry columns and leaves legacy observation rows and counts unchanged. The
+production upgrade must be performed explicitly from a trusted administration
+environment only after the immutable v0.4.0 release artifact has passed validation
+and Home Assistant can discover the update. Restore-test the PostgreSQL dump and
+record counts before stopping v0.3.2, migrating, and immediately starting v0.4.0.
+Removing or rebuilding the App cannot delete production history because the database
+is external.
 
 The migration from the final production SQLite backup completed with exact
 validation, and the shared repository has been manually validated against

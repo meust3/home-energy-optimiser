@@ -44,6 +44,9 @@ def parse_options() -> None:
 
     options = load_app_options()
     assert options.db_host == "db.example.invalid"
+    assert options.ev_vehicle_enabled
+    assert options.ev_charging_entity == "binary_sensor.test_vehicle_charging"
+    assert options.ev_telemetry_stale_seconds == 900
     assert os.environ.get("SUPERVISOR_TOKEN")
     assert not runtime_path.exists()
     print(
@@ -82,17 +85,29 @@ def dashboard_smoke() -> None:
     """Exercise current local dashboard code without Home Assistant or PostgreSQL."""
     from energy_optimizer.dashboard_api import LiveResponse, StatusResponse
     from energy_optimizer.dashboard_web import IngressAccessPolicy, make_handler
+    from energy_optimizer.home_assistant import HomeAssistantClient
     from energy_optimizer.home_assistant_app import AppHealth, load_app_options
 
     load_app_options()
 
     class Service:
         def live(self):
-            return LiveResponse(available=False)
+            return LiveResponse(
+                available=True,
+                ev_vehicle_configured=True,
+                ev_vehicle_available=True,
+                ev_vehicle_soc_percent=64,
+                ev_charging_active=False,
+                ev_plugged_in=True,
+                ev_at_home=True,
+                ev_telemetry_fresh=True,
+                ev_vehicle_status="plugged_idle",
+                ev_vehicle_battery_power_w_raw=-18.5,
+            )
 
         def status(self):
             return StatusResponse(
-                app_version="0.3.2",
+                app_version="0.4.0",
                 overall_status="healthy",
                 collector_status="healthy",
                 database_status="healthy",
@@ -126,9 +141,10 @@ def dashboard_smoke() -> None:
     try:
         status, shell = request(server, prefix, {"X-Ingress-Path": prefix})
         assert status == 200 and f'<base href="{prefix}">'.encode() in shell
+        assert b'id="overview-ev"' in shell
         status, css = request(
             server,
-            prefix + "static/app.css?v=0.3.2",
+            prefix + "static/app.css?v=0.4.0",
             {"X-Ingress-Path": prefix},
         )
         assert status == 200 and b"prefers-color-scheme" in css
@@ -137,7 +153,12 @@ def dashboard_smoke() -> None:
             prefix + "api/v1/live",
             {"X-Ingress-Path": prefix},
         )
-        assert status == 200 and json.loads(api)["available"] is False
+        payload = json.loads(api)
+        assert status == 200 and payload["ev_vehicle_status"] == "plugged_idle"
+        assert "vin" not in api.decode().lower()
+        assert "latitude" not in api.decode().lower()
+        assert "longitude" not in api.decode().lower()
+        assert not hasattr(HomeAssistantClient, "post")
     finally:
         server.shutdown()
         server.server_close()

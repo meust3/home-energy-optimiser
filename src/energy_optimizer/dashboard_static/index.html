@@ -6,8 +6,8 @@
   <meta name="color-scheme" content="light dark">
   <base href="__INGRESS_BASE_PATH__">
   <title>Energy Optimiser</title>
-  <link rel="stylesheet" href="static/app.css?v=0.3.2">
-  <script type="module" src="static/app.js?v=0.3.2"></script>
+  <link rel="stylesheet" href="static/app.css?v=0.4.0">
+  <script type="module" src="static/app.js?v=0.4.0"></script>
 </head>
 <body>
   <a class="skip-link" href="#main">Skip to dashboard content</a>
@@ -54,6 +54,10 @@
           <div class="panel-heading"><div><p class="eyebrow">Existing result</p><h3>Reserve summary</h3></div></div>
           <div class="loading-block">Loading persisted reserve…</div>
           <p class="advisory">Advisory only. No command was issued.</p>
+        </article>
+        <article class="panel" id="overview-ev">
+          <div class="panel-heading"><div><p class="eyebrow">Optional read-only telemetry</p><h3>Electric vehicle</h3></div><span id="ev-freshness" class="badge badge-muted">Loading</span></div>
+          <div class="loading-block">Loading vehicle status…</div>
         </article>
       </div>
     </section>

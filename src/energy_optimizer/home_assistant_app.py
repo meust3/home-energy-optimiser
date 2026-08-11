@@ -20,7 +20,7 @@ from energy_optimizer.home_assistant import HomeAssistantClient, redact_secret
 from energy_optimizer.persistence import ApplicationRepository, open_repository
 
 SUPERVISOR_CORE_API_URL = "http://supervisor/core/api"
-APP_VERSION = "0.3.2"
+APP_VERSION = "0.4.0"
 HEALTH_PORT = 8099
 OPTIONS_PATH_ENV = "HOME_ENERGY_APP_OPTIONS_PATH"
 SUPERVISOR_OPTIONS_PATH = Path("/data/options.json")
@@ -37,6 +37,16 @@ class HomeAssistantAppOptions(BaseModel):
     db_password: SecretStr
     timezone: str = "Australia/Brisbane"
     health_max_observation_age_seconds: int = Field(default=900, ge=300)
+    ev_vehicle_enabled: bool = False
+    ev_charging_entity: str = ""
+    ev_plugged_entity: str = ""
+    ev_online_entity: str = ""
+    ev_soc_entity: str = ""
+    ev_battery_power_entity: str = ""
+    ev_telemetry_updated_entity: str = ""
+    ev_location_entity: str = ""
+    ev_home_state: str = Field(default="home", min_length=1)
+    ev_telemetry_stale_seconds: int = Field(default=900, gt=0)
 
 
 def load_app_options(
@@ -112,12 +122,23 @@ def app_environment(
         raise ConfigurationError(
             "SUPERVISOR_TOKEN is unavailable; homeassistant_api must be enabled"
         )
-    return {
+    environment = {
         "HA_URL": SUPERVISOR_CORE_API_URL,
         "HA_TOKEN": token,
         "DATABASE_URL": postgresql_url(options),
         "TIMEZONE": options.timezone,
+        "EV_VEHICLE_ENABLED": str(options.ev_vehicle_enabled).lower(),
+        "EV_CHARGING_ENTITY": options.ev_charging_entity.strip(),
+        "EV_PLUGGED_ENTITY": options.ev_plugged_entity.strip(),
+        "EV_ONLINE_ENTITY": options.ev_online_entity.strip(),
+        "EV_SOC_ENTITY": options.ev_soc_entity.strip(),
+        "EV_BATTERY_POWER_ENTITY": options.ev_battery_power_entity.strip(),
+        "EV_TELEMETRY_UPDATED_ENTITY": options.ev_telemetry_updated_entity.strip(),
+        "EV_LOCATION_ENTITY": options.ev_location_entity.strip(),
+        "EV_HOME_STATE": options.ev_home_state.strip(),
+        "EV_TELEMETRY_STALE_SECONDS": str(options.ev_telemetry_stale_seconds),
     }
+    return environment
 
 
 def redact_runtime_error(value: Any, *secrets: str | None) -> str:

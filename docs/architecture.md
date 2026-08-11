@@ -17,8 +17,9 @@ only assemble these reusable components.
 
 The production deployment is Home Assistant App v0.2.1 (formerly called an add-on)
 on the amd64 Home Assistant OS 18.1 NUC, where it is collecting successfully.
-Version 0.3.2 is a dashboard release candidate that has not yet been installed or
-verified on that host. Supervisor injects `SUPERVISOR_TOKEN`; the App uses it only as a
+Version 0.3.2 is published but has not yet been verified on that host. Version
+0.4.0 is an unreleased release candidate with an explicit additive database
+migration. Supervisor injects `SUPERVISOR_TOKEN`; the App uses it only as a
 bearer token for `http://supervisor/core/api`. The existing GET-only client and
 collector are unchanged. Observations are written over the LAN to the external
 Synology PostgreSQL 17 `home_energy` database as `energy_app`.
@@ -73,6 +74,15 @@ so a leading hypothesis remains auditable rather than becoming hidden configurat
 Weather entity IDs are optional configuration. When configured, temperature and
 condition are collected in the existing bulk GET. Missing weather may make only the
 weather domain unhealthy; it cannot affect overall Phase 1 observation health.
+
+Version 0.4.0 adds another optional branch inside the same collection request.
+Configured vehicle-cloud entities are reduced to a typed, privacy-minimized
+snapshot: SOC, raw vehicle battery power, charging/plugged/online booleans,
+at-home boolean, dedicated update time, freshness, source, confidence, status, and
+structured optional issues. Missing or stale vehicle data never changes core
+telemetry health. Fresh confirmed charging without independently measured charger
+AC power preserves measured house load and marks the baseline row ineligible;
+plugged-idle remains eligible. No session worker or vehicle API is introduced.
 
 The future executor is deliberately absent. Adding it requires a separate safety
 review and explicit approval.

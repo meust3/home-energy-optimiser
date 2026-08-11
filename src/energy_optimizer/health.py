@@ -8,6 +8,7 @@ from energy_optimizer.models import (
     CollectorConfig,
     DataHealth,
     EnergyFlow,
+    EVTelemetryHealth,
     HealthDomain,
     HealthIssue,
     HealthUse,
@@ -321,6 +322,7 @@ def evaluate_data_health(
     energy_flow: EnergyFlow | None = None,
     ev_active: bool | None = None,
     ev_power_w: float | None = None,
+    ev_health: EVTelemetryHealth | None = None,
 ) -> DataHealth:
     """Evaluate independent domains; overall currently follows telemetry integrity."""
     current = (now or datetime.now(UTC)).astimezone(UTC)
@@ -350,6 +352,7 @@ def evaluate_data_health(
         solar=solar,
         weather=weather,
         flow=flow,
+        ev=ev_health or EVTelemetryHealth(),
         overall=overall,
     )
 

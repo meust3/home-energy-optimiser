@@ -32,3 +32,37 @@ Adopt an existing schema-version-6 SQLite database without recreation:
 python tools/adopt_database.py
 python tools/adopt_database.py --apply
 ```
+
+## v0.4.0 PostgreSQL schema migration
+
+Revision `20260811_01` adds nine nullable EV telemetry columns. Do not migrate
+production until the exact commit image and immutable `v0.4.0` tag have both passed
+container validation and Home Assistant offers the update. Keep v0.3.2 running
+while creating and restore-testing the pre-migration dump. Then record all table
+counts, stop every collector, and run from reviewed v0.4.0 source with a protected
+`DATABASE_URL`:
+
+```powershell
+.\.venv\Scripts\python.exe -m alembic upgrade head
+.\.venv\Scripts\python.exe -m alembic current
+.\.venv\Scripts\python.exe tools\check_database.py --application-readiness
+```
+
+Require `20260811_01` and unchanged table counts, then immediately update and start
+the already-discoverable v0.4.0 App.
+
+The preferred App-failure fallback keeps revision `20260811_01` and runs the
+reviewed Windows v0.4.0 collector against production PostgreSQL with exactly one
+collector active. A v0.3.2 rollback requires a maintenance window and either:
+
+```powershell
+.\.venv\Scripts\python.exe -m alembic downgrade 20260810_01
+.\.venv\Scripts\python.exe -m alembic current
+```
+
+or restoration of the verified pre-v0.4.0 dump. The downgrade removes only the
+nine nullable EV fields, so legacy fields and rows remain, but EV telemetry collected
+after v0.4.0 started is discarded. Verify revision `20260810_01`, unchanged legacy
+counts, and absent EV columns before starting v0.3.2. Never use `alembic stamp` as a
+schema rollback. The complete sequence is in
+[the vehicle integration runbook](byd_vehicle_integration.md).

@@ -73,7 +73,7 @@ main { min-height: 70vh; }
 .kpi .value { overflow-wrap: break-word; word-break: normal; font-size: clamp(1.25rem, 3vw, 1.8rem); font-weight: 750; letter-spacing: -.03em; line-height: 1.15; }
 .metric-unavailable { color: var(--muted); font-size: 1rem; font-weight: 650; letter-spacing: 0; }
 .kpi .detail { color: var(--muted); font-size: .73rem; margin: auto 0 0; padding-top: .55rem; }
-.overview-grid { display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(300px, .8fr); gap: var(--layout-gap); align-items: stretch; }
+.overview-grid { display: grid; grid-template-columns: minmax(0, 1.45fr) repeat(2, minmax(260px, .75fr)); gap: var(--layout-gap); align-items: stretch; }
 .panel { padding: var(--panel-padding); min-width: 0; }
 .energy-flow { display: grid; grid-template-columns: repeat(3, 1fr); grid-template-areas: ". solar ." "battery home grid"; gap: 1rem; align-items: center; min-height: 270px; padding: 1.2rem; }
 .flow-node { position: relative; text-align: center; border: 1px solid var(--line); border-radius: 50%; aspect-ratio: 1; display: grid; place-content: center; max-width: 130px; width: 100%; margin: auto; background: var(--surface-soft); }
@@ -138,6 +138,11 @@ th { position: sticky; top: 0; background: var(--surface); color: var(--muted); 
 .quality-metric { font-size: 1.5rem; font-weight: 750; margin: .35rem 0; }
 .issue-list { padding-left: 1.15rem; }
 .issue-list li { margin-bottom: .35rem; }
+.ev-help { margin: 1rem 0 0; color: var(--muted); font-size: .78rem; }
+.ev-timeline { display: flex; flex-wrap: wrap; gap: .35rem; margin-top: 1rem; }
+.ev-marker { border: 1px solid var(--line); border-radius: .4rem; padding: .35rem .5rem; color: var(--muted); font-size: .72rem; }
+.ev-marker.charging { color: var(--accent); border-color: var(--accent); background: var(--accent-soft); }
+.ev-marker.plugged { color: var(--grid); border-color: var(--grid); }
 .loading-block, .empty-state, .error-state { color: var(--muted); min-height: 8rem; display: grid; place-content: center; text-align: center; padding: 1rem; }
 .chart-empty { align-content: center; gap: .4rem; min-height: 11rem; margin: .75rem 0 0; border: 1px dashed var(--line); border-radius: calc(var(--radius) - .2rem); background: var(--surface-soft); }
 .chart-empty strong { color: var(--text); font-size: .92rem; }

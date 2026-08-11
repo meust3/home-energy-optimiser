@@ -29,10 +29,10 @@ SQLite remains supported for local/offline development and as the retained final
 pre-migration backup; it is not a production fallback.
 
 Home Assistant App v0.2.1 is installed and collecting successfully on the amd64
-Home Assistant OS 18.1 NUC. Version 0.3.0 adds an experimental administrator-only
-Ingress dashboard and remains a release candidate until installed and verified on
-that host. Independent EV telemetry is not yet integrated, so EV charging may
-reduce load-forecast and reserve estimate confidence.
+Home Assistant OS 18.1 NUC. Version 0.3.2 publishes the experimental
+administrator-only Ingress dashboard and remains unverified on that host. Version
+0.4.0 is an unreleased release candidate adding optional read-only vehicle-cloud
+telemetry; it requires an explicit additive database migration before App update.
 
 ## Architecture
 
@@ -394,6 +394,15 @@ Optional EV telemetry and Home Assistant helper entities may be read with GET. T
 must never be controlled or created by this project. Baseline household demand may
 subtract direct EV power, but inferred EV power must never be silently subtracted.
 Ambiguous inferred sessions are excluded from baseline training.
+
+Optional vehicle-cloud telemetry must remain distinct from direct charger AC
+telemetry. Vehicle battery power is stored only as raw supporting data and must not
+populate `ev_power_w`, be subtracted from household demand, or infer charging.
+Fresh direct charging state may exclude a baseline row without changing measured
+house consumption. Location is persisted only as an at-home boolean; VIN,
+coordinates, tracker attributes, journey history, and control entities must never
+be stored or exposed. Vehicle telemetry health is optional and cannot reduce core
+observation health.
 
 Forecast runs and projected-vs-actual points are stored in the database selected by
 `DATABASE_URL`. Forecast

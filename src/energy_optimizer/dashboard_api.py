@@ -59,6 +59,16 @@ OBSERVATION_COLUMNS = (
     "baseline_exclusion_reason",
     "ev_power_w",
     "ev_source",
+    "ev_charging_active",
+    "ev_vehicle_soc_percent",
+    "ev_vehicle_battery_power_w_raw",
+    "ev_plugged_in",
+    "ev_vehicle_online",
+    "ev_at_home",
+    "ev_telemetry_updated_at_utc",
+    "ev_telemetry_age_seconds",
+    "ev_telemetry_fresh",
+    "ev_vehicle_status",
     "sign_convention_confidence",
     "balance_residual_w",
 )
@@ -121,6 +131,19 @@ class LiveResponse(ApiModel):
     ev_power_w: float | None = None
     independent_ev_telemetry_available: bool = False
     ev_contamination_warning: bool = True
+    ev_vehicle_configured: bool = False
+    ev_vehicle_available: bool = False
+    ev_vehicle_soc_percent: float | None = None
+    ev_vehicle_battery_power_w_raw: float | None = None
+    ev_charging_active: bool | None = None
+    ev_plugged_in: bool | None = None
+    ev_vehicle_online: bool | None = None
+    ev_at_home: bool | None = None
+    ev_telemetry_updated_at_utc: datetime | None = None
+    ev_telemetry_age_seconds: float | None = None
+    ev_telemetry_fresh: bool | None = None
+    ev_vehicle_status: str | None = None
+    ev_issues: list[str] = Field(default_factory=list)
 
 
 class TimeseriesPoint(ApiModel):
@@ -137,6 +160,9 @@ class TimeseriesPoint(ApiModel):
     grid_export_power_w: float | None
     amber_buy_price_aud_per_kwh: float | None
     amber_sell_price_aud_per_kwh: float | None
+    ev_vehicle_soc_percent: float | None
+    ev_charging_active: bool | None
+    ev_plugged_in: bool | None
 
 
 class TimeseriesResponse(ApiModel):
@@ -219,6 +245,7 @@ class ReserveResponse(ApiModel):
     forecast_tier_counts: dict[str, int] = Field(default_factory=dict)
     persisted_fields: list[str] = Field(default_factory=list)
     command_issued: Literal[False] = False
+    ev_vehicle_soc_percent: float | None = None
 
 
 class DataQualityResponse(ApiModel):
@@ -243,6 +270,11 @@ class DataQualityResponse(ApiModel):
     forecast_tier_share: dict[str, float]
     independent_ev_telemetry_available: bool
     ev_contamination_warning: bool
+    ev_integration_configured: bool
+    ev_telemetry_available: bool
+    ev_telemetry_fresh: bool | None
+    independent_ac_charger_power_available: bool
+    known_charging_rows_excluded: int
     sign_convention_confidence: dict[str, int]
     average_absolute_balance_residual_w: float | None
 
@@ -322,6 +354,8 @@ class DashboardService:
         direct_ev = (
             row.get("ev_source") == "charger" and row.get("ev_power_w") is not None
         )
+        domains = row.get("health_domains_json") or {}
+        ev_health = domains.get("ev", {}) if isinstance(domains, dict) else {}
         return LiveResponse(
             available=True,
             slot_utc=_utc(row.get("slot_utc")),
@@ -357,6 +391,30 @@ class DashboardService:
             ev_power_w=_number(row.get("ev_power_w")) if direct_ev else None,
             independent_ev_telemetry_available=direct_ev,
             ev_contamination_warning=not direct_ev,
+            ev_vehicle_configured=bool(
+                ev_health.get("configured")
+                or row.get("ev_source") == "byd_vehicle_cloud"
+            ),
+            ev_vehicle_available=bool(ev_health.get("available")),
+            ev_vehicle_soc_percent=_number(row.get("ev_vehicle_soc_percent")),
+            ev_vehicle_battery_power_w_raw=_number(
+                row.get("ev_vehicle_battery_power_w_raw")
+            ),
+            ev_charging_active=row.get("ev_charging_active"),
+            ev_plugged_in=row.get("ev_plugged_in"),
+            ev_vehicle_online=row.get("ev_vehicle_online"),
+            ev_at_home=row.get("ev_at_home"),
+            ev_telemetry_updated_at_utc=_optional_utc(
+                row.get("ev_telemetry_updated_at_utc")
+            ),
+            ev_telemetry_age_seconds=_number(row.get("ev_telemetry_age_seconds")),
+            ev_telemetry_fresh=row.get("ev_telemetry_fresh"),
+            ev_vehicle_status=row.get("ev_vehicle_status"),
+            ev_issues=[
+                str(issue.get("code"))
+                for issue in ev_health.get("issues", [])
+                if isinstance(issue, dict) and issue.get("code")
+            ],
         )
 
     def timeseries(
@@ -493,6 +551,7 @@ class DashboardService:
     def reserve_latest(self) -> ReserveResponse:
         with self._repository() as repository:
             run = repository.latest_reserve_run_read_only()
+            latest = repository.latest_observation_read_only()
         if run is None:
             return ReserveResponse(
                 available=False,
@@ -529,6 +588,9 @@ class DashboardService:
             horizon_end_utc=_utc(run["horizon_end_utc"]),
             forecast_tier_counts=run["tier_counts"],
             persisted_fields=supported,
+            ev_vehicle_soc_percent=(
+                _number(latest.get("ev_vehicle_soc_percent")) if latest else None
+            ),
         )
 
     def data_quality(
@@ -598,6 +660,24 @@ class DashboardService:
             row.get("ev_source") == "charger" and row.get("ev_power_w") is not None
             for row in rows
         )
+        latest = rows[-1] if rows else {}
+        latest_domains = latest.get("health_domains_json") or {}
+        latest_ev_health = (
+            latest_domains.get("ev", {}) if isinstance(latest_domains, dict) else {}
+        )
+        ev_configured = bool(
+            latest_ev_health.get("configured")
+            or latest.get("ev_source") == "byd_vehicle_cloud"
+        )
+        known_excluded = sum(
+            row.get("baseline_exclusion_reason")
+            in {
+                "known_ev_session_without_ac_power",
+                "known_ev_session_without_ev_power",
+                "ev_active_power_unknown",
+            }
+            for row in rows
+        )
         confidence = Counter(str(row["sign_convention_confidence"]) for row in rows)
         residuals = [
             abs(value)
@@ -626,6 +706,11 @@ class DashboardService:
             forecast_tier_share=tier_share,
             independent_ev_telemetry_available=direct_ev,
             ev_contamination_warning=not direct_ev,
+            ev_integration_configured=ev_configured,
+            ev_telemetry_available=bool(latest_ev_health.get("available")),
+            ev_telemetry_fresh=latest.get("ev_telemetry_fresh"),
+            independent_ac_charger_power_available=direct_ev,
+            known_charging_rows_excluded=known_excluded,
             sign_convention_confidence=dict(confidence),
             average_absolute_balance_residual_w=(
                 sum(residuals) / len(residuals) if residuals else None
@@ -729,6 +814,9 @@ def aggregate_timeseries(
                 amber_sell_price_aud_per_kwh=_average(
                     values, "amber_export_price_per_kwh"
                 ),
+                ev_vehicle_soc_percent=_last(values, "ev_vehicle_soc_percent"),
+                ev_charging_active=_last_bool(values, "ev_charging_active"),
+                ev_plugged_in=_last_bool(values, "ev_plugged_in"),
             )
         )
         cursor += interval
@@ -753,6 +841,14 @@ def _last(rows: list[dict[str, Any]], name: str) -> float | None:
         value = _number(row.get(name))
         if value is not None:
             return value
+    return None
+
+
+def _last_bool(rows: list[dict[str, Any]], name: str) -> bool | None:
+    for row in reversed(rows):
+        value = row.get(name)
+        if value is not None:
+            return bool(value)
     return None
 
 

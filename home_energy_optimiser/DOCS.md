@@ -5,8 +5,9 @@ five-minute intervals, stores it in an external PostgreSQL database, and present
 the stored information in an administrator-only Ingress dashboard. It provides
 explainable, advisory analysis; it does not operate energy equipment.
 
-Version 0.3.2 is a release candidate and has not been verified on the production
-Home Assistant OS host.
+Version 0.4.0 is an unreleased release candidate and has not been verified on the
+production Home Assistant OS host. It requires Alembic revision `20260811_01`
+before the App is updated; startup never runs migrations automatically.
 
 ## Read-only safety boundary
 
@@ -43,6 +44,14 @@ tested PostgreSQL backup.
 - `health_max_observation_age_seconds`: Maximum accepted age of the latest
   observation before the health endpoint reports stale collection. The allowed
   range is 300 to 3600 seconds.
+- `ev_vehicle_enabled`: Enables optional read-only vehicle state collection.
+- `ev_charging_entity`, `ev_plugged_entity`, `ev_online_entity`,
+  `ev_soc_entity`, `ev_battery_power_entity`, `ev_telemetry_updated_entity`, and
+  `ev_location_entity`: Installation-specific optional IDs; empty means
+  unconfigured.
+- `ev_home_state`: Tracker state interpreted as at home.
+- `ev_telemetry_stale_seconds`: Maximum dedicated vehicle telemetry age; defaults
+  to 900 seconds.
 
 The App receives `SUPERVISOR_TOKEN` from Home Assistant Supervisor at runtime and
 uses it with the Supervisor Core API proxy. Users do not need to create or enter a
@@ -74,9 +83,11 @@ and Reserve show truthful empty states when no persisted runs or estimates exist
 opening those pages does not run a forecast or reserve calculation. The App has no
 forecast scheduler.
 
-Independent EV telemetry is not yet integrated. EV charging can therefore remain
-embedded in household consumption, and the dashboard must not be interpreted as
-providing independently measured EV demand.
+Optional vehicle telemetry distinguishes plugged, charging, online, SOC, home/away,
+and freshness. Raw vehicle battery power remains supporting vehicle-side data and
+is not independently measured charger AC demand. Confirmed fresh charging rows are
+excluded from baseline learning without inventing EV power, but complete EV energy
+separation remains deferred until charger AC power is integrated and validated.
 
 ## Troubleshooting
 
@@ -121,11 +132,26 @@ The dashboard reads stored forecast results only. Confirm an existing supported
 forecast workflow has persisted data; the App does not schedule or calculate
 forecasts when a page is opened.
 
-## Rollback to 0.2.1
+## Migration and rollback
 
-Before rollback, take and verify a PostgreSQL backup and preserve the current App
-configuration securely. Install version 0.2.1 through the supported Home Assistant
-App version workflow, restart it, and verify database and collection health.
-Version 0.2.1 retains the read-only collector but does not provide the v0.3.0
-Ingress dashboard. The v0.3.2 release makes no database schema change, so no
-database downgrade is required.
+Before production migration, validate the exact commit image and immutable v0.4.0
+tag, merge the release, and confirm Home Assistant offers the update without
+installing it. Then create and restore-test a custom-format PostgreSQL dump, record
+all application-table counts, stop v0.3.2 and every other collector, apply
+`python -m alembic upgrade head` from reviewed v0.4.0 source, run
+`python tools/check_database.py --application-readiness`, and require revision
+`20260811_01` with unchanged counts. Immediately update and start v0.4.0. See the
+repository vehicle-integration runbook for the exact sequence.
+
+## Rollback to 0.3.2
+
+Prefer stopping the failed App and running the reviewed Windows v0.4.0 collector
+against unchanged PostgreSQL revision `20260811_01` with exactly one collector.
+
+Before App rollback, take and verify another PostgreSQL backup and stop every
+collector. Restore the verified pre-v0.4.0 dump or run
+`python -m alembic downgrade 20260810_01` from reviewed v0.4.0 source. The downgrade
+removes only the nine nullable vehicle fields and therefore discards EV telemetry
+collected after v0.4.0 began while preserving legacy rows and fields. Confirm the
+old revision, unchanged legacy counts, and absent EV columns before installing and
+starting v0.3.2. Never use `alembic stamp` as a physical rollback.

@@ -1,27 +1,36 @@
 # Home Assistant App installation
 
-Version `0.2.1` is installed and collecting successfully on Home Assistant OS 18.1.
-Version `0.3.2` packages the experimental administrator-only Ingress dashboard with
-improved sparse-data presentation and is a release candidate until the image and
-update are verified on that host.
+Version `0.3.2` is the pre-migration App. Version `0.4.0` is an unreleased,
+schema-changing release candidate for optional read-only vehicle telemetry.
 
 ## Publish and install
 
 The repository root contains `repository.yaml` and one App folder,
 `home_energy_optimiser/`, so the GitHub repository can be added directly.
 
-1. After review, commit and privately push the release-candidate changes, then
-   validate a full image build.
-2. Only after that validation, create the immutable tag matching `config.yaml` and
-   Docker `APP_SOURCE_REF` (`v0.3.2`).
-3. In Home Assistant, open **Settings > Apps > App store**.
-4. Open the repository menu, choose **Repositories**, and add
-   `https://github.com/meust3/home-energy-optimiser`.
-5. Refresh the store and open **Home Energy Optimiser**.
-6. Install it, but do not start it yet (or use **Update** for an existing v0.2.1
-   installation).
-7. Enter the configuration below, save, enable **Start on boot** and **Watchdog**,
-   then start the App.
+Production PostgreSQL must not be migrated until the immutable release has passed
+validation and Home Assistant can discover v0.4.0. Follow this order exactly:
+
+1. Complete all source and migration validation.
+2. Commit the v0.4.0 release candidate.
+3. Push its release branch.
+4. Build an image from the exact commit.
+5. Run the complete container test against the exact-commit image.
+6. Tag and push `v0.4.0`.
+7. Build and validate the immutable v0.4.0 tag.
+8. Merge or fast-forward the reviewed release to `main`.
+9. Refresh the Home Assistant App store and confirm v0.4.0 is offered, but do not
+   update yet.
+10. Create and restore-test the production PostgreSQL backup.
+11. Record exact production application-table counts.
+12. Stop v0.3.2 and confirm no other collector is running.
+13. Apply `python -m alembic upgrade head` from reviewed v0.4.0 source.
+14. Require revision `20260811_01`, application readiness, and unchanged counts.
+15. Immediately update and start the already-discoverable v0.4.0 App.
+16. Configure the optional BYD entities and validate advancing collection.
+
+The exact backup, migration, count, and validation commands are in
+[the vehicle integration runbook](byd_vehicle_integration.md).
 
 Required values (password deliberately omitted):
 
@@ -38,11 +47,27 @@ Set `db_password` in the App configuration UI. Do not paste it into logs or
 documentation. No Home Assistant token is entered; Supervisor supplies one at
 runtime.
 
+Optional vehicle values use installation-specific entity IDs; empty strings leave
+individual inputs unconfigured:
+
+```yaml
+ev_vehicle_enabled: true
+ev_charging_entity: <binary_sensor.vehicle_charging>
+ev_plugged_entity: <binary_sensor.vehicle_plugged>
+ev_online_entity: <binary_sensor.vehicle_online>
+ev_soc_entity: <sensor.vehicle_soc>
+ev_battery_power_entity: <sensor.vehicle_battery_power>
+ev_telemetry_updated_entity: <sensor.vehicle_telemetry_updated>
+ev_location_entity: <device_tracker.vehicle_location_state>
+ev_home_state: home
+ev_telemetry_stale_seconds: 900
+```
+
 ## First-start verification
 
 1. Confirm startup logs show backend PostgreSQL, the expected host, port, database,
    and username but no password or full URL.
-2. Confirm the schema check reports revision `20260810_01` and the read-only Home
+2. Confirm the schema check reports revision `20260811_01` and the read-only Home
    Assistant readiness check passes.
 3. Wait through the next clock-aligned five-minute boundary.
 4. Confirm a `Saved slot ... No command was issued` log entry appears.
@@ -78,27 +103,28 @@ The Dockerfile downloads the canonical application source because Supervisor
 builds with the App folder as its context; this avoids duplicating collector code
 inside the deployment wrapper.
 
-For the installed v0.2.1 App, publish and apply the reviewed v0.3.2 release candidate
-as follows:
+For v0.4.0, follow the immutable-artifact, Home Assistant discovery, backup,
+restore-test, count, App-stop, Alembic, immediate-update, plugged-idle, and
+active-charging sequence in [the vehicle integration runbook](byd_vehicle_integration.md).
+The App must be stopped during the short migration window, and production migration
+must not begin before Home Assistant offers the validated v0.4.0 artifact.
 
-1. Create a Home Assistant backup containing the v0.2.1 App and its configuration.
-   This is an App rollback artifact, not a PostgreSQL backup.
-2. Push the reviewed commit, verify an amd64 image from its commit SHA, then create
-   and push tag `v0.3.2` only when that validation passes. Repeat the image build
-   from that tag.
-3. In **Settings > Apps > App store**, choose **Check for updates** or **Update
-   information** from the repository menu.
-4. Open **Home Energy Optimiser**, confirm version `0.3.2` is offered, and select
-   **Update**. Preserve the existing App configuration.
-5. Start the App if Supervisor does not start it automatically, then verify the
-   startup and first collection using the checklist above.
+## Roll back to v0.3.2
 
-## Roll back to v0.2.1
+If v0.4.0 fails, first stop the App, keep PostgreSQL at `20260811_01`, and run the
+reviewed Windows v0.4.0 collector against production with exactly one collector.
+Troubleshoot the App without changing history.
 
-If v0.3.2 fails before real-host validation, stop it and restore the pre-update Home
-Assistant backup containing App v0.2.1 and its options. If that backup is unavailable,
-publish the immutable `v0.2.1` source through a temporary private/local App repository
-and reinstall it with the preserved options. PostgreSQL remains external and is not
-removed or rolled back with the App. Confirm exactly one collector resumes and that
-the latest observation advances. Do not start a Windows fallback collector at the
-same time.
+Restore v0.3.2 only after restoring the verified pre-v0.4.0 PostgreSQL dump or after
+stopping every collector and running this physical downgrade from reviewed v0.4.0
+source:
+
+```powershell
+.\.venv\Scripts\python.exe -m alembic downgrade 20260810_01
+.\.venv\Scripts\python.exe -m alembic current
+```
+
+The downgrade removes only the nine nullable EV telemetry columns, discarding any
+EV telemetry collected after v0.4.0 began while preserving legacy fields and row
+counts. Require revision `20260810_01`, unchanged legacy counts, and absent EV
+columns before starting v0.3.2. Never use `alembic stamp` as a schema rollback.

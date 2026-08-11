@@ -333,7 +333,11 @@ def forecast_household_demand(
             1
             for original in rows
             if dict(original).get("baseline_exclusion_reason")
-            in {"known_ev_session_without_ev_power", "ev_active_power_unknown"}
+            in {
+                "known_ev_session_without_ac_power",
+                "known_ev_session_without_ev_power",
+                "ev_active_power_unknown",
+            }
         ),
         direct_ev_power_rows_retained=sum(
             1
@@ -425,7 +429,12 @@ def _eligible_samples(
             _Sample(
                 local,
                 max(float(value), 0) / 1000,
-                row.get("ev_power_w") is not None or row.get("ev_source") == "charger",
+                row.get("ev_power_w") is not None
+                or row.get("ev_source") == "charger"
+                or (
+                    row.get("ev_source") == "byd_vehicle_cloud"
+                    and bool(row.get("ev_telemetry_fresh"))
+                ),
             )
         )
     return samples, ineligible, same_day_excluded, future_excluded

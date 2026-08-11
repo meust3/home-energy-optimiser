@@ -61,6 +61,15 @@ DERIVED_COLUMNS = {
     "ev_ready_by_local": "TEXT",
     "ev_source": "TEXT NOT NULL DEFAULT 'none'",
     "ev_detection_confidence": "TEXT NOT NULL DEFAULT 'unconfirmed'",
+    "ev_vehicle_soc_percent": "REAL",
+    "ev_vehicle_battery_power_w_raw": "REAL",
+    "ev_plugged_in": "INTEGER",
+    "ev_vehicle_online": "INTEGER",
+    "ev_at_home": "INTEGER",
+    "ev_telemetry_updated_at_utc": "TEXT",
+    "ev_telemetry_age_seconds": "REAL",
+    "ev_telemetry_fresh": "INTEGER",
+    "ev_vehicle_status": "TEXT",
     "baseline_house_consumption_w": "REAL",
     "baseline_training_eligible": "INTEGER NOT NULL DEFAULT 0",
     "baseline_exclusion_reason": "TEXT",
@@ -445,6 +454,39 @@ class Historian:
             ),
             observation.ev_source,
             observation.ev_detection_confidence,
+            observation.ev_vehicle.vehicle_soc_percent,
+            observation.ev_vehicle.vehicle_battery_power_w_raw,
+            (
+                None
+                if observation.ev_vehicle.plugged_in is None
+                else int(observation.ev_vehicle.plugged_in)
+            ),
+            (
+                None
+                if observation.ev_vehicle.vehicle_online is None
+                else int(observation.ev_vehicle.vehicle_online)
+            ),
+            (
+                None
+                if observation.ev_vehicle.at_home is None
+                else int(observation.ev_vehicle.at_home)
+            ),
+            (
+                observation.ev_vehicle.telemetry_updated_at_utc.isoformat()
+                if observation.ev_vehicle.telemetry_updated_at_utc
+                else None
+            ),
+            observation.ev_vehicle.telemetry_age_seconds,
+            (
+                None
+                if observation.ev_vehicle.telemetry_fresh is None
+                else int(observation.ev_vehicle.telemetry_fresh)
+            ),
+            (
+                observation.ev_vehicle.status
+                if observation.ev_vehicle.source != "none"
+                else None
+            ),
             observation.baseline_house_consumption_w,
             int(observation.baseline_training_eligible),
             observation.baseline_exclusion_reason,

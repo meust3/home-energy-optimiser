@@ -242,6 +242,7 @@ class DatabaseRepository:
             "ev_source",
             "ev_charging_active",
             "ev_session_id",
+            "ev_telemetry_fresh",
         )
         return self.observation_rows(
             start=end - timedelta(days=days), end=end, columns=columns
@@ -1048,6 +1049,7 @@ def observation_values(observation: EnergyObservation) -> dict[str, Any]:
     json_dump = observation.model_dump(mode="json")
     health = observation.data_health
     flow = observation.energy_flow
+    vehicle = observation.ev_vehicle
     values: dict[str, Any] = {
         "slot_utc": observation.slot_utc.astimezone(UTC),
         "observed_at_utc": observation.observed_at_utc.astimezone(UTC),
@@ -1100,6 +1102,15 @@ def observation_values(observation: EnergyObservation) -> dict[str, Any]:
         "health_domains_json": health.model_dump(mode="json"),
         "event_labels_json": dump["event_labels"],
         "event_label_evidence_json": dump["event_label_evidence"],
+        "ev_vehicle_soc_percent": vehicle.vehicle_soc_percent,
+        "ev_vehicle_battery_power_w_raw": vehicle.vehicle_battery_power_w_raw,
+        "ev_plugged_in": vehicle.plugged_in,
+        "ev_vehicle_online": vehicle.vehicle_online,
+        "ev_at_home": vehicle.at_home,
+        "ev_telemetry_updated_at_utc": vehicle.telemetry_updated_at_utc,
+        "ev_telemetry_age_seconds": vehicle.telemetry_age_seconds,
+        "ev_telemetry_fresh": vehicle.telemetry_fresh,
+        "ev_vehicle_status": vehicle.status if vehicle.source != "none" else None,
     }
     for source in ("remaining_today", "tomorrow", "next_hour", "this_hour", "today"):
         values[f"solcast_{source}_kwh_json"] = json_dump[f"solcast_{source}_kwh"]

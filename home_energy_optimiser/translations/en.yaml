@@ -20,3 +20,33 @@ configuration:
   health_max_observation_age_seconds:
     name: Maximum observation age
     description: Age after which collector health becomes unhealthy.
+  ev_vehicle_enabled:
+    name: Enable vehicle telemetry
+    description: Read configured vehicle entities without enabling any control action.
+  ev_charging_entity:
+    name: Vehicle charging entity
+    description: Optional binary sensor that directly reports active charging.
+  ev_plugged_entity:
+    name: Vehicle plugged entity
+    description: Optional binary sensor that reports whether the vehicle is plugged in.
+  ev_online_entity:
+    name: Vehicle online entity
+    description: Optional binary sensor used as vehicle-cloud availability context.
+  ev_soc_entity:
+    name: Vehicle SOC entity
+    description: Optional sensor reporting vehicle battery percentage.
+  ev_battery_power_entity:
+    name: Raw vehicle battery power entity
+    description: Optional vehicle-side raw power sensor; it is not charger AC demand.
+  ev_telemetry_updated_entity:
+    name: Vehicle telemetry timestamp entity
+    description: Optional sensor containing a timezone-aware telemetry update timestamp.
+  ev_location_entity:
+    name: Vehicle location-state entity
+    description: Optional tracker used only to derive home versus away; coordinates are ignored.
+  ev_home_state:
+    name: Home state value
+    description: Entity state that means the vehicle is at home.
+  ev_telemetry_stale_seconds:
+    name: Vehicle telemetry freshness
+    description: Maximum vehicle telemetry age before its charging state becomes unknown.

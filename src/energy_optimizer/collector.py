@@ -5,7 +5,7 @@ from zoneinfo import ZoneInfo
 
 from energy_optimizer import entity_ids as ids
 from energy_optimizer.energy_flow import derive_energy_flow, derive_event_labels
-from energy_optimizer.ev import calculate_baseline_load
+from energy_optimizer.ev import calculate_baseline_load, parse_vehicle_telemetry
 from energy_optimizer.health import evaluate_data_health
 from energy_optimizer.home_assistant import HomeAssistantClient
 from energy_optimizer.models import (
@@ -76,10 +76,14 @@ def build_observation(
     pv_power = number(ids.GOODWE_PV_POWER)
     house_consumption = number(ids.GOODWE_HOUSE_CONSUMPTION)
     grid_power = number(ids.GOODWE_GRID_POWER)
-    ev_active = (
+    legacy_ev_active = (
         parse_bool(states[config.ev_charging_active_entity_id].state)
         if config.ev_charging_active_entity_id in states
         else None
+    )
+    vehicle, ev_health = parse_vehicle_telemetry(states, config, now=now_utc)
+    ev_active = (
+        vehicle.charging_active if config.ev_vehicle_enabled else legacy_ev_active
     )
     ev_power = (
         number(config.ev_charging_power_entity_id)
@@ -98,6 +102,9 @@ def build_observation(
     if ev_power is not None:
         ev_source = "charger"
         ev_confidence = "high"
+    elif config.ev_vehicle_enabled:
+        ev_source = "byd_vehicle_cloud"
+        ev_confidence = vehicle.confidence
     elif any(
         (
             config.ev_charging_active_entity_id,
@@ -114,6 +121,11 @@ def build_observation(
         house_consumption,
         ev_charging_active=ev_active,
         ev_power_w=ev_power,
+        active_without_power_reason=(
+            "known_ev_session_without_ac_power"
+            if config.ev_vehicle_enabled
+            else "ev_active_power_unknown"
+        ),
     )
     energy_flow = derive_energy_flow(
         pv_power_w=pv_power,
@@ -128,6 +140,25 @@ def build_observation(
         ev_power_w=ev_power,
         tolerance_w=config.balance_tolerance_w,
     )
+    if vehicle.telemetry_fresh:
+        vehicle_labels = []
+        if vehicle.charging_active is True:
+            vehicle_labels.append("ev_charging_confirmed")
+        elif vehicle.plugged_in is True and vehicle.charging_active is False:
+            vehicle_labels.append("ev_plugged_idle")
+        if vehicle.at_home is True:
+            vehicle_labels.append("ev_at_home")
+        if vehicle_labels:
+            event_labels = [label for label in event_labels if label != "unknown"]
+            event_labels.extend(
+                label for label in vehicle_labels if label not in event_labels
+            )
+            event_confidence = "high"
+            event_evidence["vehicle"] = {
+                "source": vehicle.source,
+                "status": vehicle.status,
+                "fresh": vehicle.telemetry_fresh,
+            }
     health = evaluate_data_health(
         states,
         config,
@@ -135,6 +166,7 @@ def build_observation(
         energy_flow=energy_flow,
         ev_active=ev_active,
         ev_power_w=ev_power,
+        ev_health=ev_health,
     )
 
     return EnergyObservation(
@@ -185,6 +217,7 @@ def build_observation(
         ev_ready_by_local=ev_ready_by,
         ev_source=ev_source,
         ev_detection_confidence=ev_confidence,
+        ev_vehicle=vehicle,
         baseline_house_consumption_w=baseline,
         baseline_training_eligible=baseline_eligible,
         baseline_exclusion_reason=exclusion_reason,
@@ -211,6 +244,13 @@ class Collector:
                 self._config.ev_plugged_in_entity_id,
                 self._config.ev_energy_required_entity_id,
                 self._config.ev_ready_by_entity_id,
+                self._config.ev_vehicle_charging_entity_id,
+                self._config.ev_vehicle_plugged_entity_id,
+                self._config.ev_vehicle_online_entity_id,
+                self._config.ev_vehicle_soc_entity_id,
+                self._config.ev_vehicle_battery_power_entity_id,
+                self._config.ev_vehicle_telemetry_updated_entity_id,
+                self._config.ev_vehicle_location_entity_id,
             )
             if entity_id
         )

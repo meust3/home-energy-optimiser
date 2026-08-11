@@ -100,6 +100,9 @@ emergency reserve, local time, GoodWe mode/derived-flow context, normalized Solc
 energy, Amber import forecasts, optional weather health, and optional direct EV
 required-energy context. EV power is removed from baseline history only where the
 collector had direct EV telemetry; inferred EV power is never silently subtracted.
+Version 0.4.0 vehicle-cloud SOC is contextual only and does not become required EV
+energy or change the reserve algorithm. Fresh confirmed charging without charger AC
+power is excluded from baseline training instead of being subtracted.
 
 ## Method
 
@@ -191,7 +194,9 @@ EV telemetry, and prior scored forecast error when available. Initial configurab
 ceilings are conservative: fewer than two complete days is Low, fewer than seven is
 at most Medium-Low, no exact-slot coverage cannot be High, and more than half Tier
 3–5 cannot exceed Medium. Missing independent EV telemetry is disclosed as possible
-contamination rather than treated as proof of clean household demand.
+contamination rather than treated as proof of clean household demand. Vehicle
+charging state can reduce known-session contamination, but the absence of direct
+charger AC power still prevents complete EV energy separation.
 
 Each CLI estimate stores its immutable five-minute demand projection in the
 configured forecast tables. After its horizon, `--score-run ID` attaches eligible

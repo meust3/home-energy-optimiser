@@ -1,5 +1,5 @@
 name: Home Energy Optimiser
-version: "0.3.2"
+version: "0.4.0"
 slug: home_energy_optimiser
 description: Read-only energy dashboard and five-minute PostgreSQL collector
 url: https://github.com/meust3/home-energy-optimiser
@@ -22,6 +22,16 @@ options:
   db_user: energy_app
   timezone: Australia/Brisbane
   health_max_observation_age_seconds: 900
+  ev_vehicle_enabled: false
+  ev_charging_entity: ""
+  ev_plugged_entity: ""
+  ev_online_entity: ""
+  ev_soc_entity: ""
+  ev_battery_power_entity: ""
+  ev_telemetry_updated_entity: ""
+  ev_location_entity: ""
+  ev_home_state: home
+  ev_telemetry_stale_seconds: 900
 schema:
   db_host: str
   db_port: port
@@ -30,3 +40,13 @@ schema:
   db_password: password
   timezone: str
   health_max_observation_age_seconds: int(300,3600)
+  ev_vehicle_enabled: bool
+  ev_charging_entity: str
+  ev_plugged_entity: str
+  ev_online_entity: str
+  ev_soc_entity: str
+  ev_battery_power_entity: str
+  ev_telemetry_updated_entity: str
+  ev_location_entity: str
+  ev_home_state: str
+  ev_telemetry_stale_seconds: int(1,86400)

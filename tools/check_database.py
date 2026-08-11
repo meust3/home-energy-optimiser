@@ -122,6 +122,20 @@ def _application_readiness(engine) -> dict[str, dict[str, object]]:
             {"observations", "ev_session_annotations", "ev_session_annotation_rows"},
             {"ev_session_id", "ev_power_w"},
         ),
+        "vehicle_telemetry": (
+            {"observations"},
+            {
+                "ev_vehicle_soc_percent",
+                "ev_vehicle_battery_power_w_raw",
+                "ev_plugged_in",
+                "ev_vehicle_online",
+                "ev_at_home",
+                "ev_telemetry_updated_at_utc",
+                "ev_telemetry_age_seconds",
+                "ev_telemetry_fresh",
+                "ev_vehicle_status",
+            },
+        ),
         "reprocessing": (
             {"observations", "observation_derivations"},
             {"derivation_model_version", "reprocessed_at_utc"},

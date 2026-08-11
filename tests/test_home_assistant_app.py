@@ -410,11 +410,11 @@ def test_app_patch_versions_are_consistent():
     manifest = Path("home_energy_optimiser/config.yaml").read_text(encoding="utf-8")
     dockerfile = Path("home_energy_optimiser/Dockerfile").read_text(encoding="utf-8")
     project = Path("pyproject.toml").read_text(encoding="utf-8")
-    assert APP_VERSION == "0.3.2"
-    assert 'version: "0.3.2"' in manifest
-    assert "ARG BUILD_VERSION=0.3.2" in dockerfile
-    assert "ARG APP_SOURCE_REF=v0.3.2" in dockerfile
-    assert 'version = "0.3.2"' in project
+    assert APP_VERSION == "0.4.0"
+    assert 'version: "0.4.0"' in manifest
+    assert "ARG BUILD_VERSION=0.4.0" in dockerfile
+    assert "ARG APP_SOURCE_REF=v0.4.0" in dockerfile
+    assert 'version = "0.4.0"' in project
 
 
 def test_app_launcher_execs_existing_collector_without_restart_loop():
@@ -508,7 +508,7 @@ def test_app_page_documentation_and_changelog_are_packaged():
     assert changelog.is_file()
     assert documentation.is_file()
     changelog_text = changelog.read_text(encoding="utf-8")
-    assert "## 0.3.2" in changelog_text
+    assert "## 0.4.0" in changelog_text
     assert "## 0.3.1" in changelog_text
     assert "## 0.3.0" in changelog_text
 

@@ -11,7 +11,8 @@ from energy_optimizer.db.models import Base
 config = context.config
 if config.config_file_name:
     fileConfig(config.config_file_name)
-config.set_main_option("sqlalchemy.url", load_database_url().replace("%", "%%"))
+if not config.get_main_option("sqlalchemy.url"):
+    config.set_main_option("sqlalchemy.url", load_database_url().replace("%", "%%"))
 target_metadata = Base.metadata
 
 

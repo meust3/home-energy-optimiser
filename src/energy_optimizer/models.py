@@ -42,12 +42,61 @@ class HealthDomain(BaseModel):
     required_for: list[HealthUse] = Field(default_factory=list)
 
 
+EVVehicleStatus = Literal[
+    "charging",
+    "plugged_idle",
+    "home_unplugged",
+    "away",
+    "offline",
+    "stale",
+    "unknown",
+]
+EVTelemetryConfidence = Literal["direct_fresh", "direct_stale", "unavailable"]
+
+
+class EVTelemetryHealth(BaseModel):
+    """Optional vehicle readiness that never changes core observation health."""
+
+    configured: bool = False
+    available: bool = False
+    fresh: bool = False
+    online: bool | None = None
+    status: EVVehicleStatus = "unknown"
+    issues: list[HealthIssue] = Field(default_factory=list)
+
+
+class EVVehicleTelemetry(BaseModel):
+    """Privacy-minimized vehicle-cloud telemetry; raw attributes are excluded."""
+
+    vehicle_soc_percent: float | None = Field(default=None, ge=0, le=100)
+    vehicle_battery_power_w_raw: float | None = None
+    charging_active: bool | None = None
+    plugged_in: bool | None = None
+    vehicle_online: bool | None = None
+    at_home: bool | None = None
+    telemetry_updated_at_utc: datetime | None = None
+    telemetry_age_seconds: float | None = Field(default=None, ge=0)
+    telemetry_fresh: bool | None = None
+    source: Literal["byd_vehicle_cloud", "none"] = "none"
+    confidence: EVTelemetryConfidence = "unavailable"
+    status: EVVehicleStatus = "unknown"
+    issues: list[HealthIssue] = Field(default_factory=list)
+
+    @field_validator("telemetry_updated_at_utc")
+    @classmethod
+    def telemetry_time_is_aware(cls, value: datetime | None) -> datetime | None:
+        if value is not None and (value.tzinfo is None or value.utcoffset() is None):
+            raise ValueError("vehicle telemetry datetime must be timezone-aware")
+        return value
+
+
 class DataHealth(BaseModel):
     telemetry: HealthDomain
     price: HealthDomain
     solar: HealthDomain
     weather: HealthDomain
     flow: HealthDomain
+    ev: EVTelemetryHealth = Field(default_factory=EVTelemetryHealth)
     overall: HealthDomain
 
     @computed_field
@@ -108,7 +157,22 @@ GridSignConvention = Literal["positive_import", "positive_export", "unknown"]
 BatterySignConvention = Literal["positive_charge", "positive_discharge", "unknown"]
 SignConventionStatus = Literal["confirmed", "unconfirmed", "unavailable"]
 ConfidenceLevel = Literal["high", "medium", "low", "unconfirmed"]
-EVSource = Literal["charger", "home_assistant_helper", "inferred", "none"]
+EVSource = Literal[
+    "charger",
+    "home_assistant_helper",
+    "byd_vehicle_cloud",
+    "inferred",
+    "none",
+]
+EVDetectionConfidence = Literal[
+    "high",
+    "medium",
+    "low",
+    "unconfirmed",
+    "direct_fresh",
+    "direct_stale",
+    "unavailable",
+]
 EventLabel = Literal[
     "normal_self_consumption",
     "solar_battery_charge",
@@ -118,6 +182,9 @@ EventLabel = Literal[
     "ev_charge_solar",
     "ev_charge_grid",
     "ev_charge_mixed",
+    "ev_charging_confirmed",
+    "ev_plugged_idle",
+    "ev_at_home",
     "unknown",
 ]
 ForecastType = Literal[
@@ -224,6 +291,16 @@ class CollectorConfig(BaseModel):
     ev_plausible_power_min_w: float = Field(default=1800.0, ge=0)
     ev_plausible_power_max_w: float = Field(default=12000.0, gt=0)
     ev_minimum_session_minutes: int = Field(default=30, gt=0)
+    ev_vehicle_enabled: bool = False
+    ev_vehicle_charging_entity_id: str | None = None
+    ev_vehicle_plugged_entity_id: str | None = None
+    ev_vehicle_online_entity_id: str | None = None
+    ev_vehicle_soc_entity_id: str | None = None
+    ev_vehicle_battery_power_entity_id: str | None = None
+    ev_vehicle_telemetry_updated_entity_id: str | None = None
+    ev_vehicle_location_entity_id: str | None = None
+    ev_home_state: str = Field(default="home", min_length=1)
+    ev_telemetry_stale_seconds: int = Field(default=900, gt=0)
     forecast_retention_days: int = Field(default=365, gt=0)
     minimum_soc_percent: float = Field(default=20.0, ge=0, le=100)
     emergency_reserve_kwh: float = Field(default=6.0, ge=0)
@@ -287,7 +364,8 @@ class EnergyObservation(BaseModel):
     ev_energy_required_kwh: float | None = None
     ev_ready_by_local: datetime | None = None
     ev_source: EVSource = "none"
-    ev_detection_confidence: ConfidenceLevel = "unconfirmed"
+    ev_detection_confidence: EVDetectionConfidence = "unconfirmed"
+    ev_vehicle: EVVehicleTelemetry = Field(default_factory=EVVehicleTelemetry)
     baseline_house_consumption_w: float | None = None
     baseline_training_eligible: bool = True
     baseline_exclusion_reason: str | None = None

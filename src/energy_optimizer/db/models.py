@@ -137,6 +137,17 @@ class Observation(Base):
     ev_detection_confidence: Mapped[str] = mapped_column(
         Text, nullable=False, default="unconfirmed"
     )
+    ev_vehicle_soc_percent: Mapped[float | None] = mapped_column(Float)
+    ev_vehicle_battery_power_w_raw: Mapped[float | None] = mapped_column(Float)
+    ev_plugged_in: Mapped[bool | None] = mapped_column(Boolean)
+    ev_vehicle_online: Mapped[bool | None] = mapped_column(Boolean)
+    ev_at_home: Mapped[bool | None] = mapped_column(Boolean)
+    ev_telemetry_updated_at_utc: Mapped[datetime | None] = mapped_column(
+        AwareDateTime()
+    )
+    ev_telemetry_age_seconds: Mapped[float | None] = mapped_column(Float)
+    ev_telemetry_fresh: Mapped[bool | None] = mapped_column(Boolean)
+    ev_vehicle_status: Mapped[str | None] = mapped_column(Text)
     baseline_house_consumption_w: Mapped[float | None] = mapped_column(Float)
     baseline_training_eligible: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=False

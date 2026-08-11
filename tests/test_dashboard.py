@@ -210,6 +210,85 @@ def test_reserve_empty_state_and_data_quality(dashboard_database):
     assert quality.ev_contamination_warning
 
 
+def test_vehicle_dashboard_api_uses_nullable_privacy_minimized_fields(
+    healthy_states, config, now
+):
+    entity_ids = {
+        "charging": "binary_sensor.test_vehicle_charging",
+        "plugged": "binary_sensor.test_vehicle_plugged",
+        "online": "binary_sensor.test_vehicle_online",
+        "soc": "sensor.test_vehicle_soc",
+        "power": "sensor.test_vehicle_battery_power",
+        "updated": "sensor.test_vehicle_updated",
+        "location": "device_tracker.test_vehicle_location",
+    }
+    config.ev_vehicle_enabled = True
+    config.ev_vehicle_charging_entity_id = entity_ids["charging"]
+    config.ev_vehicle_plugged_entity_id = entity_ids["plugged"]
+    config.ev_vehicle_online_entity_id = entity_ids["online"]
+    config.ev_vehicle_soc_entity_id = entity_ids["soc"]
+    config.ev_vehicle_battery_power_entity_id = entity_ids["power"]
+    config.ev_vehicle_telemetry_updated_entity_id = entity_ids["updated"]
+    config.ev_vehicle_location_entity_id = entity_ids["location"]
+    template = next(iter(healthy_states.values()))
+    values = {
+        "charging": "on",
+        "plugged": "on",
+        "online": "on",
+        "soc": "72",
+        "power": "-12",
+        "updated": now.isoformat(),
+        "location": "home",
+    }
+    for role, value in values.items():
+        healthy_states[entity_ids[role]] = template.model_copy(
+            deep=True,
+            update={
+                "entity_id": entity_ids[role],
+                "state": value,
+                "attributes": {
+                    "vin": "PRIVATE-SENTINEL-NOT-STORED",
+                    "latitude": "PRIVATE-SENTINEL-NOT-STORED",
+                },
+            },
+        )
+    url = _repository_url(config)
+    repository = open_repository(url)
+    repository.create_schema_for_tests()
+    observation = build_observation(healthy_states, config, observed_at=now)
+    repository.save_observation(observation)
+    repository.close()
+    service = DashboardService(url, AppHealth(900))
+
+    live = service.live()
+    assert live.ev_vehicle_configured
+    assert live.ev_vehicle_available
+    assert live.ev_vehicle_soc_percent == 72
+    assert live.ev_vehicle_battery_power_w_raw == -12
+    assert live.ev_charging_active is True
+    assert live.ev_plugged_in is True
+    assert live.ev_at_home is True
+    assert live.ev_power_w is None
+    assert "PRIVATE" not in live.model_dump_json()
+    assert "latitude" not in live.model_dump_json().lower()
+
+    series = service.timeseries(
+        start=observation.slot_utc,
+        end=observation.slot_utc + timedelta(minutes=5),
+        resolution="5m",
+    )
+    assert series.points[0].ev_vehicle_soc_percent == 72
+    assert series.points[0].ev_charging_active is True
+    quality = service.data_quality(
+        start=observation.slot_utc,
+        end=observation.slot_utc + timedelta(minutes=5),
+    )
+    assert quality.ev_integration_configured
+    assert quality.ev_telemetry_fresh is True
+    assert not quality.independent_ac_charger_power_available
+    assert quality.known_charging_rows_excluded == 1
+
+
 def test_latest_persisted_reserve_returns_supported_subset(dashboard_database):
     url, first, _ = dashboard_database
     repository = open_repository(url)
@@ -265,7 +344,7 @@ class _FakeService:
         from energy_optimizer.dashboard_api import StatusResponse
 
         return StatusResponse(
-            app_version="0.3.2",
+            app_version="0.4.0",
             overall_status="healthy",
             collector_status="healthy",
             database_status="healthy",
@@ -311,14 +390,14 @@ def test_web_shell_static_nested_ingress_api_and_security_headers():
         assert status == 200
         html = body.decode()
         assert f'<base href="{prefix}">' in html
-        assert 'href="static/app.css?v=0.3.2"' in html
+        assert 'href="static/app.css?v=0.4.0"' in html
         assert "Advisory only. No command was issued." in html
         assert "Content-Security-Policy" in headers
         assert "X-Frame-Options" not in headers
         status, _, css = _request(
             server,
             "GET",
-            prefix + "static/app.css?v=0.3.2",
+            prefix + "static/app.css?v=0.4.0",
             {"X-Ingress-Path": prefix},
         )
         assert status == 200
@@ -387,6 +466,14 @@ def test_frontend_has_no_external_assets_or_control_actions():
         assert section in html
     assert "prefers-reduced-motion" in combined
     assert "Accessible data table" in javascript
+    assert 'id="overview-ev"' in html
+    assert "Vehicle battery power (raw)" in javascript
+    assert "not treated as charger AC demand" in javascript
+    assert "ev_vehicle_soc_percent" in javascript
+    assert "EV connection history" in javascript
+    assert "EV contamination warning" in javascript
+    for private_field in ("vin", "latitude", "longitude"):
+        assert private_field not in javascript.lower()
 
 
 def test_forecast_metadata_uses_stable_readable_key_value_layout():

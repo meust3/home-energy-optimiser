@@ -1,9 +1,9 @@
 # EV handling
 
-Independent EV telemetry is not currently integrated in the deployed data source.
-Until it is available, EV charging can contaminate measured household load and
-reduce forecast and reserve-estimate confidence. The rules below describe the
-implemented handling when direct telemetry or explicit local annotations exist.
+Independent EV telemetry is not currently deployed. Unreleased v0.4.0 adds
+optional read-only vehicle-cloud status while direct charger AC power remains
+unavailable. Until AC power is integrated and validated, EV energy separation is
+incomplete even though fresh confirmed charging rows can be excluded safely.
 
 Manual session annotation, reversal, prior-state snapshots, and audit records use
 the configured repository backend selected by `DATABASE_URL`. Annotation and
@@ -38,3 +38,13 @@ Existing direct power is preserved and used as `max(house - EV power, 0)` when
 telemetry quality permits. `--remove-session ID` previews or reverses a session
 from its audited prior-state snapshots. These operations affect only the configured
 database and never contact Home Assistant or hardware.
+
+Vehicle charging and plugged states are distinct. Fresh confirmed charging with no
+direct AC power preserves measured house load, leaves `ev_power_w` NULL, and uses
+`known_ev_session_without_ac_power`; fresh plugged-idle data does not exclude a row
+solely because the cable is connected. Stale or offline `off` is unknown rather
+than confident not-charging. Raw vehicle battery power is stored separately and is
+never subtracted or used as a non-zero charging heuristic.
+
+See [read-only vehicle telemetry](byd_vehicle_integration.md) for configuration,
+privacy, migration, first-session validation, and rollback.

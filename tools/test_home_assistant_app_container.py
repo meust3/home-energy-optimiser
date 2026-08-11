@@ -85,6 +85,16 @@ def write_root_only_options(volume: str) -> None:
             "db_password": TEST_PASSWORD,
             "timezone": "Australia/Brisbane",
             "health_max_observation_age_seconds": 900,
+            "ev_vehicle_enabled": True,
+            "ev_charging_entity": "binary_sensor.test_vehicle_charging",
+            "ev_plugged_entity": "binary_sensor.test_vehicle_plugged",
+            "ev_online_entity": "binary_sensor.test_vehicle_online",
+            "ev_soc_entity": "sensor.test_vehicle_soc",
+            "ev_battery_power_entity": "sensor.test_vehicle_battery_power",
+            "ev_telemetry_updated_entity": "sensor.test_vehicle_updated",
+            "ev_location_entity": "device_tracker.test_vehicle_location",
+            "ev_home_state": "home",
+            "ev_telemetry_stale_seconds": 900,
         }
     )
     docker(

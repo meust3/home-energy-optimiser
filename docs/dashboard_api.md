@@ -24,6 +24,15 @@ resolution below 2,500 points. Power and price aggregation uses the mean; SOC us
 the last available value in a bucket. An empty bucket is returned with null values
 and `has_observation=false`; it is never interpolated.
 
+Version 0.4.0 extends `/api/v1/live` with nullable, privacy-minimized vehicle SOC,
+raw vehicle battery power, charging/plugged/online/at-home booleans, telemetry
+timestamp/age/freshness, status, and issue codes. `/api/v1/timeseries` adds vehicle
+SOC and charging/plugged states. `/api/v1/data-quality` adds configured,
+available/fresh, independent charger-AC availability, known excluded-row count,
+and contamination-warning fields. `/api/v1/reserve/latest` may expose latest
+vehicle SOC as context only. No response contains full Home Assistant attributes,
+VIN, coordinates, exact location, credentials, or a control route.
+
 `/api/v1/forecast-runs` supports `forecast_type`, `after`, `before`, and `limit`.
 `/api/v1/forecast-comparison` supports `forecast_run_id`, `forecast_type`, `start`,
 `end`, and `limit`. It uses the existing forecast-type-to-observation mapping and

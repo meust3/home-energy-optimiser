@@ -1,5 +1,34 @@
 # Changelog
 
+## 0.4.0 — release candidate (unreleased)
+
+- Added optional, configurable, GET-only vehicle-cloud telemetry for charging,
+  plugged, online, SOC, raw vehicle battery power, telemetry freshness, and an
+  at-home boolean.
+- Added a typed optional EV health/readiness result that cannot make core energy
+  telemetry unhealthy or stop collection, persistence, reserve analysis, or the
+  dashboard.
+- Excluded fresh confirmed charging observations from baseline training when
+  direct charger AC power is absent, while preserving measured household load and
+  leaving `ev_power_w` null; plugged-idle observations remain eligible.
+- Added additive Alembic revision `20260811_01` with nullable, portable
+  SQLite/PostgreSQL vehicle columns, a tested physical downgrade that removes only
+  those nine columns, and no automatic App migration. Downgrade discards collected
+  v0.4.0 EV telemetry while preserving legacy observation fields and counts.
+- Added a read-only EV dashboard card, SOC history, state markers, data-quality
+  readiness/warnings, API fields, and reserve-page SOC context without changing
+  the reserve algorithm.
+- Ignored Home Assistant attributes and retained no VIN, coordinates, precise
+  location, journey history, or vehicle-control data.
+- Retained the strict Home Assistant GET allowlist and added no service call,
+  vehicle/charger/inverter command, force poll, Modbus write, or mutation endpoint.
+- This version is prepared as a release candidate only; it is not released or
+  operational on the production Home Assistant host.
+- Required immutable commit/tag image validation and Home Assistant update
+  discovery before production migration. App failure falls back first to the
+  reviewed Windows v0.4.0 collector; v0.3.2 requires a physical downgrade or
+  verified dump restoration, never an Alembic stamp.
+
 ## 0.3.2
 
 - Fixed forecast metadata collapsing into character-by-character vertical text by

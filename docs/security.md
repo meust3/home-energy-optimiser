@@ -94,3 +94,10 @@ Optional EV sensors and helpers are also GET-only. The project does not create o
 change helpers, charger state, inverter settings, or Modbus registers. Energy-flow
 normalization never overwrites raw power. Forecast comparison writes only derived
 actual/error values to the configured database.
+
+The v0.4.0 vehicle path reads configured state entities in that same bulk GET. It
+does not retain Home Assistant attributes. Location is reduced to an at-home
+boolean, and no schema or API field exists for VIN, latitude, longitude, precise
+home coordinates, GPS history, or journeys. Raw vehicle battery power is explicitly
+separate from charger AC demand. No vehicle control entity, force-poll action,
+poll-interval change, service endpoint, or dashboard mutation route is present.
