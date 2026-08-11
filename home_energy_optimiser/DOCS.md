@@ -5,9 +5,9 @@ five-minute intervals, stores it in an external PostgreSQL database, and present
 the stored information in an administrator-only Ingress dashboard. It provides
 explainable, advisory analysis; it does not operate energy equipment.
 
-Version 0.4.0 is an unreleased release candidate and has not been verified on the
-production Home Assistant OS host. It requires Alembic revision `20260811_01`
-before the App is updated; startup never runs migrations automatically.
+Version 0.4.1 is a schema-neutral hotfix awaiting production Home Assistant OS
+validation. It requires the existing Alembic revision `20260811_01`; startup never
+runs migrations or historical repair automatically.
 
 ## Read-only safety boundary
 
@@ -44,6 +44,11 @@ tested PostgreSQL backup.
 - `health_max_observation_age_seconds`: Maximum accepted age of the latest
   observation before the health endpoint reports stale collection. The allowed
   range is 300 to 3600 seconds.
+- `grid_power_sign`: `unknown`, `positive_export`, or `positive_import`.
+- `battery_power_sign`: `unknown`, `positive_discharge`, or `positive_charge`.
+- `sign_convention_confidence`: `unconfirmed`, `low`, `medium`, or `high`.
+- `sign_convention_supporting_samples`: Non-negative validation sample count.
+- `balance_tolerance_w`: Positive residual tolerance in watts.
 - `ev_vehicle_enabled`: Enables optional read-only vehicle state collection.
 - `ev_charging_entity`, `ev_plugged_entity`, `ev_online_entity`,
   `ev_soc_entity`, `ev_battery_power_entity`, `ev_telemetry_updated_entity`, and
@@ -56,6 +61,19 @@ tested PostgreSQL backup.
 The App receives `SUPERVISOR_TOKEN` from Home Assistant Supervisor at runtime and
 uses it with the Supervisor Core API proxy. Users do not need to create or enter a
 Home Assistant long-lived access token. The token is not displayed by the App.
+
+Generic sign defaults are unknown/unconfirmed with zero samples. For this
+installation only, the validated example is:
+
+```yaml
+grid_power_sign: positive_export
+battery_power_sign: positive_discharge
+sign_convention_confidence: high
+sign_convention_supporting_samples: 175
+balance_tolerance_w: 250
+```
+
+Do not treat these installation-specific directions as universal defaults.
 
 ## Starting and opening the App
 
@@ -76,18 +94,38 @@ Home Assistant long-lived access token. The token is not displayed by the App.
 - **Forecasts** compares persisted forecast points with available actual values.
 - **Reserve** shows persisted advisory reserve estimates and their recorded
   context.
-- **Data Quality** reports collection health, missing values, and freshness.
+- **Data Quality** reports collection health, missing values, freshness, and the
+  configured power-sign evidence.
 
 Unavailable values remain unavailable rather than being shown as zero. Forecasts
 and Reserve show truthful empty states when no persisted runs or estimates exist;
 opening those pages does not run a forecast or reserve calculation. The App has no
 forecast scheduler.
 
+If normalized grid and battery values are all null because signs were unknown, the
+charts say that sign conventions are not configured. A genuinely empty period
+keeps the generic missing-data message. Historical repair remains a separate,
+backup-gated operator command documented in the repository runbook.
+
 Optional vehicle telemetry distinguishes plugged, charging, online, SOC, home/away,
 and freshness. Raw vehicle battery power remains supporting vehicle-side data and
 is not independently measured charger AC demand. Confirmed fresh charging rows are
 excluded from baseline learning without inventing EV power, but complete EV energy
 separation remains deferred until charger AC power is integrated and validated.
+
+## Historical normalized-flow repair
+
+Repair is never automatic. On the trusted operator workstation, create and
+restore-test a fresh PostgreSQL backup, record counts, stop all collectors, and set
+`DATABASE_URL` plus the five reviewed sign environment variables. Run
+`python tools/reprocess_observations.py` for the default dry run. After reviewing
+the report, apply with
+`python tools/reprocess_observations.py --apply --backup-verified`.
+
+The production symptom does not require `--override-confirmed`; that exceptional
+flag is only for a separately reviewed correction of confirmed derivations. The
+repair preserves raw power, BYD fields, EV classification and manual annotations,
+and creates derivation audit records. Restart exactly one collector afterward.
 
 ## Troubleshooting
 

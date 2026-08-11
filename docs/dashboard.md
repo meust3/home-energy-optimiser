@@ -1,9 +1,8 @@
 # Read-only Ingress dashboard
 
-Version 0.3.2 publishes the experimental dashboard but has not yet been verified on
-the production NUC. Unreleased v0.4.0 adds read-only vehicle presentation after an
-explicit database migration. Home Assistant App v0.2.1 remains the confirmed
-working production collector.
+Version 0.4.1 is a focused hotfix for sign configuration and
+normalized-flow diagnostics. It does not change dashboard mutability or add a
+database migration.
 
 ## Architecture
 
@@ -43,7 +42,10 @@ Ingress origin.
 - **History** charts house/baseline, PV, grid, battery, SOC, and Amber prices over
   6 hours through 30 days, plus optional vehicle SOC and fresh plugged/charging
   markers. Missing buckets remain gaps, wholly missing series use
-  explicit empty states, and partially available series remain chartable.
+  explicit empty states, and partially available series remain chartable. When
+  persisted observations have unconfirmed signs and all normalized directions are
+  null, grid and battery charts explicitly say sign conventions are not configured;
+  a period with no observations retains the generic missing-data state.
 - **Forecasts** selects existing persisted runs and compares their stored expected
   values with observations at request time without a database write.
 - **Reserve** shows only fields currently persisted with the latest
@@ -51,7 +53,8 @@ Ingress origin.
   stored by the current schema.
 - **Data Quality** summarizes coverage, gaps, domain health, baseline eligibility,
   forecast tiers, optional vehicle availability/freshness, known charging-row
-  exclusions, the lack of charger AC power, sign confidence, and balance residuals.
+  exclusions, the lack of charger AC power, configured grid/battery signs,
+  confidence, supporting samples, tolerance, and persisted balance residuals.
 
 Status and live data refresh no faster than every 30 seconds. Loaded analytical
 pages refresh every five minutes. Polling pauses while the document is hidden, and

@@ -1,7 +1,7 @@
 # Read-only vehicle telemetry integration
 
-Version 0.4.0 is an unreleased release candidate for optional, read-only vehicle
-telemetry. The initial implementation is designed around the states exposed by a
+Version 0.4.0 introduced optional, read-only vehicle telemetry. The initial
+implementation is designed around the states exposed by a
 BYD vehicle cloud integration, but every Home Assistant entity ID is
 installation-specific configuration. No product-specific entity ID is a universal
 default.
@@ -102,7 +102,7 @@ artifact has passed validation and Home Assistant can discover the offered updat
 The required order is:
 
 1. Complete source, migration, privacy, and container validation.
-2. Commit the v0.4.0 release candidate.
+2. Commit the v0.4.0 release.
 3. Push its release branch.
 4. Build an image from that exact commit.
 5. Run the complete container test against that exact-commit image.
@@ -111,8 +111,8 @@ The required order is:
 8. Merge or fast-forward the reviewed release to `main`.
 9. Refresh the Home Assistant App store and confirm v0.4.0 is offered, but do not
    update the App yet.
-10. While v0.3.2 remains running, create and restore-test the production PostgreSQL
-   backup from a trusted workstation:
+10. Before the v0.4.0 migration, while v0.3.2 remained running, create and
+   restore-test the production PostgreSQL backup from a trusted workstation:
 
    ```powershell
    pg_dump --format=custom --file home_energy_pre_v0.4.0.dump --dbname home_energy

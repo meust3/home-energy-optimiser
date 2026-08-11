@@ -11,6 +11,10 @@ database and never migrates PostgreSQL automatically.
 - **Malformed JSON or schema validation:** correct the configuration through the
   App UI. The password must be non-empty and the port must be 1-65535. Diagnostics
   deliberately omit all option values.
+- **Power-sign schema validation:** signs must be either both unknown with
+  unconfirmed confidence and zero samples, or both explicitly configured with
+  low/medium/high confidence and at least one supporting sample. Balance tolerance
+  must be positive.
 - **PostgreSQL connection/authentication:** verify Synology listener/firewall,
   trusted LAN routing, port 55432, `home_energy`, `energy_app`, and its grants.
 - **Schema mismatch:** back up PostgreSQL, run the reviewed Alembic upgrade from an
@@ -34,6 +38,10 @@ database and never migrates PostgreSQL automatically.
 - **Missing charts:** select a shorter period and check collection coverage. Gaps
   are intentionally not interpolated. Forecast and reserve panels show empty states
   when no persisted run exists and never start a calculation.
+- **Grid/battery charts say signs are not configured:** raw telemetry is still
+  preserved. Configure the locally validated sign pair, restart, and verify a new
+  normalized observation. Historical rows remain null until the separately
+  backup-gated v0.4.1 reprocessing command is run; startup never repairs history.
 - **Stale dashboard values:** compare the status observation age with `/health`,
   verify the PostgreSQL row advances, and inspect collector logs. Thirty-second
   browser polling does not change the five-minute collection frequency.

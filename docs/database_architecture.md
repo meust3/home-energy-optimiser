@@ -25,8 +25,8 @@ Production has completed its PostgreSQL cutover. Synology `home_energy` is
 authoritative and the Home Assistant App always supplies an explicit
 `postgresql+psycopg://` URL assembled from protected App options. App startup
 rejects absent credentials, connection/authentication failure, and any revision
-other than the application head (`20260811_01` for the unreleased v0.4.0
-candidate); it does not migrate automatically or create local tables.
+other than the application head (`20260811_01`, introduced in v0.4.0); it does not
+migrate automatically or create local tables.
 
 Revision `20260811_01` is additive: it appends nullable, privacy-minimized vehicle
 telemetry columns and leaves legacy observation rows and counts unchanged. The

@@ -85,6 +85,11 @@ def write_root_only_options(volume: str) -> None:
             "db_password": TEST_PASSWORD,
             "timezone": "Australia/Brisbane",
             "health_max_observation_age_seconds": 900,
+            "grid_power_sign": "positive_export",
+            "battery_power_sign": "positive_discharge",
+            "sign_convention_confidence": "high",
+            "sign_convention_supporting_samples": 175,
+            "balance_tolerance_w": 250,
             "ev_vehicle_enabled": True,
             "ev_charging_entity": "binary_sensor.test_vehicle_charging",
             "ev_plugged_entity": "binary_sensor.test_vehicle_plugged",
@@ -158,6 +163,7 @@ def test_options_and_identity(
         "runtime_copy_gid": 10001,
         "runtime_copy_mode": "0600",
         "runtime_copy_uid": 10001,
+        "sign_environment": "propagated",
         "status": "ok",
         "token_present": True,
         "uid": 10001,
@@ -166,6 +172,7 @@ def test_options_and_identity(
         raise RuntimeError(f"Unexpected sanitized probe result: {payload!r}")
     print("PASS bootstrap copied options as app:app mode=0600")
     print("PASS configuration parsing succeeded")
+    print("PASS all five sign options propagated to the application environment")
     print("PASS application process uid=10001 gid=10001")
     print("PASS ephemeral options copy removed")
     print("PASS no secret printed")

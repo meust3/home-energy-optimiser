@@ -20,6 +20,13 @@ charge. The dashboard does not reimplement sign conversion. It displays
 `battery_discharge_power_w` exactly as stored. Baseline load is also used exactly as
 persisted. Unhealthy observations are retained and marked, not silently discarded.
 
+If every directional value in a requested range is null and each collected row has
+`sign_convention_status="unconfirmed"`, the API marks the normalized-flow gap as
+caused by unconfigured signs. With no collected rows, it does not set that marker,
+so the frontend retains the generic missing-history message. The configured signs
+shown on Data Quality come from validated App runtime settings; persisted raw and
+normalized values remain authoritative for the charts.
+
 ## Available data
 
 The latest observation supports raw telemetry, normalized flows, battery energy,

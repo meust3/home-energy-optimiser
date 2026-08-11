@@ -10,7 +10,7 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 from energy_optimizer.db.repository import DatabaseRepository
-from energy_optimizer.energy_flow import derive_energy_flow, derive_event_labels
+from energy_optimizer.energy_flow import derive_energy_flow
 from energy_optimizer.ev import calculate_baseline_load
 from energy_optimizer.models import CollectorConfig
 
@@ -24,6 +24,8 @@ RAW_COLUMNS = (
     "telemetry_is_healthy",
     "ev_charging_active",
     "ev_power_w",
+    "ev_source",
+    "ev_session_id",
     "sign_convention_status",
     "grid_import_power_w",
     "grid_export_power_w",
@@ -40,7 +42,6 @@ RAW_COLUMNS = (
     "baseline_house_consumption_w",
     "baseline_training_eligible",
     "baseline_exclusion_reason",
-    "event_labels_json",
     "flow_is_healthy",
     "flow_health_score",
 )
@@ -60,9 +61,6 @@ DERIVED_UPDATE_COLUMNS = (
     "sign_convention_status",
     "sign_convention_confidence",
     "sign_supporting_sample_count",
-    "event_labels_json",
-    "event_label_confidence",
-    "event_label_evidence_json",
     "baseline_house_consumption_w",
     "baseline_training_eligible",
     "baseline_exclusion_reason",
@@ -79,10 +77,14 @@ class ReprocessingReport(BaseModel):
     applied: bool
     model_version: str
     rows_examined: int = Field(ge=0)
+    rows_repairable: int = Field(ge=0)
+    rows_unchanged: int = Field(ge=0)
+    rows_excluded: int = Field(ge=0)
     rows_eligible_for_reprocessing: int = Field(ge=0)
     rows_becoming_baseline_eligible: int = Field(ge=0)
     rows_remaining_ineligible: int = Field(ge=0)
     exclusion_reasons: dict[str, int]
+    row_exclusion_reasons: dict[str, int]
     residual_sample_count: int = Field(ge=0)
     mean_absolute_residual_w: float | None
     median_absolute_residual_w: float | None
@@ -96,17 +98,32 @@ def reprocess_observations(
     config: CollectorConfig,
     *,
     apply: bool = False,
+    backup_verified: bool = False,
+    override_confirmed: bool = False,
     now: datetime | None = None,
 ) -> ReprocessingReport:
     """Recompute derivations; dry-run by default and never alter raw columns."""
     _validate_conventions(config)
+    if apply and not backup_verified:
+        raise ValueError("--apply requires a verified, restore-tested database backup")
     timestamp = (now or datetime.now(UTC)).astimezone(UTC)
     rows = _read_rows(historian)
-    results = [_derive(dict(row), config, timestamp) for row in rows]
+    results = [
+        _derive(
+            dict(row),
+            config,
+            timestamp,
+            override_confirmed=override_confirmed,
+        )
+        for row in rows
+    ]
+    repairable = [
+        result for result in results if result["repair_status"] == "repairable"
+    ]
     audit_added = 0
     if apply:
         audit_added = historian.apply_reprocessing_results(
-            results,
+            repairable,
             model_version=DERIVATION_MODEL_VERSION,
             conventions={
                 "grid": config.grid_power_sign_convention,
@@ -119,29 +136,42 @@ def reprocess_observations(
         )
     residuals = [
         abs(result["derived"]["balance_residual_w"])
-        for result in results
+        for result in repairable
         if result["derived"]["balance_residual_w"] is not None
     ]
     reasons = Counter(
         result["derived"]["baseline_exclusion_reason"]
-        for result in results
+        for result in repairable
         if not result["derived"]["baseline_training_eligible"]
     )
-    eligible = sum(result["can_derive"] for result in results)
+    eligible = len(repairable)
     becoming = sum(
         result["derived"]["baseline_training_eligible"]
         and not bool(result["original"].get("baseline_training_eligible"))
+        for result in repairable
+    )
+    row_exclusions = Counter(
+        str(result["repair_exclusion_reason"])
         for result in results
+        if result["repair_status"] == "excluded"
     )
     return ReprocessingReport(
         applied=apply,
         model_version=DERIVATION_MODEL_VERSION,
         rows_examined=len(results),
+        rows_repairable=len(repairable),
+        rows_unchanged=sum(
+            result["repair_status"] == "unchanged" for result in results
+        ),
+        rows_excluded=sum(result["repair_status"] == "excluded" for result in results),
         rows_eligible_for_reprocessing=eligible,
         rows_becoming_baseline_eligible=becoming,
-        rows_remaining_ineligible=len(results)
-        - sum(result["derived"]["baseline_training_eligible"] for result in results),
+        rows_remaining_ineligible=len(repairable)
+        - sum(result["derived"]["baseline_training_eligible"] for result in repairable),
         exclusion_reasons={str(key): value for key, value in sorted(reasons.items())},
+        row_exclusion_reasons={
+            str(key): value for key, value in sorted(row_exclusions.items())
+        },
         residual_sample_count=len(residuals),
         mean_absolute_residual_w=(
             round(sum(residuals) / len(residuals), 3) if residuals else None
@@ -164,7 +194,11 @@ def _read_rows(historian: DatabaseRepository) -> list[Any]:
 
 
 def _derive(
-    row: dict[str, Any], config: CollectorConfig, timestamp: datetime
+    row: dict[str, Any],
+    config: CollectorConfig,
+    timestamp: datetime,
+    *,
+    override_confirmed: bool,
 ) -> dict[str, Any]:
     raw_values = tuple(
         row.get(name)
@@ -182,13 +216,10 @@ def _derive(
         battery_power_w=row.get("battery_power_w"),
         config=config,
     )
-    labels, label_confidence, label_evidence = derive_event_labels(
-        flow,
-        ev_active=_bool_or_none(row.get("ev_charging_active")),
-        ev_power_w=row.get("ev_power_w"),
-        tolerance_w=config.balance_tolerance_w,
-    )
     can_derive = None not in raw_values and flow.sign_convention_status == "confirmed"
+    manual_annotation = row.get("ev_source") == "manual_annotation" or bool(
+        row.get("ev_session_id")
+    )
     exclusion: str | None = None
     if not can_derive:
         exclusion = "required_raw_telemetry_missing"
@@ -198,14 +229,32 @@ def _derive(
         abs(flow.balance_residual_w) > config.balance_tolerance_w
     ):
         exclusion = "balance_residual_outside_tolerance"
-    elif bool(row.get("ev_charging_active")) and row.get("ev_power_w") is None:
-        exclusion = "ev_active_power_unknown"
-    baseline, baseline_eligible, baseline_reason = calculate_baseline_load(
-        row.get("house_consumption_w"),
-        ev_charging_active=_bool_or_none(row.get("ev_charging_active")),
-        ev_power_w=row.get("ev_power_w"),
-    )
-    if exclusion is not None:
+    elif (
+        not manual_annotation
+        and bool(row.get("ev_charging_active"))
+        and row.get("ev_power_w") is None
+    ):
+        exclusion = (
+            "known_ev_session_without_ac_power"
+            if row.get("ev_source") == "byd_vehicle_cloud"
+            else "ev_active_power_unknown"
+        )
+    if manual_annotation:
+        baseline = row.get("baseline_house_consumption_w")
+        baseline_eligible = bool(row.get("baseline_training_eligible"))
+        baseline_reason = row.get("baseline_exclusion_reason")
+    else:
+        baseline, baseline_eligible, baseline_reason = calculate_baseline_load(
+            row.get("house_consumption_w"),
+            ev_charging_active=_bool_or_none(row.get("ev_charging_active")),
+            ev_power_w=row.get("ev_power_w"),
+            active_without_power_reason=(
+                "known_ev_session_without_ac_power"
+                if row.get("ev_source") == "byd_vehicle_cloud"
+                else "ev_active_power_unknown"
+            ),
+        )
+    if exclusion is not None and not manual_annotation:
         baseline_eligible = False
         baseline_reason = exclusion
     residual_ok = (
@@ -240,9 +289,6 @@ def _derive(
         "sign_convention_status": flow.sign_convention_status,
         "sign_convention_confidence": config.sign_convention_confidence,
         "sign_supporting_sample_count": config.sign_convention_supporting_samples,
-        "event_labels_json": _json(labels),
-        "event_label_confidence": label_confidence,
-        "event_label_evidence_json": _json(label_evidence),
         "baseline_house_consumption_w": baseline,
         "baseline_training_eligible": int(baseline_eligible),
         "baseline_exclusion_reason": baseline_reason,
@@ -271,6 +317,27 @@ def _derive(
         },
     }
     fingerprint = hashlib.sha256(_json(fingerprint_payload).encode()).hexdigest()
+    primary_directions = (
+        "grid_import_power_w",
+        "grid_export_power_w",
+        "battery_charge_power_w",
+        "battery_discharge_power_w",
+    )
+    confirmed = row.get("sign_convention_status") == "confirmed"
+    normalized_missing = any(row.get(name) is None for name in primary_directions)
+    if not can_derive:
+        repair_status = "excluded"
+        repair_exclusion_reason = "required_raw_telemetry_missing"
+    elif confirmed and not override_confirmed:
+        if normalized_missing:
+            repair_status = "excluded"
+            repair_exclusion_reason = "confirmed_row_requires_explicit_override"
+        else:
+            repair_status = "unchanged"
+            repair_exclusion_reason = None
+    else:
+        repair_status = "repairable"
+        repair_exclusion_reason = None
     return {
         "slot_utc": row["slot_utc"],
         "original": row,
@@ -279,6 +346,8 @@ def _derive(
         "fingerprint": fingerprint,
         "can_derive": can_derive,
         "originally_legacy": originally_legacy,
+        "repair_status": repair_status,
+        "repair_exclusion_reason": repair_exclusion_reason,
     }
 
 

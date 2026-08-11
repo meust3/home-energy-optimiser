@@ -809,22 +809,27 @@ class DatabaseRepository:
                         audit.c.model_version,
                         audit.c.input_fingerprint,
                     ]
+                ).returning(audit.c.id)
+                audit_created = (
+                    session.execute(statement).scalar_one_or_none() is not None
                 )
-                inserted = session.execute(statement)
-                count += int(inserted.rowcount > 0)
-                session.execute(
-                    update(Observation)
-                    .where(Observation.slot_utc == self._slot_value(result["slot_utc"]))
-                    .values(
-                        **{
-                            name: _coerce_column_value(
-                                Observation.__table__.c[name],
-                                result["derived"].get(name),
-                            )
-                            for name in update_columns
-                        }
+                count += int(audit_created)
+                if audit_created:
+                    session.execute(
+                        update(Observation)
+                        .where(
+                            Observation.slot_utc == self._slot_value(result["slot_utc"])
+                        )
+                        .values(
+                            **{
+                                name: _coerce_column_value(
+                                    Observation.__table__.c[name],
+                                    result["derived"].get(name),
+                                )
+                                for name in update_columns
+                            }
+                        )
                     )
-                )
         return count
 
     def ev_annotation_rows(self, session_id: str) -> list[dict[str, Any]]:

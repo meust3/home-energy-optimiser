@@ -4,33 +4,38 @@ A Home Assistant-connected, PostgreSQL-backed household energy optimisation
 platform for forecasting demand, modelling battery reserve requirements, and
 eventually supporting automated buy, sell, and charge decisions.
 
+> Version 0.4.1 is a focused hotfix. It exposes the existing power
+> sign settings to the Home Assistant App, improves normalized-flow diagnostics,
+> and provides protected historical derived-field repair. It adds no schema or
+> control change.
+
 The project is personal infrastructure under active development. It currently
 collects and analyses data but does not control Home Assistant or energy hardware.
 
 ## Current status
 
 - **PostgreSQL production:** working and manually validated end to end
-- **Continuous collector:** App v0.2.1 is installed and collecting successfully on
+- **Continuous collector:** App v0.4.0 is installed and collecting successfully on
   the Home Assistant OS 18.1 NUC
-- **Ingress dashboard:** v0.3.2 is published and awaits real-NUC installation
-  verification
+- **Ingress dashboard:** deployed through App v0.4.0
 - **Reserve forecasting:** working and advisory
 - **Solar and price forecasts:** Solcast and Amber Electric integrated
-- **EV telemetry:** optional read-only vehicle-cloud integration is implemented for
-  the unreleased v0.4.0 release candidate
+- **EV telemetry:** optional read-only vehicle-cloud integration was introduced in
+  v0.4.0
+- **Power-flow repair:** included in the v0.4.1 hotfix
 - **Automated control or trading:** not enabled
 
 PostgreSQL 17 on the Synology NAS is the canonical production source of truth. The
 SQLite-to-PostgreSQL migration and exact validation are complete. Home Assistant
 App v0.2.1 fixed Supervisor options-file permissions while retaining an
-unprivileged application process; it is now the working production collector.
+unprivileged application process.
 Version 0.3.0 added a strictly read-only Ingress presentation layer, and version
 0.3.1 corrected App packaging metadata and documentation. Version 0.3.2 makes
 sparse forecast, reserve, and normalized-flow data look intentional rather than
 broken. The dashboard remains unverified on the production host until installation
 testing is complete. Version 0.4.0 adds optional vehicle status, SOC, freshness,
 home/away, and confirmed-charging detection without pretending raw vehicle battery
-power is charger AC demand. It is not released or operational in production.
+power is charger AC demand. Version 0.4.0 is the working production collector.
 
 Forecast confidence can remain medium or low while household history is limited,
 and EV charging may still be embedded in historical household demand.
@@ -49,7 +54,7 @@ GoodWe / Amber / Solcast / weather
        |                            |
        v                            v
 Windows development          Home Assistant App
-and offline analysis         v0.2.1 production collector
+and offline analysis         v0.4.0 production collector
        |                            |
        +-------------+--------------+
                      v
@@ -91,6 +96,21 @@ Fully missing chart series now show explicit accessible empty states instead of
 blank axes. Partially available charts retain their valid series, reserve fields
 distinguish unavailable run data from values not stored by the current schema, and
 the Overview consolidates missing normalized directions into one concise note.
+In v0.4.1, normalized grid/battery charts explicitly identify unconfigured power
+signs instead of presenting a generic no-data message.
+
+For this installation only, 175 validated samples support this App configuration:
+
+```yaml
+grid_power_sign: positive_export
+battery_power_sign: positive_discharge
+sign_convention_confidence: high
+sign_convention_supporting_samples: 175
+balance_tolerance_w: 250
+```
+
+These values are evidence for this installation, not universal inverter defaults.
+Leave generic sign settings unknown/unconfirmed until locally validated.
 
 ## Safety model
 
@@ -134,9 +154,8 @@ The amd64 Home Assistant App deployment wrapper:
 - presents existing stored data through administrator-only Ingress and a bounded
   GET-only API introduced in v0.3.0.
 
-Version 0.2.1 is the confirmed production collector. Version 0.3.2 is ready for
-installation but has not been verified on the production NUC. Version 0.4.0 is an
-unreleased schema-changing release candidate. See:
+Version 0.4.0 is the confirmed production collector. Version 0.4.1 is the
+schema-neutral power-sign hotfix. See:
 
 - [App design](docs/home_assistant_app.md)
 - [Installation](docs/home_assistant_app_installation.md)
@@ -172,6 +191,7 @@ python tools/check_database.py --application-readiness
 python tools/inspect_history.py
 python tools/inspect_energy_flows.py
 python tools/estimate_reserve.py --source live
+python tools/reprocess_observations.py
 ```
 
 These commands use the single configured persistence backend. Home Assistant-facing

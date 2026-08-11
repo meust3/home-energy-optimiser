@@ -1,6 +1,19 @@
 # Changelog
 
-## 0.4.0 — release candidate (unreleased)
+## 0.4.1
+
+- Added validated App options for grid/battery signs, confidence, supporting
+  samples, and balance tolerance, with unknown/unconfirmed safe defaults.
+- Enabled the existing collector to derive normalized grid and battery directions
+  for new observations when signs are explicitly configured.
+- Added a clear unconfigured-sign empty state and current sign configuration on
+  Data Quality.
+- Added backup-gated, audited, idempotent historical flow repair that protects
+  confirmed rows and preserves raw, BYD, EV, and manual-annotation data.
+- Added no database migration, forecasting change, Home Assistant write, or
+  device-control path.
+
+## 0.4.0
 
 - Added optional read-only vehicle charging, plugged, online, SOC, home/away, and
   freshness telemetry configured through App options.

@@ -15,15 +15,35 @@ deterministic accounting order and are derived estimates, not separately metered
 facts. Excess residual makes flow readiness unhealthy without affecting telemetry.
 
 The supplied 175-sample analysis strongly supports grid-positive export and
-battery-positive discharge (21.75 W MAE, high confidence, 99.48% separation). This
-is evidence for manual configuration, not automatic configuration.
+battery-positive discharge (21.75 W MAE, high confidence, 99.48% separation). The
+installation-specific App example is:
+
+```yaml
+grid_power_sign: positive_export
+battery_power_sign: positive_discharge
+sign_convention_confidence: high
+sign_convention_supporting_samples: 175
+balance_tolerance_w: 250
+```
+
+This is evidence for manual configuration on this installation, not automatic or
+universal configuration.
 
 ## Historical reprocessing
 
 `tools/reprocess_observations.py` uses only manually configured, confirmed signs.
-It defaults to dry-run and reports eligibility, exclusions, residual statistics, and
-tolerance failures. `--apply` recomputes derived flows, allocations, events,
-baseline eligibility, and flow health while preserving every raw value.
+It defaults to dry-run and reports rows examined, repairable, unchanged, excluded,
+baseline eligibility changes, residual statistics, and tolerance failures. Apply
+requires both `--apply` and the explicit `--backup-verified` acknowledgement after
+the production backup has passed a restore test.
+
+Default repair targets only complete-raw rows whose normalized directions are
+missing or unconfirmed. Already-confirmed rows are unchanged; exceptional
+replacement requires the separately named `--override-confirmed` option. Repair
+updates only derived flow, flow-health, baseline, provenance, and legacy-status
+fields. It never updates raw PV/house/grid/battery values, BYD fields, EV charging
+classification, event labels, EV session data, or manual annotation audit rows.
+Manual annotation baseline decisions are also retained.
 
 Each interpretation records its model, timestamp, conventions, supporting samples,
 raw-input fingerprint, previous result, new result, and original legacy status.

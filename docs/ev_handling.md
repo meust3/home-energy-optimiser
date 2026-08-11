@@ -1,7 +1,7 @@
 # EV handling
 
-Independent EV telemetry is not currently deployed. Unreleased v0.4.0 adds
-optional read-only vehicle-cloud status while direct charger AC power remains
+Version 0.4.0 added optional read-only vehicle-cloud status while direct charger AC
+power remains
 unavailable. Until AC power is integrated and validated, EV energy separation is
 incomplete even though fresh confirmed charging rows can be excluded safely.
 

@@ -9,7 +9,7 @@ from http.server import ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 
-from pydantic import BaseModel, Field, SecretStr, ValidationError
+from pydantic import BaseModel, Field, SecretStr, ValidationError, model_validator
 from sqlalchemy.engine import URL
 
 from energy_optimizer import entity_ids
@@ -17,10 +17,15 @@ from energy_optimizer.config import ConfigurationError
 from energy_optimizer.db.migrations import current_revision, expected_revision
 from energy_optimizer.db.redaction import redact_database_urls
 from energy_optimizer.home_assistant import HomeAssistantClient, redact_secret
+from energy_optimizer.models import (
+    BatterySignConvention,
+    ConfidenceLevel,
+    GridSignConvention,
+)
 from energy_optimizer.persistence import ApplicationRepository, open_repository
 
 SUPERVISOR_CORE_API_URL = "http://supervisor/core/api"
-APP_VERSION = "0.4.0"
+APP_VERSION = "0.4.1"
 HEALTH_PORT = 8099
 OPTIONS_PATH_ENV = "HOME_ENERGY_APP_OPTIONS_PATH"
 SUPERVISOR_OPTIONS_PATH = Path("/data/options.json")
@@ -37,6 +42,11 @@ class HomeAssistantAppOptions(BaseModel):
     db_password: SecretStr
     timezone: str = "Australia/Brisbane"
     health_max_observation_age_seconds: int = Field(default=900, ge=300)
+    grid_power_sign: GridSignConvention = "unknown"
+    battery_power_sign: BatterySignConvention = "unknown"
+    sign_convention_confidence: ConfidenceLevel = "unconfirmed"
+    sign_convention_supporting_samples: int = Field(default=0, ge=0)
+    balance_tolerance_w: float = Field(default=250.0, gt=0)
     ev_vehicle_enabled: bool = False
     ev_charging_entity: str = ""
     ev_plugged_entity: str = ""
@@ -47,6 +57,27 @@ class HomeAssistantAppOptions(BaseModel):
     ev_location_entity: str = ""
     ev_home_state: str = Field(default="home", min_length=1)
     ev_telemetry_stale_seconds: int = Field(default=900, gt=0)
+
+    @model_validator(mode="after")
+    def sign_settings_are_consistent(self) -> "HomeAssistantAppOptions":
+        """Require either the safe unknown defaults or one confirmed sign pair."""
+        grid_unknown = self.grid_power_sign == "unknown"
+        battery_unknown = self.battery_power_sign == "unknown"
+        if grid_unknown != battery_unknown:
+            raise ValueError(
+                "grid and battery power signs must both be known or unknown"
+            )
+        if grid_unknown:
+            if self.sign_convention_confidence != "unconfirmed":
+                raise ValueError("unknown power signs require unconfirmed confidence")
+            if self.sign_convention_supporting_samples != 0:
+                raise ValueError("unknown power signs require zero supporting samples")
+            return self
+        if self.sign_convention_confidence == "unconfirmed":
+            raise ValueError("configured power signs require confirmed confidence")
+        if self.sign_convention_supporting_samples == 0:
+            raise ValueError("configured power signs require supporting samples")
+        return self
 
 
 def load_app_options(
@@ -127,6 +158,13 @@ def app_environment(
         "HA_TOKEN": token,
         "DATABASE_URL": postgresql_url(options),
         "TIMEZONE": options.timezone,
+        "GRID_POWER_SIGN": options.grid_power_sign,
+        "BATTERY_POWER_SIGN": options.battery_power_sign,
+        "SIGN_CONVENTION_CONFIDENCE": options.sign_convention_confidence,
+        "SIGN_CONVENTION_SUPPORTING_SAMPLES": str(
+            options.sign_convention_supporting_samples
+        ),
+        "BALANCE_TOLERANCE_W": str(options.balance_tolerance_w),
         "EV_VEHICLE_ENABLED": str(options.ev_vehicle_enabled).lower(),
         "EV_CHARGING_ENTITY": options.ev_charging_entity.strip(),
         "EV_PLUGGED_ENTITY": options.ev_plugged_entity.strip(),
@@ -202,6 +240,11 @@ class AppHealth:
     """Thread-safe, non-secret collector heartbeat exposed to Supervisor."""
 
     max_observation_age_seconds: int
+    grid_power_sign: str = "unknown"
+    battery_power_sign: str = "unknown"
+    sign_convention_confidence: str = "unconfirmed"
+    sign_convention_supporting_samples: int = 0
+    balance_tolerance_w: float = 250.0
     version: str = APP_VERSION
     database: str = "healthy"
     home_assistant: str = "healthy"

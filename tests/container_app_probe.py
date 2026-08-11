@@ -33,7 +33,7 @@ def write_options() -> None:
 
 def parse_options() -> None:
     """Assert copied-file metadata, parse it, and print only safe evidence."""
-    from energy_optimizer.home_assistant_app import load_app_options
+    from energy_optimizer.home_assistant_app import app_environment, load_app_options
 
     runtime_path = Path(os.environ[OPTIONS_PATH_ENV])
     runtime_metadata = runtime_path.stat()
@@ -47,7 +47,18 @@ def parse_options() -> None:
     assert options.ev_vehicle_enabled
     assert options.ev_charging_entity == "binary_sensor.test_vehicle_charging"
     assert options.ev_telemetry_stale_seconds == 900
+    assert options.grid_power_sign == "positive_export"
+    assert options.battery_power_sign == "positive_discharge"
+    assert options.sign_convention_confidence == "high"
+    assert options.sign_convention_supporting_samples == 175
+    assert options.balance_tolerance_w == 250
     assert os.environ.get("SUPERVISOR_TOKEN")
+    environment = app_environment(options)
+    assert environment["GRID_POWER_SIGN"] == "positive_export"
+    assert environment["BATTERY_POWER_SIGN"] == "positive_discharge"
+    assert environment["SIGN_CONVENTION_CONFIDENCE"] == "high"
+    assert environment["SIGN_CONVENTION_SUPPORTING_SAMPLES"] == "175"
+    assert environment["BALANCE_TOLERANCE_W"] == "250.0"
     assert not runtime_path.exists()
     print(
         json.dumps(
@@ -58,6 +69,7 @@ def parse_options() -> None:
                 "runtime_copy_gid": runtime_metadata.st_gid,
                 "runtime_copy_mode": f"{runtime_mode:04o}",
                 "runtime_copy_uid": runtime_metadata.st_uid,
+                "sign_environment": "propagated",
                 "status": "ok",
                 "token_present": True,
                 "uid": os.getuid(),
@@ -107,7 +119,7 @@ def dashboard_smoke() -> None:
 
         def status(self):
             return StatusResponse(
-                app_version="0.4.0",
+                app_version="0.4.1",
                 overall_status="healthy",
                 collector_status="healthy",
                 database_status="healthy",
@@ -144,7 +156,7 @@ def dashboard_smoke() -> None:
         assert b'id="overview-ev"' in shell
         status, css = request(
             server,
-            prefix + "static/app.css?v=0.4.0",
+            prefix + "static/app.css?v=0.4.1",
             {"X-Ingress-Path": prefix},
         )
         assert status == 200 and b"prefers-color-scheme" in css

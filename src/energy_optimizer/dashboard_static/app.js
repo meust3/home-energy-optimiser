@@ -3,6 +3,7 @@ const $ = (selector, root = document) => root.querySelector(selector);
 const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
 const svgNS = "http://www.w3.org/2000/svg";
 const missingDirectionalFlowMessage = "Detailed directional flow breakdown is unavailable for this slot.";
+const unconfiguredPowerSignsMessage = "Power sign conventions are not configured, so normalized import/export and charge/discharge values are unavailable.";
 
 function apiUrl(path, params = {}) {
   const url = new URL(`api/v1/${path}`, document.baseURI);
@@ -128,7 +129,7 @@ async function loadLive() {
       <div class="flow-node grid"><strong>${gridState === "Unavailable" ? "—" : gridState}</strong><span>Grid</span></div>
       ${availableFlows.length ? `<div class="flow-labels">${availableFlows.map(([label, value]) => `<span class="flow-label ${value > 0 ? "" : "inactive"}">${label} · ${power(value)}</span>`).join("")}</div>` : ""}`;
     $("#flow-note").textContent = missingFlowCount === flows.length
-      ? missingDirectionalFlowMessage
+      ? data.sign_convention_status === "unconfirmed" ? unconfiguredPowerSignsMessage : missingDirectionalFlowMessage
       : missingFlowCount
         ? "Some detailed directional flow values are unavailable for this slot."
         : "Directions use persisted normalized flow fields.";
@@ -260,7 +261,11 @@ async function loadHistory() {
     const data = await request("history", "timeseries", { range, resolution: "auto" });
     setState("#history-state", `Stored observations from ${localTime(data.requested_start_utc)} to ${localTime(data.requested_end_utc)}.`);
     $("#history-summary").innerHTML = `<span>${data.actual_resolution} resolution</span><span>${data.point_count} chart points</span><span>${number(data.coverage_percent, 1)}% coverage</span><span>${data.missing_slot_count} missing five-minute slots</span>`;
-    const root = $("#history-charts"); chartDefinitions.forEach(def => root.append(makeChart(def[0], def[1], def[2], data.points, def[3], def[4]))); root.append(makeEVTimeline(data.points));
+    const root = $("#history-charts"); chartDefinitions.forEach(def => {
+      const normalizedFlowChart = def[0] === "Grid import / export" || def[0] === "Battery charge / discharge";
+      const emptyMessage = normalizedFlowChart && data.normalized_flow_unavailable_due_to_unconfigured_signs ? unconfiguredPowerSignsMessage : def[4];
+      root.append(makeChart(def[0], def[1], def[2], data.points, def[3], emptyMessage));
+    }); root.append(makeEVTimeline(data.points));
   } catch (error) { setState("#history-state", error.message, "error-state"); $("#history-charts").innerHTML = `<div class="panel error-state">${safeText(error.message)}</div>`; }
 }
 
@@ -299,6 +304,7 @@ async function loadQuality() {
       ["Baseline training", data.eligible_baseline_rows, `${Object.values(data.ineligible_baseline_rows_by_reason).reduce((a,b) => a+b,0)} ineligible rows`],
       ["EV telemetry", data.ev_integration_configured ? data.ev_telemetry_fresh ? "Fresh" : "Needs attention" : "Disabled", data.ev_telemetry_available ? "Vehicle telemetry available" : "Vehicle telemetry unavailable"],
       ["Charger AC power", data.independent_ac_charger_power_available ? "Available" : "No", `${data.known_charging_rows_excluded} known charging rows excluded`],
+      ["Power signs", `${data.configured_grid_power_sign} / ${data.configured_battery_power_sign}`, `${data.configured_sign_confidence} confidence; ${data.configured_sign_supporting_samples} samples; ${number(data.configured_balance_tolerance_w, 1)} W tolerance`],
       ["Balance residual", power(data.average_absolute_balance_residual_w), `Signs: ${Object.entries(data.sign_convention_confidence).map(([k,v]) => `${k} ${v}`).join(", ")}`],
     ];
     const domains = Object.entries(data.domain_health).map(([name, value]) => `<article class="panel"><h3>${safeText(name[0].toUpperCase()+name.slice(1))}</h3>${definition([["Healthy", value.healthy_count], ["Unhealthy", value.unhealthy_count], ["Average score", percent(value.average_score)], ["Warnings", value.warning_count], ["Errors", value.error_count]])}<ul class="issue-list">${value.most_common_issues.slice(0,3).map(issue => `<li>${safeText(issue.code)} · ${issue.count}</li>`).join("") || "<li>No persisted issues</li>"}</ul></article>`).join("");

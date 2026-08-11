@@ -121,6 +121,30 @@ def test_unknown_signs_only_block_flow_health(healthy_states, config, now):
     assert observation.energy_flow.sign_convention_status == "unconfirmed"
 
 
+def test_configured_signs_populate_new_observation_flows_and_baseline(
+    healthy_states, config, now
+):
+    config.grid_power_sign_convention = "positive_export"
+    config.battery_power_sign_convention = "positive_discharge"
+    config.sign_convention_confidence = "high"
+    config.sign_convention_supporting_samples = 175
+    config.balance_tolerance_w = 250
+    observation = build_observation(healthy_states, config, observed_at=now)
+    flow = observation.energy_flow
+    assert observation.grid_power_w == -900
+    assert observation.battery_power_w == -1200
+    assert observation.house_consumption_w == 1800
+    assert observation.pv_power_w == 4200
+    assert flow.grid_import_power_w == 900
+    assert flow.grid_export_power_w == 0
+    assert flow.battery_charge_power_w == 1200
+    assert flow.battery_discharge_power_w == 0
+    assert flow.balance_residual_w == 2100
+    assert flow.sign_convention_status == "confirmed"
+    assert observation.baseline_house_consumption_w == 1800
+    assert observation.baseline_training_eligible
+
+
 def test_large_balance_residual_only_blocks_flow_health(healthy_states, config, now):
     config.grid_power_sign_convention = "positive_export"
     config.battery_power_sign_convention = "positive_discharge"

@@ -1,8 +1,8 @@
 # Read-only operational data model
 
 Legacy SQLite uses schema version 6; Alembic revision `20260810_01` is the
-portable SQLite/PostgreSQL baseline and unreleased head `20260811_01` adds optional
-vehicle telemetry. There is one `observations` row per five-minute UTC slot.
+portable SQLite/PostgreSQL baseline and head `20260811_01` adds optional vehicle
+telemetry. There is one `observations` row per five-minute UTC slot.
 `slot_utc` is the primary key. A repeat collection for a slot uses a last-write-wins
 upsert so a newer snapshot atomically replaces an earlier snapshot without creating
 a duplicate.
@@ -152,7 +152,7 @@ Raw house, grid, battery, and PV telemetry is never included in annotation updat
 
 ## Alembic revision 20260811_01: vehicle telemetry
 
-The v0.4.0 release candidate additively adds nullable vehicle SOC, raw vehicle
+Version 0.4.0 additively added nullable vehicle SOC, raw vehicle
 battery power, plugged, online, at-home, telemetry timestamp/age/freshness, and
 status columns. Existing rows and counts are unchanged and new fields remain NULL
 until an enabled vehicle integration supplies data. `AwareDateTime` retains the

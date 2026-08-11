@@ -24,6 +24,13 @@ resolution below 2,500 points. Power and price aggregation uses the mean; SOC us
 the last available value in a bucket. An empty bucket is returned with null values
 and `has_observation=false`; it is never interpolated.
 
+Version 0.4.1 adds
+`normalized_flow_unavailable_due_to_unconfigured_signs` to the timeseries response
+and the persisted `sign_convention_status` to live/bucket data. The frontend uses
+these presentation-only fields to distinguish unknown sign configuration from an
+empty observation period. Data Quality also reports the runtime-configured grid
+sign, battery sign, confidence, supporting sample count, and balance tolerance.
+
 Version 0.4.0 extends `/api/v1/live` with nullable, privacy-minimized vehicle SOC,
 raw vehicle battery power, charging/plugged/online/at-home booleans, telemetry
 timestamp/age/freshness, status, and issue codes. `/api/v1/timeseries` adds vehicle

@@ -62,6 +62,62 @@ def test_app_configuration_parsing(tmp_path):
     assert loaded.db_port == 55432
 
 
+def test_app_sign_options_accept_valid_installation_settings():
+    options = _options(
+        grid_power_sign="positive_export",
+        battery_power_sign="positive_discharge",
+        sign_convention_confidence="high",
+        sign_convention_supporting_samples=175,
+        balance_tolerance_w=250,
+    )
+    assert options.grid_power_sign == "positive_export"
+    assert options.battery_power_sign == "positive_discharge"
+    assert options.sign_convention_confidence == "high"
+    assert options.sign_convention_supporting_samples == 175
+    assert options.balance_tolerance_w == 250
+
+
+def test_app_sign_options_keep_safe_generic_defaults():
+    options = _options()
+    assert options.grid_power_sign == "unknown"
+    assert options.battery_power_sign == "unknown"
+    assert options.sign_convention_confidence == "unconfirmed"
+    assert options.sign_convention_supporting_samples == 0
+    assert options.balance_tolerance_w == 250
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("grid_power_sign", "positive_charge"),
+        ("battery_power_sign", "positive_import"),
+        ("sign_convention_confidence", "certain"),
+        ("sign_convention_supporting_samples", -1),
+        ("balance_tolerance_w", 0),
+    ],
+)
+def test_app_sign_options_reject_invalid_values(field, value):
+    with pytest.raises(ValueError):
+        _options(**{field: value})
+
+
+@pytest.mark.parametrize(
+    "updates",
+    [
+        {"grid_power_sign": "positive_export"},
+        {
+            "grid_power_sign": "positive_export",
+            "battery_power_sign": "positive_discharge",
+        },
+        {"sign_convention_confidence": "high"},
+        {"sign_convention_supporting_samples": 1},
+    ],
+)
+def test_app_sign_options_reject_inconsistent_confirmation(updates):
+    with pytest.raises(ValueError):
+        _options(**updates)
+
+
 def test_missing_database_password_rejects_startup(tmp_path):
     path = tmp_path / "options.json"
     path.write_text(json.dumps({"db_host": "nas.local"}), encoding="utf-8")
@@ -146,11 +202,25 @@ def test_postgresql_url_encodes_credentials():
 
 
 def test_app_environment_uses_supervisor_proxy_and_never_sqlite():
-    environment = app_environment(_options(), supervisor_token="example-token")
+    environment = app_environment(
+        _options(
+            grid_power_sign="positive_export",
+            battery_power_sign="positive_discharge",
+            sign_convention_confidence="high",
+            sign_convention_supporting_samples=175,
+            balance_tolerance_w=250,
+        ),
+        supervisor_token="example-token",
+    )
     assert environment["HA_URL"] == SUPERVISOR_CORE_API_URL
     assert environment["HA_TOKEN"] == "example-token"
     assert environment["DATABASE_URL"].startswith("postgresql+psycopg://")
     assert "sqlite" not in environment["DATABASE_URL"]
+    assert environment["GRID_POWER_SIGN"] == "positive_export"
+    assert environment["BATTERY_POWER_SIGN"] == "positive_discharge"
+    assert environment["SIGN_CONVENTION_CONFIDENCE"] == "high"
+    assert environment["SIGN_CONVENTION_SUPPORTING_SAMPLES"] == "175"
+    assert environment["BALANCE_TOLERANCE_W"] == "250.0"
 
 
 def test_app_requires_supervisor_token(monkeypatch):
@@ -410,11 +480,11 @@ def test_app_patch_versions_are_consistent():
     manifest = Path("home_energy_optimiser/config.yaml").read_text(encoding="utf-8")
     dockerfile = Path("home_energy_optimiser/Dockerfile").read_text(encoding="utf-8")
     project = Path("pyproject.toml").read_text(encoding="utf-8")
-    assert APP_VERSION == "0.4.0"
-    assert 'version: "0.4.0"' in manifest
-    assert "ARG BUILD_VERSION=0.4.0" in dockerfile
-    assert "ARG APP_SOURCE_REF=v0.4.0" in dockerfile
-    assert 'version = "0.4.0"' in project
+    assert APP_VERSION == "0.4.1"
+    assert 'version: "0.4.1"' in manifest
+    assert "ARG BUILD_VERSION=0.4.1" in dockerfile
+    assert "ARG APP_SOURCE_REF=v0.4.1" in dockerfile
+    assert 'version = "0.4.1"' in project
 
 
 def test_app_launcher_execs_existing_collector_without_restart_loop():
@@ -508,6 +578,7 @@ def test_app_page_documentation_and_changelog_are_packaged():
     assert changelog.is_file()
     assert documentation.is_file()
     changelog_text = changelog.read_text(encoding="utf-8")
+    assert "## 0.4.1" in changelog_text
     assert "## 0.4.0" in changelog_text
     assert "## 0.3.1" in changelog_text
     assert "## 0.3.0" in changelog_text

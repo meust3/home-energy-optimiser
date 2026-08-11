@@ -1,6 +1,28 @@
 # Changelog
 
-## 0.4.0 — release candidate (unreleased)
+## 0.4.1
+
+- Added validated Home Assistant App options for grid and battery power signs,
+  sign confidence, supporting samples, and balance tolerance. Generic defaults
+  remain safely unknown and unconfirmed.
+- Passed the validated settings into the unchanged collector normalization logic,
+  allowing new observations to populate directional grid/battery flow, residual,
+  and baseline fields without changing raw telemetry.
+- Distinguished normalized-flow gaps caused by unconfigured signs from periods
+  with no observations, and exposed the configured signs and confidence on Data
+  Quality.
+- Tightened historical derived-field repair: dry-run remains the default, writes
+  require `--apply --backup-verified`, confirmed rows are protected unless
+  `--override-confirmed` is explicit, audit insertion gates updates, and reruns are
+  idempotent.
+- Preserved raw energy telemetry, BYD fields, EV classifications, manual EV
+  annotations, and their baseline decisions during repair. No schema migration,
+  Home Assistant write, device command, or energy-balance equation change was
+  added.
+- This hotfix changes no production schema, forecasting algorithm, Home Assistant
+  write surface, or device-control capability.
+
+## 0.4.0
 
 - Added optional, configurable, GET-only vehicle-cloud telemetry for charging,
   plugged, online, SOC, raw vehicle battery power, telemetry freshness, and an
@@ -22,8 +44,8 @@
   location, journey history, or vehicle-control data.
 - Retained the strict Home Assistant GET allowlist and added no service call,
   vehicle/charger/inverter command, force poll, Modbus write, or mutation endpoint.
-- This version is prepared as a release candidate only; it is not released or
-  operational on the production Home Assistant host.
+- Released and validated the read-only vehicle telemetry integration on the
+  production Home Assistant host.
 - Required immutable commit/tag image validation and Home Assistant update
   discovery before production migration. App failure falls back first to the
   reviewed Windows v0.4.0 collector; v0.3.2 requires a physical downgrade or

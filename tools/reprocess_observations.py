@@ -14,10 +14,30 @@ from energy_optimizer.reprocessing import reprocess_observations
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--apply", action="store_true", help="Apply derived updates")
+    parser.add_argument(
+        "--backup-verified",
+        action="store_true",
+        help="Confirm the production backup has passed a restore test",
+    )
+    parser.add_argument(
+        "--override-confirmed",
+        action="store_true",
+        help="Also replace already-confirmed derived rows (exceptional use only)",
+    )
     parser.add_argument("--json", action="store_true")
     args = parser.parse_args()
+    if args.apply and not args.backup_verified:
+        parser.error("--apply requires --backup-verified")
+    if args.backup_verified and not args.apply:
+        parser.error("--backup-verified is meaningful only with --apply")
     config = load_reprocessing_config()
-    report = reprocess_observations(open_repository(), config, apply=args.apply)
+    report = reprocess_observations(
+        open_repository(),
+        config,
+        apply=args.apply,
+        backup_verified=args.backup_verified,
+        override_confirmed=args.override_confirmed,
+    )
     console = Console()
     if args.json:
         console.print_json(data=report.model_dump(mode="json"))
@@ -42,7 +62,9 @@ def main() -> int:
     table.add_column("Value", justify="right")
     for label, value in (
         ("Rows examined", report.rows_examined),
-        ("Eligible for derivation", report.rows_eligible_for_reprocessing),
+        ("Rows repairable", report.rows_repairable),
+        ("Rows unchanged", report.rows_unchanged),
+        ("Rows excluded", report.rows_excluded),
         ("Would become baseline eligible", report.rows_becoming_baseline_eligible),
         ("Remaining ineligible", report.rows_remaining_ineligible),
         ("Residual samples", report.residual_sample_count),
@@ -54,7 +76,9 @@ def main() -> int:
     ):
         table.add_row(label, "N/A" if value is None else str(value))
     for reason, count in report.exclusion_reasons.items():
-        table.add_row(f"Excluded: {reason}", str(count))
+        table.add_row(f"Baseline excluded: {reason}", str(count))
+    for reason, count in report.row_exclusion_reasons.items():
+        table.add_row(f"Repair excluded: {reason}", str(count))
     console.print(table)
     console.print("No Home Assistant or hardware command was issued.")
     return 0

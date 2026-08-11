@@ -69,6 +69,7 @@ OBSERVATION_COLUMNS = (
     "ev_telemetry_age_seconds",
     "ev_telemetry_fresh",
     "ev_vehicle_status",
+    "sign_convention_status",
     "sign_convention_confidence",
     "balance_residual_w",
 )
@@ -121,6 +122,7 @@ class LiveResponse(ApiModel):
     battery_mode: str | None = None
     work_mode: str | None = None
     energy_balance_residual_w: float | None = None
+    sign_convention_status: str | None = None
     sign_convention_confidence: str | None = None
     event_labels: list[str] = Field(default_factory=list)
     telemetry_health: HealthDomain | None = None
@@ -163,6 +165,7 @@ class TimeseriesPoint(ApiModel):
     ev_vehicle_soc_percent: float | None
     ev_charging_active: bool | None
     ev_plugged_in: bool | None
+    sign_convention_status: str | None
 
 
 class TimeseriesResponse(ApiModel):
@@ -175,6 +178,7 @@ class TimeseriesResponse(ApiModel):
     collected_slots: int
     missing_slot_count: int
     coverage_percent: float
+    normalized_flow_unavailable_due_to_unconfigured_signs: bool
     points: list[TimeseriesPoint]
 
 
@@ -275,6 +279,11 @@ class DataQualityResponse(ApiModel):
     ev_telemetry_fresh: bool | None
     independent_ac_charger_power_available: bool
     known_charging_rows_excluded: int
+    configured_grid_power_sign: str
+    configured_battery_power_sign: str
+    configured_sign_confidence: str
+    configured_sign_supporting_samples: int
+    configured_balance_tolerance_w: float
     sign_convention_confidence: dict[str, int]
     average_absolute_balance_residual_w: float | None
 
@@ -378,6 +387,7 @@ class DashboardService:
             battery_mode=row.get("battery_mode"),
             work_mode=row.get("work_mode"),
             energy_balance_residual_w=_number(row.get("balance_residual_w")),
+            sign_convention_status=row.get("sign_convention_status"),
             sign_convention_confidence=row.get("sign_convention_confidence"),
             event_labels=[str(value) for value in (row.get("event_labels_json") or [])],
             telemetry_health=_domain(row, "telemetry"),
@@ -443,6 +453,17 @@ class DashboardService:
         points = aggregate_timeseries(
             rows, start=start_utc, end=end_utc, resolution=actual_resolution
         )
+        directional_columns = (
+            "grid_import_power_w",
+            "grid_export_power_w",
+            "battery_charge_power_w",
+            "battery_discharge_power_w",
+        )
+        unconfigured_normalized_flow = bool(rows) and all(
+            all(row.get(name) is None for name in directional_columns)
+            and row.get("sign_convention_status") == "unconfirmed"
+            for row in rows
+        )
         return TimeseriesResponse(
             requested_start_utc=start_utc,
             requested_end_utc=end_utc,
@@ -453,6 +474,9 @@ class DashboardService:
             collected_slots=gap["collected_slots"],
             missing_slot_count=gap["missing_slots"],
             coverage_percent=gap["coverage_percent"],
+            normalized_flow_unavailable_due_to_unconfigured_signs=(
+                unconfigured_normalized_flow
+            ),
             points=points,
         )
 
@@ -711,6 +735,21 @@ class DashboardService:
             ev_telemetry_fresh=latest.get("ev_telemetry_fresh"),
             independent_ac_charger_power_available=direct_ev,
             known_charging_rows_excluded=known_excluded,
+            configured_grid_power_sign=str(
+                getattr(self.health, "grid_power_sign", "unknown")
+            ),
+            configured_battery_power_sign=str(
+                getattr(self.health, "battery_power_sign", "unknown")
+            ),
+            configured_sign_confidence=str(
+                getattr(self.health, "sign_convention_confidence", "unconfirmed")
+            ),
+            configured_sign_supporting_samples=int(
+                getattr(self.health, "sign_convention_supporting_samples", 0)
+            ),
+            configured_balance_tolerance_w=float(
+                getattr(self.health, "balance_tolerance_w", 250.0)
+            ),
             sign_convention_confidence=dict(confidence),
             average_absolute_balance_residual_w=(
                 sum(residuals) / len(residuals) if residuals else None
@@ -817,6 +856,7 @@ def aggregate_timeseries(
                 ev_vehicle_soc_percent=_last(values, "ev_vehicle_soc_percent"),
                 ev_charging_active=_last_bool(values, "ev_charging_active"),
                 ev_plugged_in=_last_bool(values, "ev_plugged_in"),
+                sign_convention_status=_last_text(values, "sign_convention_status"),
             )
         )
         cursor += interval
@@ -849,6 +889,14 @@ def _last_bool(rows: list[dict[str, Any]], name: str) -> bool | None:
         value = row.get(name)
         if value is not None:
             return bool(value)
+    return None
+
+
+def _last_text(rows: list[dict[str, Any]], name: str) -> str | None:
+    for row in reversed(rows):
+        value = row.get(name)
+        if value is not None:
+            return str(value)
     return None
 
 

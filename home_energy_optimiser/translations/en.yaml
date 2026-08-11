@@ -20,6 +20,21 @@ configuration:
   health_max_observation_age_seconds:
     name: Maximum observation age
     description: Age after which collector health becomes unhealthy.
+  grid_power_sign:
+    name: Grid power sign
+    description: Confirmed direction represented by positive raw grid power; leave unknown until validated.
+  battery_power_sign:
+    name: Battery power sign
+    description: Confirmed direction represented by positive raw battery power; leave unknown until validated.
+  sign_convention_confidence:
+    name: Sign confidence
+    description: Confidence assigned to the validated grid and battery sign pair.
+  sign_convention_supporting_samples:
+    name: Supporting samples
+    description: Number of observations used to validate the configured sign pair.
+  balance_tolerance_w:
+    name: Balance tolerance
+    description: Positive watt tolerance used by the unchanged energy-balance check.
   ev_vehicle_enabled:
     name: Enable vehicle telemetry
     description: Read configured vehicle entities without enabling any control action.

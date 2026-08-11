@@ -1,12 +1,13 @@
 # Home Assistant App design
 
 Home Energy Optimiser is packaged as a Home Assistant App (formerly called an
-add-on) without changing collector business logic. Version 0.2.1 is installed and
+add-on) without changing collector business logic. Version 0.4.0 is installed and
 collecting successfully on the amd64 Home Assistant OS 18.1 NUC. Version 0.3.0 added
 an experimental administrator-only read-only Ingress dashboard, and version 0.3.2
-adds resilient sparse-data presentation. Unreleased v0.4.0 adds optional
-privacy-minimized vehicle telemetry and requires an explicit additive database
-migration before the App update. It is not operational on that host.
+adds resilient sparse-data presentation. Version 0.4.0 added optional
+privacy-minimized vehicle telemetry and required an explicit additive database
+migration before its App update.
+Version 0.4.1 adds schema-neutral power-sign options and normalized-flow repair.
 
 ```text
 Home Assistant Core
@@ -45,11 +46,20 @@ The entrypoint then uses `exec gosu app:app` to run Python as UID/GID 10001 whil
 preserving Supervisor's runtime environment. Python validates host, port, database,
 username, password, timezone, and health settings, then immediately unlinks the
 ephemeral copy after successful parsing. It URL-encodes the credential components
-and exports one explicit `DATABASE_URL`. It then verifies:
+and exports one explicit `DATABASE_URL`.
+
+Version 0.4.1 also validates and exports `GRID_POWER_SIGN`,
+`BATTERY_POWER_SIGN`, `SIGN_CONVENTION_CONFIDENCE`,
+`SIGN_CONVENTION_SUPPORTING_SAMPLES`, and `BALANCE_TOLERANCE_W`. Both signs must
+remain unknown with unconfirmed/zero evidence, or both must be configured with
+confirmed confidence and supporting samples. Startup logs only these non-secret
+values, never the full options payload. It does not automatically repair history.
+
+It then verifies:
 
 1. the URL is PostgreSQL, never SQLite;
 2. PostgreSQL connectivity and authentication;
-3. the exact expected Alembic revision (`20260811_01` for the v0.4.0 candidate);
+3. the exact expected Alembic revision (`20260811_01` since v0.4.0);
 4. tables needed for collection and analytical consumers;
 5. the Core API through the Supervisor proxy;
 6. all required collector entities through GET requests.

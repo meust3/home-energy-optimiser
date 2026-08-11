@@ -170,6 +170,7 @@ def test_live_timeseries_and_forecast_comparison_are_read_only(dashboard_databas
 
     live = service.live()
     assert live.available
+    assert live.sign_convention_status == "unconfirmed"
     assert live.slot_utc.tzinfo is not None
     assert live.amber_buy_price_aud_per_kwh == pytest.approx(0.21)
     assert live.ev_power_w is None
@@ -180,6 +181,7 @@ def test_live_timeseries_and_forecast_comparison_are_read_only(dashboard_databas
         resolution="5m",
     )
     assert series.missing_slot_count == 3
+    assert series.normalized_flow_unavailable_due_to_unconfigured_signs
     assert any(not point.has_observation for point in series.points)
     comparison = service.forecast_comparison(forecast_run_id=run_id)
     assert comparison.available
@@ -208,6 +210,30 @@ def test_reserve_empty_state_and_data_quality(dashboard_database):
     assert quality.total_observations == 2
     assert quality.missing_slots == 3
     assert quality.ev_contamination_warning
+    assert quality.configured_grid_power_sign == "unknown"
+    assert quality.configured_battery_power_sign == "unknown"
+    assert quality.configured_sign_confidence == "unconfirmed"
+
+
+def test_data_quality_reports_runtime_sign_configuration(dashboard_database):
+    url, first, _ = dashboard_database
+    health = AppHealth(
+        900,
+        grid_power_sign="positive_export",
+        battery_power_sign="positive_discharge",
+        sign_convention_confidence="high",
+        sign_convention_supporting_samples=175,
+        balance_tolerance_w=250,
+    )
+    quality = DashboardService(url, health).data_quality(
+        start=first.slot_utc - timedelta(minutes=5),
+        end=first.slot_utc + timedelta(minutes=15),
+    )
+    assert quality.configured_grid_power_sign == "positive_export"
+    assert quality.configured_battery_power_sign == "positive_discharge"
+    assert quality.configured_sign_confidence == "high"
+    assert quality.configured_sign_supporting_samples == 175
+    assert quality.configured_balance_tolerance_w == 250
 
 
 def test_vehicle_dashboard_api_uses_nullable_privacy_minimized_fields(
@@ -344,7 +370,7 @@ class _FakeService:
         from energy_optimizer.dashboard_api import StatusResponse
 
         return StatusResponse(
-            app_version="0.4.0",
+            app_version="0.4.1",
             overall_status="healthy",
             collector_status="healthy",
             database_status="healthy",
@@ -390,14 +416,14 @@ def test_web_shell_static_nested_ingress_api_and_security_headers():
         assert status == 200
         html = body.decode()
         assert f'<base href="{prefix}">' in html
-        assert 'href="static/app.css?v=0.4.0"' in html
+        assert 'href="static/app.css?v=0.4.1"' in html
         assert "Advisory only. No command was issued." in html
         assert "Content-Security-Policy" in headers
         assert "X-Frame-Options" not in headers
         status, _, css = _request(
             server,
             "GET",
-            prefix + "static/app.css?v=0.4.0",
+            prefix + "static/app.css?v=0.4.1",
             {"X-Ingress-Path": prefix},
         )
         assert status == 200
@@ -506,6 +532,11 @@ def test_fully_missing_and_mixed_chart_series_have_intentional_rendering():
     assert "segment.length === 1" in javascript
     assert 'createElementNS(svgNS, "circle")' in javascript
     assert "Historical collection gaps" in javascript
+    assert (
+        "Power sign conventions are not configured, so normalized import/export "
+        "and charge/discharge values are unavailable." in javascript
+    )
+    assert "normalized_flow_unavailable_due_to_unconfigured_signs" in javascript
     assert javascript.count("article.append(details)") == 2
 
 
@@ -528,7 +559,7 @@ def test_missing_directional_flows_use_one_concise_fallback():
     )
     fallback = "Detailed directional flow breakdown is unavailable for this slot."
     assert javascript.count(fallback) == 1
-    assert "textContent = missingDirectionalFlowMessage" in javascript
+    assert 'data.sign_convention_status === "unconfirmed"' in javascript
     assert "availableFlows.map" in javascript
     assert "flows.map" not in javascript
     assert "directionalState(data.grid_import_power_w" in javascript

@@ -1,9 +1,8 @@
 # PostgreSQL setup
 
 The production `home_energy` cutover is complete and has been manually validated
-with a fresh live observation. Home Assistant App v0.2.1 is the active 24/7
-collector. Version 0.3.2 is published but unverified on the host; version 0.4.0 is
-an unreleased schema-changing release candidate.
+with a fresh live observation. Home Assistant App v0.4.0 is the active 24/7
+collector at schema revision `20260811_01`.
 
 Recommended Synology layout:
 

@@ -52,6 +52,15 @@ def _run(options) -> int:
         "Starting Home Assistant App with %s",
         display_database_url(environment["DATABASE_URL"]),
     )
+    LOGGER.info(
+        "Power-flow configuration grid_sign=%s battery_sign=%s "
+        "sign_confidence=%s supporting_samples=%s balance_tolerance_w=%s",
+        options.grid_power_sign,
+        options.battery_power_sign,
+        options.sign_convention_confidence,
+        options.sign_convention_supporting_samples,
+        options.balance_tolerance_w,
+    )
     validate_startup(
         database_url=environment["DATABASE_URL"],
         ha_url=config.ha_url,
@@ -62,7 +71,14 @@ def _run(options) -> int:
         "Startup validation passed: PostgreSQL revision, application readiness, "
         "and read-only Home Assistant entity access"
     )
-    health = AppHealth(options.health_max_observation_age_seconds)
+    health = AppHealth(
+        options.health_max_observation_age_seconds,
+        grid_power_sign=options.grid_power_sign,
+        battery_power_sign=options.battery_power_sign,
+        sign_convention_confidence=options.sign_convention_confidence,
+        sign_convention_supporting_samples=options.sign_convention_supporting_samples,
+        balance_tolerance_w=options.balance_tolerance_w,
+    )
     server, thread = start_dashboard_server(
         health, database_url=environment["DATABASE_URL"], port=HEALTH_PORT
     )
