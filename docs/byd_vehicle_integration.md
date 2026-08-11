@@ -111,8 +111,8 @@ The required order is:
 8. Merge or fast-forward the reviewed release to `main`.
 9. Refresh the Home Assistant App store and confirm v0.4.0 is offered, but do not
    update the App yet.
-10. Before the v0.4.0 migration, while v0.3.2 remained running, create and
-   restore-test the production PostgreSQL backup from a trusted workstation:
+10. Before the v0.4.0 migration, create and restore-test the production PostgreSQL
+   backup from a trusted workstation while v0.3.2 remains running:
 
    ```powershell
    pg_dump --format=custom --file home_energy_pre_v0.4.0.dump --dbname home_energy

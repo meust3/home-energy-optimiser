@@ -312,7 +312,7 @@ function metricCard(label, metric) {
 }
 
 async function loadForecastOperations() {
-  setState("#operations-state", "Loading scheduler audit and scored pointsâ€¦");
+  setState("#operations-state", "Loading scheduler audit and scored points...");
   try {
     const selectedRun = $("#accuracy-run").value || null;
     const [operations, accuracy, runs] = await Promise.all([

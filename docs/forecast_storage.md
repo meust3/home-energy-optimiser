@@ -15,5 +15,23 @@ actual - expected`. Run metrics report mean absolute error and signed bias. Miss
 actuals remain NULL and do not count toward metrics.
 
 Supported types are solar power, household and baseline load, battery SOC, grid
-import/export, and buy/sell prices. Retention is configurable, but automatic deletion
-is intentionally absent from this milestone.
+import/export, and buy/sell prices.
+
+## v0.5.0 storage-growth risk
+
+`FORECAST_RETENTION_DAYS` is parsed into collector configuration, but v0.5.0 does
+not apply it to scheduled forecast rows. Automatic deletion is intentionally absent
+from this release. At the default 30-minute cadence and 24-hour horizon, 48 runs per
+day each store 288 five-minute points: approximately 13,824 forecast points per day,
+414,720 over 30 days, and 5,045,760 over 365 days. Completed scoring can add the same
+number of `forecast_point_scores` rows. Runs, operation attempts, and reserve runs
+each grow by about 48 rows per day (1,440 over 30 days; 17,520 over 365 days), while
+opportunity-evaluation growth depends on the number of candidates evaluated.
+
+Indexes cover forecast run type/creation time, points by run/period, scores by score
+time, attempts by start and status/boundary, reserve runs by evaluation/forecast,
+and opportunities by reserve run. They support bounded reads but do not bound disk
+growth. Until a separately reviewed retention policy prunes forecasts and their
+cascading scores/reserve audit consistently, operators should monitor PostgreSQL
+table/index size and scoring backlog. This is a documented operational risk and a
+post-release retention follow-up; v0.5.0 does not silently delete audit history.

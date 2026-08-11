@@ -190,15 +190,11 @@ def app_environment(
         "EV_LOCATION_ENTITY": options.ev_location_entity.strip(),
         "EV_HOME_STATE": options.ev_home_state.strip(),
         "EV_TELEMETRY_STALE_SECONDS": str(options.ev_telemetry_stale_seconds),
-        "FORECAST_OPERATIONS_ENABLED": str(
-            options.forecast_operations_enabled
-        ).lower(),
+        "FORECAST_OPERATIONS_ENABLED": str(options.forecast_operations_enabled).lower(),
         "FORECAST_INTERVAL_MINUTES": str(options.forecast_interval_minutes),
         "FORECAST_HORIZON_HOURS": str(options.forecast_horizon_hours),
         "FORECAST_ALIGNMENT_MINUTES": str(options.forecast_alignment_minutes),
-        "FORECAST_SCORING_DELAY_MINUTES": str(
-            options.forecast_scoring_delay_minutes
-        ),
+        "FORECAST_SCORING_DELAY_MINUTES": str(options.forecast_scoring_delay_minutes),
         "FORECAST_MAX_RUNTIME_SECONDS": str(options.forecast_max_runtime_seconds),
         "RESERVE_SNAPSHOT_ENABLED": str(options.reserve_snapshot_enabled).lower(),
     }
