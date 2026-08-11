@@ -23,7 +23,15 @@ STATIC_FILES = {
     "app.css": "text/css; charset=utf-8",
     "app.js": "text/javascript; charset=utf-8",
 }
-SHELL_ROUTES = {"/", "/overview", "/history", "/forecasts", "/reserve", "/data-quality"}
+SHELL_ROUTES = {
+    "/",
+    "/overview",
+    "/history",
+    "/forecasts",
+    "/forecast-operations",
+    "/reserve",
+    "/data-quality",
+}
 
 
 class IngressAccessPolicy:
@@ -236,6 +244,25 @@ def make_handler(
             elif route == "/api/v1/reserve/latest":
                 self._require_params(params, set())
                 response = service.reserve_latest()
+            elif route == "/api/v1/forecast-operations/status":
+                self._require_params(params, set())
+                response = service.forecast_operations_status()
+            elif route == "/api/v1/forecast-accuracy":
+                self._require_params(params, {"range", "forecast_run_id"})
+                response = service.forecast_accuracy(
+                    range_name=self._single(params, "range") or "7d",
+                    forecast_run_id=self._optional_integer(
+                        params,
+                        "forecast_run_id",
+                        minimum=1,
+                        maximum=2_147_483_647,
+                    ),
+                )
+            elif route == "/api/v1/reserve-history":
+                self._require_params(params, {"range"})
+                response = service.reserve_history(
+                    range_name=self._single(params, "range") or "30d"
+                )
             elif route == "/api/v1/data-quality":
                 self._require_params(params, {"range", "start", "end"})
                 response = service.data_quality(

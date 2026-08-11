@@ -6,6 +6,7 @@ from typing import Any
 from sqlalchemy import (
     JSON,
     Boolean,
+    CheckConstraint,
     Float,
     ForeignKey,
     Index,
@@ -202,6 +203,133 @@ class ForecastPoint(Base):
     metadata_json: Mapped[Any] = mapped_column(JSON_TYPE, nullable=False)
     __table_args__ = (
         Index("idx_forecast_points_run_period", "forecast_run_id", "period_start_utc"),
+    )
+
+
+class ForecastPointScore(Base):
+    """Completed-interval scoring kept separate from immutable forecast values."""
+
+    __tablename__ = "forecast_point_scores"
+    forecast_point_id: Mapped[int] = mapped_column(
+        ForeignKey("forecast_points.id", ondelete="CASCADE"), primary_key=True
+    )
+    scored_at_utc: Mapped[datetime] = mapped_column(AwareDateTime(), nullable=False)
+    actual_value: Mapped[float | None] = mapped_column(Float)
+    absolute_error: Mapped[float | None] = mapped_column(Float)
+    signed_error: Mapped[float | None] = mapped_column(Float)
+    squared_error: Mapped[float | None] = mapped_column(Float)
+    actual_available: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    health_eligible: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    missing_reason: Mapped[str | None] = mapped_column(Text)
+    metadata_json: Mapped[Any] = mapped_column(JSON_TYPE, nullable=False, default=dict)
+    __table_args__ = (Index("idx_forecast_scores_scored_at", "scored_at_utc"),)
+
+
+class ForecastOperationAttempt(Base):
+    """Durable claim and audit record for one aligned scheduler boundary."""
+
+    __tablename__ = "forecast_operation_attempts"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    operation: Mapped[str] = mapped_column(String(32), nullable=False)
+    scheduled_for_utc: Mapped[datetime] = mapped_column(AwareDateTime(), nullable=False)
+    started_at_utc: Mapped[datetime] = mapped_column(AwareDateTime(), nullable=False)
+    finished_at_utc: Mapped[datetime | None] = mapped_column(AwareDateTime())
+    status: Mapped[str] = mapped_column(String(16), nullable=False)
+    duration_seconds: Mapped[float | None] = mapped_column(Float)
+    forecast_run_id: Mapped[int | None] = mapped_column(ForeignKey("forecast_runs.id"))
+    reserve_run_id: Mapped[int | None] = mapped_column(ForeignKey("reserve_runs.id"))
+    forecast_point_count: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0
+    )
+    failure_summary: Mapped[str | None] = mapped_column(String(500))
+    metadata_json: Mapped[Any] = mapped_column(JSON_TYPE, nullable=False, default=dict)
+    __table_args__ = (
+        UniqueConstraint(
+            "operation", "scheduled_for_utc", name="uq_forecast_attempt_boundary"
+        ),
+        CheckConstraint(
+            "status IN ('running', 'success', 'failed', 'skipped')",
+            name="forecast_attempt_status",
+        ),
+        Index("idx_forecast_attempts_started", "started_at_utc"),
+        Index("idx_forecast_attempts_status", "status", "scheduled_for_utc"),
+    )
+
+
+class ReserveRun(Base):
+    """Complete advisory ReserveEstimate snapshot; never a control instruction."""
+
+    __tablename__ = "reserve_runs"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    forecast_run_id: Mapped[int] = mapped_column(
+        ForeignKey("forecast_runs.id"), nullable=False
+    )
+    evaluation_timestamp_utc: Mapped[datetime] = mapped_column(
+        AwareDateTime(), nullable=False
+    )
+    observation_timestamp_utc: Mapped[datetime] = mapped_column(
+        AwareDateTime(), nullable=False
+    )
+    observation_source: Mapped[str] = mapped_column(String(16), nullable=False)
+    observation_age_seconds: Mapped[float] = mapped_column(Float, nullable=False)
+    observation_is_stale: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    battery_soc_percent: Mapped[float | None] = mapped_column(Float)
+    battery_energy_kwh: Mapped[float | None] = mapped_column(Float)
+    usable_battery_capacity_kwh: Mapped[float] = mapped_column(Float, nullable=False)
+    forecast_start_utc: Mapped[datetime] = mapped_column(
+        AwareDateTime(), nullable=False
+    )
+    forecast_end_utc: Mapped[datetime] = mapped_column(AwareDateTime(), nullable=False)
+    forecast_horizon_minutes: Mapped[float] = mapped_column(Float, nullable=False)
+    forecast_horizon_hours: Mapped[float] = mapped_column(Float, nullable=False)
+    household_demand_kwh: Mapped[float] = mapped_column(Float, nullable=False)
+    ev_demand_kwh: Mapped[float] = mapped_column(Float, nullable=False)
+    technical_reserve_kwh: Mapped[float] = mapped_column(Float, nullable=False)
+    emergency_reserve_kwh: Mapped[float] = mapped_column(Float, nullable=False)
+    uncertainty_buffer_kwh: Mapped[float] = mapped_column(Float, nullable=False)
+    gross_reserve_requirement_kwh: Mapped[float] = mapped_column(Float, nullable=False)
+    capacity_capped_reserve_kwh: Mapped[float] = mapped_column(Float, nullable=False)
+    unmet_reserve_requirement_kwh: Mapped[float] = mapped_column(Float, nullable=False)
+    current_reserve_shortfall_kwh: Mapped[float] = mapped_column(Float, nullable=False)
+    recommended_reserve_kwh: Mapped[float] = mapped_column(Float, nullable=False)
+    potentially_tradable_kwh: Mapped[float | None] = mapped_column(Float)
+    confidence: Mapped[str] = mapped_column(String(16), nullable=False)
+    confidence_score: Mapped[int] = mapped_column(Integer, nullable=False)
+    ready_for_manual_review: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    opportunity_state: Mapped[str] = mapped_column(String(40), nullable=False)
+    first_candidate_json: Mapped[Any] = mapped_column(JSON_TYPE, nullable=False)
+    effective_boundary_json: Mapped[Any | None] = mapped_column(JSON_TYPE)
+    skipped_candidate_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    expected_replenishment_kwh: Mapped[float | None] = mapped_column(Float)
+    command_issued: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    model_version: Mapped[str] = mapped_column(String(64), nullable=False)
+    reasons_json: Mapped[Any] = mapped_column(JSON_TYPE, nullable=False)
+    confidence_json: Mapped[Any] = mapped_column(JSON_TYPE, nullable=False)
+    health_json: Mapped[Any] = mapped_column(JSON_TYPE, nullable=False)
+    operational_context_json: Mapped[Any] = mapped_column(JSON_TYPE, nullable=False)
+    demand_forecast_json: Mapped[Any] = mapped_column(JSON_TYPE, nullable=False)
+    estimate_json: Mapped[Any] = mapped_column(JSON_TYPE, nullable=False)
+    __table_args__ = (
+        CheckConstraint("command_issued = false", name="reserve_command_false"),
+        Index("idx_reserve_runs_evaluation", "evaluation_timestamp_utc"),
+        Index("idx_reserve_runs_forecast", "forecast_run_id"),
+    )
+
+
+class ReserveOpportunityEvaluation(Base):
+    __tablename__ = "reserve_opportunity_evaluations"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    reserve_run_id: Mapped[int] = mapped_column(
+        ForeignKey("reserve_runs.id", ondelete="CASCADE"), nullable=False
+    )
+    sequence_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    opportunity_json: Mapped[Any] = mapped_column(JSON_TYPE, nullable=False)
+    analysis_json: Mapped[Any] = mapped_column(JSON_TYPE, nullable=False)
+    __table_args__ = (
+        UniqueConstraint(
+            "reserve_run_id", "sequence_number", name="uq_reserve_opportunity_sequence"
+        ),
+        Index("idx_reserve_opportunities_run", "reserve_run_id"),
     )
 
 

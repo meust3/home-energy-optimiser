@@ -1,5 +1,11 @@
 # Forecast-series storage
 
+Version 0.5.0 adds genuine scheduled `baseline_household_load` runs with source
+`scheduled_forecast_operations`. Their creation/horizon/model/input metadata and
+point values are immutable. Delayed actuals and errors are written only to
+`forecast_point_scores`; missing and unhealthy actuals remain explicitly unscored.
+See `forecast_operations.md` and `forecast_scoring.md`.
+
 `forecast_runs` identifies a forecast production event: type, source, model version,
 creation time, horizon, and metadata. `forecast_points` contains expected,
 lower/upper, unit, actual, and error values for each period.

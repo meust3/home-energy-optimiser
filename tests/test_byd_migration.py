@@ -5,7 +5,7 @@ from pathlib import Path
 from alembic import command
 from sqlalchemy import create_engine, inspect, text
 
-from energy_optimizer.db.migrations import alembic_config, current_revision, upgrade
+from energy_optimizer.db.migrations import alembic_config, current_revision
 
 NEW_COLUMNS = {
     "ev_vehicle_soc_percent",
@@ -47,7 +47,7 @@ def test_additive_vehicle_migration_preserves_legacy_observation(tmp_path):
         connection.execute(text("INSERT INTO alembic_version VALUES ('20260810_01')"))
     engine.dispose()
 
-    upgrade(url)
+    command.upgrade(alembic_config(url), "20260811_01")
     migrated = create_engine(url)
     columns = {
         column["name"] for column in inspect(migrated).get_columns("observations")
@@ -64,7 +64,7 @@ def test_additive_vehicle_migration_preserves_legacy_observation(tmp_path):
 
 def test_fresh_sqlite_upgrade_downgrade_reupgrade_is_compatible(tmp_path):
     url = _url(tmp_path / "fresh.db")
-    upgrade(url)
+    command.upgrade(alembic_config(url), "20260811_01")
     engine = create_engine(url)
     assert _columns(engine) >= NEW_COLUMNS
     assert current_revision(engine) == "20260811_01"
@@ -76,7 +76,7 @@ def test_fresh_sqlite_upgrade_downgrade_reupgrade_is_compatible(tmp_path):
     assert current_revision(downgraded) == "20260810_01"
     downgraded.dispose()
 
-    upgrade(url)
+    command.upgrade(alembic_config(url), "20260811_01")
     reupgraded = create_engine(url)
     assert _columns(reupgraded) >= NEW_COLUMNS
     assert current_revision(reupgraded) == "20260811_01"
@@ -118,7 +118,7 @@ def test_vehicle_upgrade_downgrade_reupgrade_preserves_legacy_sqlite_data(tmp_pa
         connection.execute(text("INSERT INTO alembic_version VALUES ('20260810_01')"))
     engine.dispose()
 
-    upgrade(url)
+    command.upgrade(alembic_config(url), "20260811_01")
     upgraded = create_engine(url)
     assert current_revision(upgraded) == "20260811_01"
     assert _columns(upgraded) >= NEW_COLUMNS
@@ -149,7 +149,7 @@ def test_vehicle_upgrade_downgrade_reupgrade_preserves_legacy_sqlite_data(tmp_pa
         assert connection.scalar(text("SELECT COUNT(*) FROM observations")) == 1
     downgraded.dispose()
 
-    upgrade(url)
+    command.upgrade(alembic_config(url), "20260811_01")
     reupgraded = create_engine(url)
     assert current_revision(reupgraded) == "20260811_01"
     assert _columns(reupgraded) >= NEW_COLUMNS

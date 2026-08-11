@@ -1,5 +1,12 @@
 # Home Assistant App troubleshooting
 
+Forecast warnings are independent from collector/database/Home Assistant health.
+Inspect the GET-only Forecast Operations view for the latest bounded failure class.
+Do not add a cron retry or start another collector. If the v0.5.0 App fails after
+migration, keep PostgreSQL at `20260812_01`, stop the App, and run the reviewed
+Windows v0.5.0 collector with forecast operations disabled and exactly one collector.
+Return to v0.4.0 only after `alembic downgrade 20260811_01` or verified dump restore.
+
 Startup is intentionally fail-closed. The App never creates a SQLite production
 database and never migrates PostgreSQL automatically.
 

@@ -1,5 +1,10 @@
 # Database architecture
 
+The v0.5.0 application head is `20260812_01`. It additively stores scheduler claims,
+separate point scores and complete reserve audits; no observation rebuild occurs.
+The baseline migration freezes its original table set so an old revision cannot
+silently inherit current ORM tables. Startup remains revision-exact and fail-closed.
+
 Application services depend on `ApplicationRepository`, not a database driver.
 `DATABASE_URL` selects exactly one backend for every component in a process. The
 legacy SQLite `Historian` remains only for schema-v6 adoption and compatibility
@@ -25,8 +30,8 @@ Production has completed its PostgreSQL cutover. Synology `home_energy` is
 authoritative and the Home Assistant App always supplies an explicit
 `postgresql+psycopg://` URL assembled from protected App options. App startup
 rejects absent credentials, connection/authentication failure, and any revision
-other than the application head (`20260811_01` for the unreleased v0.4.0
-candidate); it does not migrate automatically or create local tables.
+other than the application head (`20260812_01` for the v0.5.0 candidate); it does
+not migrate automatically or create local tables.
 
 Revision `20260811_01` is additive: it appends nullable, privacy-minimized vehicle
 telemetry columns and leaves legacy observation rows and counts unchanged. The

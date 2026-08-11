@@ -1,12 +1,16 @@
 # Home Assistant App design
 
+The v0.5.0 candidate retains one container, one Python process, one collector and
+one dashboard server. The optional forecast coordinator is a single in-process
+thread, disabled by default. Supervisor health reports scheduler and reserve status
+separately; one forecast failure is a warning and does not make core collection
+unhealthy. Three consecutive failures report degraded scheduler status without
+creating a watchdog restart loop.
+
 Home Energy Optimiser is packaged as a Home Assistant App (formerly called an
-add-on) without changing collector business logic. Version 0.2.1 is installed and
-collecting successfully on the amd64 Home Assistant OS 18.1 NUC. Version 0.3.0 added
-an experimental administrator-only read-only Ingress dashboard, and version 0.3.2
-adds resilient sparse-data presentation. Unreleased v0.4.0 adds optional
-privacy-minimized vehicle telemetry and requires an explicit additive database
-migration before the App update. It is not operational on that host.
+add-on) without changing collector business logic. Version 0.4.0 is installed and
+collecting successfully on the amd64 Home Assistant OS 18.1 NUC with optional
+privacy-minimized vehicle telemetry and PostgreSQL revision `20260811_01`.
 
 ```text
 Home Assistant Core

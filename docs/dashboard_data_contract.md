@@ -1,5 +1,11 @@
 # Dashboard data contract
 
+Scheduled accuracy distinguishes `actual_available`, `health_eligible`, and a
+nullable/missing reason; null is never serialized as zero. Reserve history preserves
+nullable tradable energy and always exposes `command_issued: false`. Scheduler
+failure summaries are bounded class-level descriptions without exception text,
+options, tokens or database URLs.
+
 Pydantic response models define the versioned API. Timestamps are timezone-aware UTC
 ISO 8601 values with `+00:00`; the browser displays them in Australia/Brisbane.
 Unavailable data is JSON `null`, never zero. Non-finite numbers are converted to

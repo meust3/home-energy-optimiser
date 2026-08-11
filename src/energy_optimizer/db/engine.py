@@ -20,7 +20,13 @@ class DatabaseTransactionError(DatabaseError):
     """A database transaction failed."""
 
 
-def create_database_engine(database_url: str, *, echo: bool = False) -> Engine:
+def create_database_engine(
+    database_url: str,
+    *,
+    echo: bool = False,
+    connect_timeout_seconds: int | None = None,
+    statement_timeout_ms: int | None = None,
+) -> Engine:
     url = safe_url(database_url)
     is_read_only_sqlite_uri = (
         url.get_backend_name() == "sqlite"
@@ -35,6 +41,18 @@ def create_database_engine(database_url: str, *, echo: bool = False) -> Engine:
     kwargs: dict[str, object] = {"pool_pre_ping": True, "echo": echo}
     if url.get_backend_name() == "sqlite":
         kwargs["connect_args"] = {"check_same_thread": False, "timeout": 30}
+    elif url.get_backend_name() == "postgresql" and (
+        connect_timeout_seconds is not None or statement_timeout_ms is not None
+    ):
+        connect_args: dict[str, object] = {}
+        if connect_timeout_seconds is not None:
+            connect_args["connect_timeout"] = connect_timeout_seconds
+        if statement_timeout_ms is not None:
+            connect_args["options"] = (
+                f"-c statement_timeout={statement_timeout_ms} "
+                f"-c lock_timeout={statement_timeout_ms}"
+            )
+        kwargs["connect_args"] = connect_args
     engine = create_engine(url, **kwargs)
     if url.get_backend_name() == "sqlite":
         event.listen(engine, "connect", _enable_sqlite_foreign_keys)

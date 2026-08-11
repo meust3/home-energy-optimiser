@@ -1,6 +1,6 @@
 """Transactional repository shared by SQLite and PostgreSQL."""
 
-from collections.abc import Iterator, Mapping
+from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -18,10 +18,14 @@ from energy_optimizer.db.models import (
     Base,
     EVSessionAnnotation,
     EVSessionAnnotationRow,
+    ForecastOperationAttempt,
     ForecastPoint,
+    ForecastPointScore,
     ForecastRun,
     Observation,
     ObservationDerivation,
+    ReserveOpportunityEvaluation,
+    ReserveRun,
 )
 from energy_optimizer.history_analysis import (
     calculate_gap_report,
@@ -45,6 +49,10 @@ class DatabaseCounts:
     observation_derivations: int
     ev_session_annotations: int
     ev_session_annotation_rows: int
+    forecast_point_scores: int = 0
+    forecast_operation_attempts: int = 0
+    reserve_runs: int = 0
+    reserve_opportunity_evaluations: int = 0
 
 
 class DatabaseRepository:
@@ -76,6 +84,26 @@ class DatabaseRepository:
         with self.engine.connect() as connection:
             connection.execute(text("SELECT 1"))
         return True
+
+    def try_forecast_operation_lock(self) -> Any:
+        """Hold a PostgreSQL session advisory lock for one whole operation."""
+        if self.backend != "postgresql":
+            return True
+        connection = self.engine.connect()
+        acquired = bool(
+            connection.scalar(text("SELECT pg_try_advisory_lock(726205005001)"))
+        )
+        if not acquired:
+            connection.close()
+            return False
+        return connection
+
+    def release_forecast_operation_lock(self, token: Any) -> None:
+        if self.backend == "postgresql" and token is not None and token is not False:
+            try:
+                token.execute(text("SELECT pg_advisory_unlock(726205005001)"))
+            finally:
+                token.close()
 
     def save_observation(self, observation: EnergyObservation) -> DuplicateResult:
         values = observation_values(observation)
@@ -376,6 +404,354 @@ class DatabaseRepository:
                     ],
                 )
         return run_id
+
+    def claim_forecast_operation(
+        self, *, scheduled_for: datetime, started_at: datetime
+    ) -> int | None:
+        """Atomically claim one aligned boundary; duplicates survive restarts."""
+        _require_aware(scheduled_for)
+        _require_aware(started_at)
+        table = ForecastOperationAttempt.__table__
+        statement = (
+            postgresql_insert(table)
+            if self.backend == "postgresql"
+            else sqlite_insert(table)
+        ).values(
+            operation="forecast_cycle",
+            scheduled_for_utc=scheduled_for.astimezone(UTC),
+            started_at_utc=started_at.astimezone(UTC),
+            status="running",
+            forecast_point_count=0,
+            metadata_json={},
+        )
+        statement = statement.on_conflict_do_nothing(
+            index_elements=[table.c.operation, table.c.scheduled_for_utc]
+        ).returning(table.c.id)
+        with self.transaction() as session:
+            return session.execute(statement).scalar_one_or_none()
+
+    def finish_forecast_operation(
+        self,
+        attempt_id: int,
+        *,
+        status: str,
+        finished_at: datetime,
+        duration_seconds: float,
+        forecast_run_id: int | None = None,
+        reserve_run_id: int | None = None,
+        forecast_point_count: int = 0,
+        failure_summary: str | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> None:
+        if status not in {"success", "failed", "skipped"}:
+            raise ValueError("invalid forecast operation status")
+        _require_aware(finished_at)
+        with self.transaction() as session:
+            session.execute(
+                update(ForecastOperationAttempt)
+                .where(ForecastOperationAttempt.id == attempt_id)
+                .values(
+                    status=status,
+                    finished_at_utc=finished_at.astimezone(UTC),
+                    duration_seconds=max(duration_seconds, 0),
+                    forecast_run_id=forecast_run_id,
+                    reserve_run_id=reserve_run_id,
+                    forecast_point_count=forecast_point_count,
+                    failure_summary=(failure_summary or None),
+                    metadata_json=metadata or {},
+                )
+            )
+
+    def recover_stale_forecast_operations(
+        self, *, before: datetime, recovered_at: datetime
+    ) -> int:
+        """Mark crash-interrupted claims failed without replaying their boundary."""
+        _require_aware(before)
+        _require_aware(recovered_at)
+        with self.transaction() as session:
+            result = session.execute(
+                update(ForecastOperationAttempt)
+                .where(
+                    ForecastOperationAttempt.status == "running",
+                    ForecastOperationAttempt.started_at_utc < before.astimezone(UTC),
+                )
+                .values(
+                    status="failed",
+                    finished_at_utc=recovered_at.astimezone(UTC),
+                    failure_summary="Interrupted before completion",
+                )
+            )
+            return result.rowcount
+
+    def forecast_operations_status_read_only(self) -> dict[str, Any]:
+        with Session(self.engine) as session:
+            attempts = list(
+                session.execute(
+                    select(ForecastOperationAttempt.__table__)
+                    .order_by(ForecastOperationAttempt.scheduled_for_utc.desc())
+                    .limit(100)
+                ).mappings()
+            )
+        latest = dict(attempts[0]) if attempts else None
+        success = next(
+            (dict(row) for row in attempts if row["status"] == "success"), None
+        )
+        return {"last_attempt": latest, "last_success": success}
+
+    def forecast_accuracy_rows_read_only(
+        self,
+        *,
+        after: datetime,
+        before: datetime,
+        forecast_run_id: int | None = None,
+        limit: int = 2500,
+    ) -> list[dict[str, Any]]:
+        _require_aware(after)
+        _require_aware(before)
+        if after >= before or not 1 <= limit <= 2500:
+            raise ValueError("invalid bounded forecast accuracy query")
+        statement = (
+            select(
+                ForecastRun.id.label("forecast_run_id"),
+                ForecastRun.created_at_utc,
+                ForecastRun.forecast_type,
+                ForecastRun.model_version,
+                ForecastPoint.period_start_utc,
+                ForecastPoint.period_end_utc,
+                ForecastPoint.expected_value,
+                ForecastPoint.lower_value,
+                ForecastPoint.upper_value,
+                ForecastPoint.metadata_json,
+                ForecastPointScore.actual_value,
+                ForecastPointScore.absolute_error,
+                ForecastPointScore.signed_error,
+                ForecastPointScore.squared_error,
+                ForecastPointScore.actual_available,
+                ForecastPointScore.health_eligible,
+                ForecastPointScore.missing_reason,
+            )
+            .join(ForecastPoint, ForecastPoint.forecast_run_id == ForecastRun.id)
+            .outerjoin(
+                ForecastPointScore,
+                ForecastPointScore.forecast_point_id == ForecastPoint.id,
+            )
+            .where(
+                ForecastRun.forecast_type == "baseline_household_load",
+                ForecastPoint.period_start_utc >= after.astimezone(UTC),
+                ForecastPoint.period_start_utc < before.astimezone(UTC),
+            )
+        )
+        if forecast_run_id is not None:
+            statement = statement.where(ForecastRun.id == forecast_run_id)
+        statement = statement.order_by(ForecastPoint.period_start_utc).limit(limit)
+        with Session(self.engine) as session:
+            return [dict(row) for row in session.execute(statement).mappings()]
+
+    def reserve_history_read_only(
+        self, *, after: datetime, before: datetime, limit: int = 1000
+    ) -> list[dict[str, Any]]:
+        _require_aware(after)
+        _require_aware(before)
+        if after >= before or not 1 <= limit <= 1000:
+            raise ValueError("invalid bounded reserve history query")
+        statement = (
+            select(ReserveRun.__table__)
+            .where(
+                ReserveRun.evaluation_timestamp_utc >= after.astimezone(UTC),
+                ReserveRun.evaluation_timestamp_utc < before.astimezone(UTC),
+            )
+            .order_by(ReserveRun.evaluation_timestamp_utc.desc())
+            .limit(limit)
+        )
+        with Session(self.engine) as session:
+            return [dict(row) for row in session.execute(statement).mappings()]
+
+    def latest_reserve_audit_read_only(self) -> dict[str, Any] | None:
+        statement = (
+            select(ReserveRun.__table__)
+            .order_by(ReserveRun.evaluation_timestamp_utc.desc())
+            .limit(1)
+        )
+        with Session(self.engine) as session:
+            row = session.execute(statement).mappings().first()
+            return dict(row) if row else None
+
+    def score_completed_forecast_points(
+        self,
+        *,
+        now: datetime,
+        delay_minutes: int,
+        limit: int = 2500,
+        runtime_guard: Callable[[], None] | None = None,
+    ) -> int:
+        """Materialize eligible completed-point scores without changing forecasts."""
+        _require_aware(now)
+        if not 1 <= limit <= 2500:
+            raise ValueError("score limit must be 1-2500")
+        cutoff = now.astimezone(UTC) - timedelta(minutes=delay_minutes)
+        with self.transaction() as session:
+            points = list(
+                session.scalars(
+                    select(ForecastPoint)
+                    .join(ForecastRun, ForecastRun.id == ForecastPoint.forecast_run_id)
+                    .outerjoin(
+                        ForecastPointScore,
+                        ForecastPointScore.forecast_point_id == ForecastPoint.id,
+                    )
+                    .where(
+                        ForecastPoint.period_end_utc <= cutoff,
+                        ForecastPointScore.forecast_point_id.is_(None),
+                        ForecastRun.forecast_type == "baseline_household_load",
+                    )
+                    .order_by(ForecastPoint.period_end_utc)
+                    .limit(limit)
+                )
+            )
+            for point in points:
+                if runtime_guard is not None:
+                    runtime_guard()
+                rows = list(
+                    session.execute(
+                        select(
+                            Observation.baseline_house_consumption_w,
+                            Observation.telemetry_is_healthy,
+                            Observation.baseline_training_eligible,
+                        ).where(
+                            Observation.slot_utc >= point.period_start_utc,
+                            Observation.slot_utc < point.period_end_utc,
+                        )
+                    )
+                )
+                available = [float(row[0]) for row in rows if row[0] is not None]
+                eligible = [
+                    float(row[0])
+                    for row in rows
+                    if row[0] is not None and bool(row[1]) and bool(row[2])
+                ]
+                actual = sum(available) / len(available) if available else None
+                health_eligible = bool(eligible)
+                scored_actual = sum(eligible) / len(eligible) if eligible else None
+                signed = (
+                    scored_actual - point.expected_value
+                    if scored_actual is not None
+                    else None
+                )
+                missing_reason = None
+                if not rows:
+                    missing_reason = "no_observation"
+                elif not available:
+                    missing_reason = "actual_value_missing"
+                elif not health_eligible:
+                    missing_reason = "actual_unhealthy_or_ineligible"
+                session.add(
+                    ForecastPointScore(
+                        forecast_point_id=point.id,
+                        scored_at_utc=now.astimezone(UTC),
+                        actual_value=(
+                            scored_actual if scored_actual is not None else actual
+                        ),
+                        absolute_error=abs(signed) if signed is not None else None,
+                        signed_error=signed,
+                        squared_error=signed * signed if signed is not None else None,
+                        actual_available=actual is not None,
+                        health_eligible=health_eligible,
+                        missing_reason=missing_reason,
+                        metadata_json={"eligible_sample_count": len(eligible)},
+                    )
+                )
+        return len(points)
+
+    def save_reserve_run(
+        self, estimate: Any, *, forecast_run_id: int, model_version: str
+    ) -> int:
+        """Persist every typed reserve field plus each evaluated opportunity."""
+        expected_replenishment = next(
+            (
+                item.expected_total_replenishment_kwh
+                for item in estimate.evaluated_opportunities
+                if item.expected_total_replenishment_kwh is not None
+            ),
+            None,
+        )
+        values = {
+            "forecast_run_id": forecast_run_id,
+            "evaluation_timestamp_utc": estimate.evaluation_time_local.astimezone(UTC),
+            "observation_timestamp_utc": estimate.observation_timestamp.astimezone(UTC),
+            "observation_source": estimate.current_state_source,
+            "observation_age_seconds": estimate.observation_age_seconds,
+            "observation_is_stale": estimate.observation_is_stale,
+            "battery_soc_percent": estimate.battery_soc_percent,
+            "battery_energy_kwh": estimate.battery_energy_kwh,
+            "usable_battery_capacity_kwh": estimate.usable_battery_capacity_kwh,
+            "forecast_start_utc": estimate.forecast_start_local.astimezone(UTC),
+            "forecast_end_utc": estimate.forecast_end_local.astimezone(UTC),
+            "forecast_horizon_minutes": estimate.forecast_horizon_minutes,
+            "forecast_horizon_hours": estimate.forecast_horizon_hours,
+            "household_demand_kwh": estimate.expected_house_demand_kwh,
+            "ev_demand_kwh": estimate.expected_ev_demand_kwh,
+            "technical_reserve_kwh": estimate.technical_reserve_kwh,
+            "emergency_reserve_kwh": estimate.emergency_reserve_kwh,
+            "uncertainty_buffer_kwh": estimate.uncertainty_buffer_kwh,
+            "gross_reserve_requirement_kwh": estimate.gross_reserve_requirement_kwh,
+            "capacity_capped_reserve_kwh": estimate.capacity_capped_reserve_kwh,
+            "unmet_reserve_requirement_kwh": estimate.unmet_reserve_requirement_kwh,
+            "current_reserve_shortfall_kwh": estimate.current_reserve_shortfall_kwh,
+            "recommended_reserve_kwh": estimate.recommended_reserve_kwh,
+            "potentially_tradable_kwh": estimate.potentially_tradable_kwh,
+            "confidence": estimate.confidence,
+            "confidence_score": estimate.confidence_score,
+            "ready_for_manual_review": estimate.ready_for_manual_review,
+            "opportunity_state": estimate.next_opportunity.state,
+            "first_candidate_json": estimate.next_opportunity.model_dump(mode="json"),
+            "effective_boundary_json": (
+                estimate.effective_reserve_boundary.model_dump(mode="json")
+                if estimate.effective_reserve_boundary
+                else None
+            ),
+            "skipped_candidate_count": estimate.skipped_insufficient_opportunity_count,
+            "expected_replenishment_kwh": expected_replenishment,
+            "command_issued": False,
+            "model_version": model_version,
+            "reasons_json": {
+                "reasoning": estimate.reasoning,
+                "horizon_is_valid": estimate.horizon_is_valid,
+                "horizon_validation_issues": estimate.horizon_validation_issues,
+                "observation_warning": estimate.observation_warning,
+            },
+            "confidence_json": {
+                "data_availability": estimate.data_availability_confidence.model_dump(),
+                "household_demand": estimate.household_demand_confidence.model_dump(),
+                "opportunity": estimate.opportunity_forecast_confidence.model_dump(),
+                "overall": estimate.overall_reserve_confidence.model_dump(),
+            },
+            "health_json": estimate.health,
+            "operational_context_json": estimate.operational_context,
+            "demand_forecast_json": estimate.demand_forecast.model_dump(mode="json"),
+            "estimate_json": estimate.model_dump(mode="json"),
+        }
+        with self.transaction() as session:
+            result = session.execute(
+                insert(ReserveRun.__table__).values(**values).returning(ReserveRun.id)
+            )
+            reserve_id = int(result.scalar_one())
+            if estimate.evaluated_opportunities:
+                session.execute(
+                    insert(ReserveOpportunityEvaluation.__table__),
+                    [
+                        {
+                            "reserve_run_id": reserve_id,
+                            "sequence_number": index,
+                            "opportunity_json": item.opportunity.model_dump(
+                                mode="json"
+                            ),
+                            "analysis_json": item.model_dump(mode="json"),
+                        }
+                        for index, item in enumerate(
+                            estimate.evaluated_opportunities, start=1
+                        )
+                    ],
+                )
+        return reserve_id
 
     def forecast_run(self, run_id: int) -> dict[str, Any] | None:
         with Session(self.engine) as session:
@@ -999,6 +1375,10 @@ class DatabaseRepository:
             ObservationDerivation,
             EVSessionAnnotation,
             EVSessionAnnotationRow,
+            ForecastPointScore,
+            ForecastOperationAttempt,
+            ReserveRun,
+            ReserveOpportunityEvaluation,
         )
         with Session(self.engine) as session:
             values = [

@@ -1,5 +1,15 @@
 # Phase 1 architecture
 
+## v0.5.0 advisory operations release candidate
+
+The existing App process now has three threads of responsibility: the primary
+five-minute collector loop, the GET-only dashboard server, and one optional
+single-threaded forecast coordinator. The coordinator is disabled by default,
+starts no workers or subprocesses, and waits beyond a collection boundary before
+doing bounded database/CPU work. Durable database claims prevent restart duplicates.
+Forecast scoring and reserve snapshots are analytical persistence only; the executor
+layer remains absent.
+
 The project keeps collection, forecasting, optimisation, and execution as separate
 layers. The current read-only phase implements collection, explainable forecasting,
 and advisory reserve estimation. It does not contain an executor or device-control
@@ -15,11 +25,9 @@ only assemble these reusable components.
 
 ## Production deployment
 
-The production deployment is Home Assistant App v0.2.1 (formerly called an add-on)
-on the amd64 Home Assistant OS 18.1 NUC, where it is collecting successfully.
-Version 0.3.2 is published but has not yet been verified on that host. Version
-0.4.0 is an unreleased release candidate with an explicit additive database
-migration. Supervisor injects `SUPERVISOR_TOKEN`; the App uses it only as a
+The production deployment is Home Assistant App v0.4.0 (formerly called an add-on)
+on the amd64 Home Assistant OS 18.1 NUC, where it is collecting successfully at
+PostgreSQL revision `20260811_01`. Supervisor injects `SUPERVISOR_TOKEN`; the App uses it only as a
 bearer token for `http://supervisor/core/api`. The existing GET-only client and
 collector are unchanged. Observations are written over the LAN to the external
 Synology PostgreSQL 17 `home_energy` database as `energy_app`.

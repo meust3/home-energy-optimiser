@@ -164,7 +164,8 @@ async function loadReserve() {
       summary.querySelector(".advisory").insertAdjacentHTML("beforebegin", `<div class="empty-state">${safeText(data.message)}</div>`);
       setState("#reserve-state", data.message); content.innerHTML = '<div class="panel empty-state schema-notice">No persisted reserve result exists. The dashboard did not run the estimator.</div>'; return;
     }
-    const confidence = data.confidence?.level || data.confidence?.confidence;
+    const confidence = data.confidence?.rating || data.confidence?.level || data.confidence?.confidence;
+    const completeAudit = (data.persisted_fields || []).includes("recommended_reserve_kwh");
     const tierUsage = Object.entries(data.forecast_tier_counts || {}).map(([key, value]) => `${key}: ${value}`).join(", ");
     const storedFields = (data.persisted_fields || []).map(field => field.replaceAll("_", " ")).join(", ");
     const summaryBody = definition([
@@ -174,8 +175,15 @@ async function loadReserve() {
       reserveRow("Next boundary", data.horizon_end_utc, localTime),
     ]);
     summary.querySelector(".advisory").insertAdjacentHTML("beforebegin", summaryBody);
-    setState("#reserve-state", `Persisted reserve forecast run ${data.forecast_run_id}. Only fields stored by the current schema are shown.`);
-    const sections = [
+    setState("#reserve-state", completeAudit ? `Complete advisory reserve audit associated with forecast run ${data.forecast_run_id}.` : `Legacy partial reserve forecast run ${data.forecast_run_id}.`);
+    const sections = completeAudit ? [
+      ["Battery", "Stored battery state at the evaluation timestamp.", [reserveRow("SOC", data.battery_soc_percent, percent), reserveRow("Estimated energy", data.battery_energy_estimate_kwh, energy), reserveRow("Tradable energy", data.potentially_tradable_energy_kwh, energy)]],
+      ["Demand", "Existing estimator demand components.", [reserveRow("Expected household", data.expected_household_demand_kwh, energy), reserveRow("Expected EV", data.expected_ev_demand_kwh, energy), reserveRow("State source", data.state_source)]],
+      ["Reserve", "Complete advisory requirement and readiness.", [reserveRow("Technical minimum", data.technical_reserve_kwh, energy), reserveRow("Emergency", data.emergency_reserve_kwh, energy), reserveRow("Uncertainty", data.uncertainty_buffer_kwh, energy), reserveRow("Gross requirement", data.gross_reserve_requirement_kwh, energy), reserveRow("Recommended", data.recommended_reserve_kwh, energy), reserveRow("Current shortfall", data.current_reserve_shortfall_kwh, energy), ["Ready for manual review", data.readiness ? "Yes" : "No", "available"]]],
+      ["Opportunity", "Persisted candidate and effective reserve boundary.", [reserveRow("State", data.opportunity_state), reserveRow("First candidate", data.first_candidate?.expected_start_local, localTime), reserveRow("Effective boundary", data.effective_boundary?.expected_start_local, localTime), reserveRow("Horizon end", data.horizon_end_utc, localTime)]],
+      ["Confidence", "Vehicle SOC remains context only and does not alter the algorithm.", [reserveRow("Overall", confidence), reserveRow("Vehicle SOC (context only)", data.ev_vehicle_soc_percent, percent)]],
+      ["Persistence", "Complete v0.5.0 audit record.", [["Command issued", "No", "available"], ["Complete estimate", "Stored", "available"]]],
+    ] : [
       ["Battery", "Battery state was not part of the persisted reserve-result record.", [notStoredRow("SOC"), notStoredRow("Estimated energy"), notStoredRow("Tradable energy")]],
       ["Demand", "Only demand values recorded with this forecast run can be shown.", [reserveRow("Expected household", data.expected_household_demand_kwh, energy), notStoredRow("Expected EV"), reserveRow("State source", data.state_source)]],
       ["Reserve", "Stored reserve requirements remain advisory.", [reserveRow("Gross requirement", data.gross_reserve_requirement_kwh, energy), reserveRow("Capacity-capped", data.capacity_capped_reserve_kwh, energy), notStoredRow("Readiness")]],
@@ -183,7 +191,7 @@ async function loadReserve() {
       ["Confidence", "Vehicle SOC is context only and does not change the reserve algorithm.", [reserveRow("Overall", confidence), reserveRow("Tier usage", tierUsage), reserveRow("Vehicle SOC (context only)", data.ev_vehicle_soc_percent, percent)]],
       ["Persistence", "The complete ReserveEstimate output is not stored by the current schema.", [reserveRow("Stored fields", storedFields), ["Command issued", "No", "available"], ["Full estimate", null, "not-stored"]]],
     ];
-    content.innerHTML = `<aside class="panel schema-notice" role="note"><strong>Stored result coverage</strong><p>This dashboard shows only fields persisted by the current reserve-result schema. Missing stored values are labelled separately from fields the schema does not store.</p></aside>${sections.map(([title, help, rows]) => `<article class="panel reserve-card"><h3>${title}</h3><p class="section-help">${help}</p>${definition(rows)}</article>`).join("")}`;
+    content.innerHTML = `<aside class="panel schema-notice" role="note"><strong>${completeAudit ? "Complete advisory audit" : "Legacy stored result coverage"}</strong><p>${completeAudit ? "The complete typed estimator output is persisted separately from immutable forecast values." : "Missing stored values are labelled separately from fields the legacy schema did not store."}</p></aside>${sections.map(([title, help, rows]) => `<article class="panel reserve-card"><h3>${title}</h3><p class="section-help">${help}</p>${definition(rows)}</article>`).join("")}`;
   } catch (error) { setState("#reserve-state", error.message, "error-state"); }
 }
 
@@ -288,6 +296,65 @@ async function loadForecastComparison() {
   } catch (error) { setState("#forecast-state", error.message, "error-state"); }
 }
 
+function metricCard(label, metric) {
+  return `<article class="panel"><p class="eyebrow">${safeText(label)}</p>${definition([
+    ["MAE", metric.mae == null ? "Unavailable" : power(metric.mae)],
+    ["Bias", metric.bias == null ? "Unavailable" : power(metric.bias)],
+    ["RMSE", metric.rmse == null ? "Unavailable" : power(metric.rmse)],
+    ["Coverage", `${number(metric.coverage_percent, 1)}%`],
+    ["Samples", `${metric.sample_count} / ${metric.total_count}`],
+  ])}</article>`;
+}
+
+async function loadForecastOperations() {
+  setState("#operations-state", "Loading scheduler audit and scored pointsâ€¦");
+  try {
+    const selectedRun = $("#accuracy-run").value || null;
+    const [operations, accuracy, runs] = await Promise.all([
+      request("operations-status", "forecast-operations/status"),
+      request("forecast-accuracy", "forecast-accuracy", { range: $("#accuracy-range").value, forecast_run_id: selectedRun }),
+      request("accuracy-runs", "forecast-runs", { forecast_type: "baseline_household_load", limit: 100 }),
+    ]);
+    const runSelect = $("#accuracy-run");
+    runSelect.innerHTML = `<option value="">All scheduled runs</option>${runs.runs.map(run => `<option value="${run.forecast_run_id}">${localTime(run.created_at_utc)} | ${safeText(run.model_version)}</option>`).join("")}`;
+    runSelect.value = selectedRun || "";
+    const last = operations.last_attempt;
+    $("#operations-status").innerHTML = [
+      ["Coordinator", operations.enabled ? operations.scheduler_status : "Disabled", operations.enabled ? "One in-process coordinator" : "Opt-in option is off"],
+      ["Last attempt", last ? localTime(last.started_at_utc) : "No attempts", last ? `${last.status} Â· ${number(last.duration_seconds, 1)} sec` : "Waiting for first aligned boundary"],
+      ["Last success", operations.last_successful_run ? localTime(operations.last_successful_run.finished_at_utc) : "None", operations.last_successful_run ? `${operations.last_successful_run.forecast_point_count} points` : "No successful scheduled run"],
+      ["Next run", operations.next_scheduled_run_utc ? localTime(operations.next_scheduled_run_utc) : "Not scheduled", "Collector receives a 20-second boundary grace period"],
+      ["Reserve", operations.reserve_scheduler_status, "Advisory snapshot only"],
+      ["Failure", last?.failure_summary || "None", "Secret-safe bounded summary"],
+    ].map(([label, value, detail]) => `<article class="panel"><p class="eyebrow">${safeText(label)}</p><div class="quality-metric">${safeText(value)}</div><p class="muted">${safeText(detail)}</p></article>`).join("");
+    if (!accuracy.available) {
+      setState("#operations-state", `${operations.enabled ? "Scheduler enabled." : "Scheduler disabled."} ${accuracy.message}`);
+      $("#accuracy-summary").innerHTML = "";
+      $("#accuracy-content").innerHTML = `<div class="panel empty-state">${safeText(accuracy.message)}</div>`;
+      return;
+    }
+    setState("#operations-state", "Completed points are scored after the configured delay; missing and unhealthy actuals are excluded from errors.");
+    $("#accuracy-summary").innerHTML = `<span>MAE ${power(accuracy.metrics.mae)}</span><span>Bias ${power(accuracy.metrics.bias)}</span><span>RMSE ${power(accuracy.metrics.rmse)}</span><span>Coverage ${number(accuracy.metrics.coverage_percent, 1)}%</span>`;
+    const points = accuracy.points.map(point => ({ timestamp_utc: point.period_start_utc, has_observation: point.health_eligible === true, expected: point.expected_value, actual: point.actual_value }));
+    const chart = makeChart("Scheduled expected versus eligible actual", "kW", [["Expected", "expected"], ["Actual", "actual"]], points, value => value / 1000, "Scored points are not yet available for this range.");
+    const groups = [
+      ["Horizon", accuracy.by_horizon], ["Local hour", accuracy.by_local_hour],
+      ["Day type", accuracy.by_day_type], ["Model", accuracy.by_model_version],
+      ["Forecast type", accuracy.by_forecast_type],
+    ].flatMap(([title, values]) => Object.entries(values).map(([label, metric]) => metricCard(`${title}: ${label}`, metric)));
+    const target = $("#accuracy-content"); target.innerHTML = ""; target.append(chart); target.insertAdjacentHTML("beforeend", groups.join(""));
+  } catch (error) { setState("#operations-state", error.message, "error-state"); }
+}
+
+async function loadReserveHistory() {
+  const target = $("#reserve-history");
+  try {
+    const data = await request("reserve-history", "reserve-history", { range: "30d" });
+    if (!data.available) { target.innerHTML = `<div class="empty-state">${safeText(data.message)}</div>`; return; }
+    target.innerHTML = `<div class="table-wrap"><table><thead><tr><th>Evaluation</th><th>Recommended</th><th>Gross</th><th>Battery</th><th>Demand</th><th>Uncertainty</th><th>Tradable</th><th>Confidence</th><th>Ready</th></tr></thead><tbody>${data.runs.map(run => `<tr><td>${localTime(run.evaluation_timestamp_utc)}</td><td>${energy(run.recommended_reserve_kwh)}</td><td>${energy(run.gross_reserve_requirement_kwh)}</td><td>${energy(run.battery_energy_kwh)}</td><td>${energy(run.expected_demand_kwh)}</td><td>${energy(run.uncertainty_buffer_kwh)}</td><td>${energy(run.potentially_tradable_kwh)}</td><td>${safeText(run.confidence)}</td><td>${run.readiness ? "Yes" : "No"}</td></tr>`).join("")}</tbody></table></div><p class="advisory">Advisory only. Every stored run records command_issued = false.</p>`;
+  } catch (error) { target.innerHTML = `<div class="error-state">${safeText(error.message)}</div>`; }
+}
+
 async function loadQuality() {
   setState("#quality-state", "Loading bounded collection and health summary…");
   try {
@@ -312,7 +379,8 @@ function activateTab() {
   $$(".page").forEach(page => page.hidden = page.id !== valid); $$(".tabs a").forEach(link => link.setAttribute("aria-current", link.dataset.tab === valid ? "page" : "false"));
   if (valid === "history" && !state.loaded.has("history")) { state.loaded.add("history"); loadHistory(); }
   if (valid === "forecasts" && !state.loaded.has("forecasts")) { state.loaded.add("forecasts"); loadForecastRuns(); }
-  if (valid === "reserve" && !state.loaded.has("reserve")) { state.loaded.add("reserve"); loadReserve(); }
+  if (valid === "forecast-operations" && !state.loaded.has("operations")) { state.loaded.add("operations"); loadForecastOperations(); }
+  if (valid === "reserve" && !state.loaded.has("reserve")) { state.loaded.add("reserve"); loadReserve(); loadReserveHistory(); }
   if (valid === "data-quality" && !state.loaded.has("quality")) { state.loaded.add("quality"); loadQuality(); }
 }
 
@@ -321,7 +389,9 @@ document.addEventListener("visibilitychange", () => { if (document.hidden) state
 window.addEventListener("hashchange", activateTab);
 $("#history-range").addEventListener("change", loadHistory);
 $("#forecast-run").addEventListener("change", loadForecastComparison);
+$("#accuracy-range").addEventListener("change", loadForecastOperations);
+$("#accuracy-run").addEventListener("change", loadForecastOperations);
 
-loadStatus(); loadLive(); loadReserve(); state.loaded.add("reserve"); activateTab();
+loadStatus(); loadLive(); loadReserve(); loadReserveHistory(); state.loaded.add("reserve"); activateTab();
 schedule("status", loadStatus, 30000); schedule("live", loadLive, 30000);
-schedule("slow", () => { if (!document.hidden) { if (state.loaded.has("history")) loadHistory(); if (state.loaded.has("forecasts")) loadForecastRuns(); if (state.loaded.has("reserve")) loadReserve(); if (state.loaded.has("quality")) loadQuality(); } }, 300000);
+schedule("slow", () => { if (!document.hidden) { if (state.loaded.has("history")) loadHistory(); if (state.loaded.has("forecasts")) loadForecastRuns(); if (state.loaded.has("operations")) loadForecastOperations(); if (state.loaded.has("reserve")) { loadReserve(); loadReserveHistory(); } if (state.loaded.has("quality")) loadQuality(); } }, 300000);

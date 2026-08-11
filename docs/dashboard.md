@@ -1,9 +1,12 @@
 # Read-only Ingress dashboard
 
-Version 0.3.2 publishes the experimental dashboard but has not yet been verified on
-the production NUC. Unreleased v0.4.0 adds read-only vehicle presentation after an
-explicit database migration. Home Assistant App v0.2.1 remains the confirmed
-working production collector.
+Version 0.5.0 adds three read-only presentations: Forecast Operations status,
+Forecast Accuracy (expected/actual, MAE, bias, RMSE, coverage and grouped metrics),
+and complete Reserve History. Empty and sparse states remain explicit. There are no
+buttons, run-now endpoints or mutation routes.
+
+Version 0.4.0 is the confirmed production Home Assistant App and includes read-only
+vehicle presentation after its explicit database migration.
 
 ## Architecture
 

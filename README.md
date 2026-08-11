@@ -1,5 +1,35 @@
 # Home Energy Optimiser
 
+> v0.5.0 is an unreleased release candidate. Forecast Operations and complete
+> Reserve Audit are strictly advisory, opt-in, and disabled by default.
+
+Version 0.5.0 keeps the existing one-container, one-process, one-collector design
+and adds one lightweight coordinator thread. At aligned local boundaries it can
+create genuine out-of-sample baseline forecasts, score only completed intervals
+after a delay, and persist the existing reserve estimator's complete result. It
+does not change forecast, reserve or opportunity algorithms and adds no device or
+Home Assistant write path. See [forecast operations](docs/forecast_operations.md),
+[scoring](docs/forecast_scoring.md), and [reserve persistence](docs/reserve_persistence.md).
+
+The Home Assistant App options are:
+
+```yaml
+forecast_operations_enabled: false
+forecast_interval_minutes: 30
+forecast_horizon_hours: 24
+forecast_alignment_minutes: 30
+forecast_scoring_delay_minutes: 10
+forecast_max_runtime_seconds: 120
+reserve_snapshot_enabled: true
+```
+
+The v0.5.0 schema head is `20260812_01`. Migration is an explicit operator step;
+the App never migrates PostgreSQL during startup. Validate the immutable image and
+Home Assistant discovery before backing up, stopping the sole collector, upgrading
+with `python -m alembic upgrade head`, verifying counts/revision, and immediately
+updating the App. Forecast operations should be enabled only after collection is
+healthy on v0.5.0.
+
 A Home Assistant-connected, PostgreSQL-backed household energy optimisation
 platform for forecasting demand, modelling battery reserve requirements, and
 eventually supporting automated buy, sell, and charge decisions.
@@ -17,7 +47,7 @@ collects and analyses data but does not control Home Assistant or energy hardwar
 - **Reserve forecasting:** working and advisory
 - **Solar and price forecasts:** Solcast and Amber Electric integrated
 - **EV telemetry:** optional read-only vehicle-cloud integration is implemented for
-  the unreleased v0.4.0 release candidate
+  operational v0.4.0 vehicle telemetry release
 - **Automated control or trading:** not enabled
 
 PostgreSQL 17 on the Synology NAS is the canonical production source of truth. The

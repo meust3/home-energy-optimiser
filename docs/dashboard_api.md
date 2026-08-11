@@ -1,5 +1,14 @@
 # Dashboard API
 
+v0.5.0 adds bounded GET-only routes:
+
+- `GET /api/v1/forecast-operations/status`;
+- `GET /api/v1/forecast-accuracy?range=24h|7d|30d&forecast_run_id=...`;
+- `GET /api/v1/reserve-history?range=24h|7d|30d`.
+
+They return persisted analytical/audit data only. They never trigger computation,
+expose raw App options or accept POST, PUT, PATCH or DELETE.
+
 All endpoints are versioned, GET-only, and intended solely for authenticated Home
 Assistant Ingress. Direct clients receive 403. POST, PUT, PATCH, and DELETE receive
 405. API and HTML responses use `Cache-Control: no-store`; versioned local assets

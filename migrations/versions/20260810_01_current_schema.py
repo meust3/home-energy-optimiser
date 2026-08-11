@@ -13,16 +13,31 @@ down_revision = None
 branch_labels = None
 depends_on = None
 
+# Freeze the baseline table set. Importing current ORM metadata must not make an old
+# revision silently acquire tables introduced by later releases.
+BASELINE_TABLES = {
+    "observations",
+    "forecast_runs",
+    "forecast_points",
+    "observation_derivations",
+    "ev_session_annotations",
+    "ev_session_annotation_rows",
+    "migration_progress",
+}
+
 
 def upgrade() -> None:
     """Create a fresh schema; an existing v6 SQLite database must be stamped."""
     connection = op.get_bind()
+    tables = [
+        table for table in Base.metadata.sorted_tables if table.name in BASELINE_TABLES
+    ]
     if op.get_context().as_sql:
-        for table in Base.metadata.sorted_tables:
+        for table in tables:
             table.create(connection, checkfirst=False)
         return
     existing = set(inspect(connection).get_table_names())
-    application_tables = set(Base.metadata.tables)
+    application_tables = BASELINE_TABLES
     if existing & application_tables:
         missing = application_tables - existing
         if missing == {"migration_progress"}:
@@ -34,7 +49,8 @@ def upgrade() -> None:
                 "after validating that it is schema version 6."
             )
         return
-    Base.metadata.create_all(connection)
+    for table in tables:
+        table.create(connection)
 
 
 def downgrade() -> None:

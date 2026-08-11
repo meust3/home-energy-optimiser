@@ -1,5 +1,5 @@
 name: Home Energy Optimiser
-version: "0.4.0"
+version: "0.5.0"
 slug: home_energy_optimiser
 description: Read-only energy dashboard and five-minute PostgreSQL collector
 url: https://github.com/meust3/home-energy-optimiser
@@ -32,6 +32,13 @@ options:
   ev_location_entity: ""
   ev_home_state: home
   ev_telemetry_stale_seconds: 900
+  forecast_operations_enabled: false
+  forecast_interval_minutes: 30
+  forecast_horizon_hours: 24
+  forecast_alignment_minutes: 30
+  forecast_scoring_delay_minutes: 10
+  forecast_max_runtime_seconds: 120
+  reserve_snapshot_enabled: true
 schema:
   db_host: str
   db_port: port
@@ -50,3 +57,10 @@ schema:
   ev_location_entity: str
   ev_home_state: str
   ev_telemetry_stale_seconds: int(1,86400)
+  forecast_operations_enabled: bool
+  forecast_interval_minutes: int(15,1440)
+  forecast_horizon_hours: int(1,168)
+  forecast_alignment_minutes: int(5,60)
+  forecast_scoring_delay_minutes: int(0,1440)
+  forecast_max_runtime_seconds: int(30,900)
+  reserve_snapshot_enabled: bool

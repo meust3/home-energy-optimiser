@@ -1,5 +1,11 @@
 # Battery reserve estimation
 
+Version 0.5.0 does not change this estimator. When explicitly enabled, the scheduled
+coordinator evaluates it at the forecast creation timestamp using history bounded to
+that timestamp and stores the complete typed result described in
+`reserve_persistence.md`. This is advisory only; unavailable tradable energy remains
+missing and every audit row records that no command was issued.
+
 ## Evaluation-time semantics
 
 Live estimates use the timestamp of the freshly collected GET-only observation as

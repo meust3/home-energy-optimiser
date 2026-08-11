@@ -7,6 +7,7 @@ from collections import Counter, defaultdict
 from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
 from typing import Any, Literal
+from zoneinfo import ZoneInfo
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -94,6 +95,47 @@ class StatusResponse(ApiModel):
     expected_schema_revision: str
     read_only_mode: Literal[True] = True
     command_execution_enabled: Literal[False] = False
+    forecast_scheduler: str = "disabled"
+    last_forecast_success_utc: datetime | None = None
+    forecast_age_seconds: float | None = None
+    reserve_scheduler: str = "disabled"
+    last_reserve_success_utc: datetime | None = None
+
+
+class ForecastOperationStatusResponse(ApiModel):
+    enabled: bool
+    scheduler_status: str
+    reserve_scheduler_status: str
+    next_scheduled_run_utc: datetime | None
+    last_attempt: dict[str, Any] | None
+    last_successful_run: dict[str, Any] | None
+
+
+class AccuracyMetric(ApiModel):
+    sample_count: int
+    total_count: int
+    coverage_percent: float
+    mae: float | None
+    bias: float | None
+    rmse: float | None
+
+
+class ForecastAccuracyResponse(ApiModel):
+    available: bool
+    message: str | None = None
+    metrics: AccuracyMetric
+    by_horizon: dict[str, AccuracyMetric]
+    by_local_hour: dict[str, AccuracyMetric]
+    by_day_type: dict[str, AccuracyMetric]
+    by_forecast_type: dict[str, AccuracyMetric]
+    by_model_version: dict[str, AccuracyMetric]
+    points: list[dict[str, Any]]
+
+
+class ReserveHistoryResponse(ApiModel):
+    available: bool
+    message: str | None = None
+    runs: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class HealthDomain(ApiModel):
@@ -235,11 +277,20 @@ class ReserveResponse(ApiModel):
     battery_energy_estimate_kwh: float | None = None
     expected_household_demand_kwh: float | None = None
     expected_ev_demand_kwh: float | None = None
+    technical_reserve_kwh: float | None = None
+    emergency_reserve_kwh: float | None = None
+    uncertainty_buffer_kwh: float | None = None
     gross_reserve_requirement_kwh: float | None = None
     capacity_capped_reserve_kwh: float | None = None
+    unmet_reserve_requirement_kwh: float | None = None
+    current_reserve_shortfall_kwh: float | None = None
+    recommended_reserve_kwh: float | None = None
     potentially_tradable_energy_kwh: float | None = None
     confidence: dict[str, Any] | None = None
     readiness: bool | None = None
+    opportunity_state: str | None = None
+    first_candidate: dict[str, Any] | None = None
+    effective_boundary: dict[str, Any] | None = None
     horizon_start_utc: datetime | None = None
     horizon_end_utc: datetime | None = None
     forecast_tier_counts: dict[str, int] = Field(default_factory=dict)
@@ -344,6 +395,149 @@ class DashboardService:
             observation_age_seconds=observation_age,
             database_schema_revision=revision,
             expected_schema_revision=expected_revision(),
+            forecast_scheduler=str(health.get("forecast_scheduler", "disabled")),
+            last_forecast_success_utc=health.get("last_forecast_success_utc"),
+            forecast_age_seconds=_number(health.get("forecast_age_seconds")),
+            reserve_scheduler=str(health.get("reserve_scheduler", "disabled")),
+            last_reserve_success_utc=health.get("last_reserve_success_utc"),
+        )
+
+    def forecast_operations_status(self) -> ForecastOperationStatusResponse:
+        _, health = self.health.response()
+        with self._repository() as repository:
+            status = repository.forecast_operations_status_read_only()
+        return ForecastOperationStatusResponse(
+            enabled=health.get("forecast_scheduler") != "disabled",
+            scheduler_status=str(health.get("forecast_scheduler", "disabled")),
+            reserve_scheduler_status=str(health.get("reserve_scheduler", "disabled")),
+            next_scheduled_run_utc=health.get("next_forecast_run_utc"),
+            last_attempt=_attempt_json(status["last_attempt"]),
+            last_successful_run=_attempt_json(status["last_success"]),
+        )
+
+    def forecast_accuracy(
+        self,
+        *,
+        range_name: str = "7d",
+        forecast_run_id: int | None = None,
+        now: datetime | None = None,
+    ) -> ForecastAccuracyResponse:
+        start, end = resolve_window(
+            range_name=range_name, start=None, end=None, now=now
+        )
+        with self._repository() as repository:
+            rows = repository.forecast_accuracy_rows_read_only(
+                after=start,
+                before=end,
+                forecast_run_id=forecast_run_id,
+            )
+        groups: dict[str, dict[str, list[dict[str, Any]]]] = {
+            "horizon": defaultdict(list),
+            "hour": defaultdict(list),
+            "day_type": defaultdict(list),
+            "forecast_type": defaultdict(list),
+            "model": defaultdict(list),
+        }
+        points = []
+        for row in rows:
+            period = _utc(row["period_start_utc"])
+            created = _utc(row["created_at_utc"])
+            horizon_hours = max((period - created).total_seconds() / 3600, 0)
+            horizon = (
+                "0-6h"
+                if horizon_hours < 6
+                else (
+                    "6-12h"
+                    if horizon_hours < 12
+                    else "12-24h" if horizon_hours < 24 else "24h+"
+                )
+            )
+            local = period.astimezone(ZoneInfo("Australia/Brisbane"))
+            metadata = row.get("metadata_json") or {}
+            local_hour = int(metadata.get("local_hour", local.hour))
+            day_type = str(
+                metadata.get(
+                    "day_type", "weekend" if local.weekday() >= 5 else "weekday"
+                )
+            )
+            groups["horizon"][horizon].append(row)
+            groups["hour"][f"{local_hour:02d}"].append(row)
+            groups["day_type"][day_type].append(row)
+            groups["forecast_type"][str(row["forecast_type"])].append(row)
+            groups["model"][str(row["model_version"])].append(row)
+            points.append(
+                {
+                    "forecast_run_id": row["forecast_run_id"],
+                    "period_start_utc": period.isoformat(),
+                    "expected_value": row["expected_value"],
+                    "actual_value": row["actual_value"],
+                    "absolute_error": row["absolute_error"],
+                    "signed_error": row["signed_error"],
+                    "health_eligible": row["health_eligible"],
+                    "missing_reason": row["missing_reason"],
+                    "model_version": row["model_version"],
+                }
+            )
+        empty_metric = _accuracy_metric([])
+        return ForecastAccuracyResponse(
+            available=bool(rows),
+            message=None if rows else "No scheduled forecast scores are available.",
+            metrics=_accuracy_metric(rows) if rows else empty_metric,
+            by_horizon={
+                key: _accuracy_metric(value) for key, value in groups["horizon"].items()
+            },
+            by_local_hour={
+                key: _accuracy_metric(value) for key, value in groups["hour"].items()
+            },
+            by_day_type={
+                key: _accuracy_metric(value)
+                for key, value in groups["day_type"].items()
+            },
+            by_forecast_type={
+                key: _accuracy_metric(value)
+                for key, value in groups["forecast_type"].items()
+            },
+            by_model_version={
+                key: _accuracy_metric(value) for key, value in groups["model"].items()
+            },
+            points=points,
+        )
+
+    def reserve_history(
+        self, *, range_name: str = "30d", now: datetime | None = None
+    ) -> ReserveHistoryResponse:
+        start, end = resolve_window(
+            range_name=range_name, start=None, end=None, now=now
+        )
+        with self._repository() as repository:
+            rows = repository.reserve_history_read_only(after=start, before=end)
+        runs = [
+            {
+                "reserve_run_id": row["id"],
+                "forecast_run_id": row["forecast_run_id"],
+                "evaluation_timestamp_utc": _utc(
+                    row["evaluation_timestamp_utc"]
+                ).isoformat(),
+                "recommended_reserve_kwh": row["recommended_reserve_kwh"],
+                "gross_reserve_requirement_kwh": row["gross_reserve_requirement_kwh"],
+                "battery_energy_kwh": row["battery_energy_kwh"],
+                "expected_demand_kwh": row["household_demand_kwh"],
+                "uncertainty_buffer_kwh": row["uncertainty_buffer_kwh"],
+                "potentially_tradable_kwh": row["potentially_tradable_kwh"],
+                "confidence": row["confidence"],
+                "confidence_score": row["confidence_score"],
+                "effective_boundary": row["effective_boundary_json"],
+                "readiness": row["ready_for_manual_review"],
+                "command_issued": False,
+            }
+            for row in rows
+        ]
+        return ReserveHistoryResponse(
+            available=bool(runs),
+            message=(
+                None if runs else "No complete reserve audit snapshots are available."
+            ),
+            runs=runs,
         )
 
     def live(self) -> LiveResponse:
@@ -550,8 +744,55 @@ class DashboardService:
 
     def reserve_latest(self) -> ReserveResponse:
         with self._repository() as repository:
+            audit = repository.latest_reserve_audit_read_only()
             run = repository.latest_reserve_run_read_only()
             latest = repository.latest_observation_read_only()
+        if audit is not None:
+            confidence_json = audit.get("confidence_json") or {}
+            return ReserveResponse(
+                available=True,
+                forecast_run_id=audit["forecast_run_id"],
+                calculation_timestamp_utc=_utc(audit["evaluation_timestamp_utc"]),
+                state_source=audit["observation_source"],
+                battery_soc_percent=_number(audit["battery_soc_percent"]),
+                battery_energy_estimate_kwh=_number(audit["battery_energy_kwh"]),
+                expected_household_demand_kwh=_number(audit["household_demand_kwh"]),
+                expected_ev_demand_kwh=_number(audit["ev_demand_kwh"]),
+                technical_reserve_kwh=_number(audit["technical_reserve_kwh"]),
+                emergency_reserve_kwh=_number(audit["emergency_reserve_kwh"]),
+                uncertainty_buffer_kwh=_number(audit["uncertainty_buffer_kwh"]),
+                gross_reserve_requirement_kwh=_number(
+                    audit["gross_reserve_requirement_kwh"]
+                ),
+                capacity_capped_reserve_kwh=_number(
+                    audit["capacity_capped_reserve_kwh"]
+                ),
+                unmet_reserve_requirement_kwh=_number(
+                    audit["unmet_reserve_requirement_kwh"]
+                ),
+                current_reserve_shortfall_kwh=_number(
+                    audit["current_reserve_shortfall_kwh"]
+                ),
+                recommended_reserve_kwh=_number(audit["recommended_reserve_kwh"]),
+                potentially_tradable_energy_kwh=_number(
+                    audit["potentially_tradable_kwh"]
+                ),
+                confidence=confidence_json.get("overall")
+                or {
+                    "rating": audit["confidence"],
+                    "score": audit["confidence_score"],
+                },
+                readiness=bool(audit["ready_for_manual_review"]),
+                opportunity_state=audit["opportunity_state"],
+                first_candidate=audit["first_candidate_json"],
+                effective_boundary=audit["effective_boundary_json"],
+                horizon_start_utc=_utc(audit["forecast_start_utc"]),
+                horizon_end_utc=_utc(audit["forecast_end_utc"]),
+                persisted_fields=list(audit.keys()),
+                ev_vehicle_soc_percent=(
+                    _number(latest.get("ev_vehicle_soc_percent")) if latest else None
+                ),
+            )
         if run is None:
             return ReserveResponse(
                 available=False,
@@ -869,6 +1110,36 @@ def _complete_periods(rows: list[dict[str, Any]]) -> tuple[int, int]:
         for slots in slots_by_day.values()
     )
     return complete_days, overnights
+
+
+def _accuracy_metric(rows: list[dict[str, Any]]) -> AccuracyMetric:
+    signed = [
+        float(row["signed_error"])
+        for row in rows
+        if row.get("signed_error") is not None and row.get("health_eligible") is True
+    ]
+    total = len(rows)
+    count = len(signed)
+    return AccuracyMetric(
+        sample_count=count,
+        total_count=total,
+        coverage_percent=round(count / total * 100, 2) if total else 0.0,
+        mae=sum(abs(value) for value in signed) / count if count else None,
+        bias=sum(signed) / count if count else None,
+        rmse=(
+            math.sqrt(sum(value * value for value in signed) / count) if count else None
+        ),
+    )
+
+
+def _attempt_json(row: dict[str, Any] | None) -> dict[str, Any] | None:
+    if row is None:
+        return None
+    result = dict(row)
+    for name in ("scheduled_for_utc", "started_at_utc", "finished_at_utc"):
+        if result.get(name) is not None:
+            result[name] = _utc(result[name]).isoformat()
+    return result
 
 
 def _number(value: Any) -> float | None:

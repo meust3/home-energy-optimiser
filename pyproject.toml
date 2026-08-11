@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "home-energy-optimiser"
-version = "0.4.0"
+version = "0.5.0"
 description = "Read-only home energy data collection and optimisation for Home Assistant, Amber Electric, Solcast, and GoodWe."
 readme = "README.md"
 requires-python = ">=3.12"

@@ -107,7 +107,7 @@ def dashboard_smoke() -> None:
 
         def status(self):
             return StatusResponse(
-                app_version="0.4.0",
+                app_version="0.5.0",
                 overall_status="healthy",
                 collector_status="healthy",
                 database_status="healthy",
@@ -144,7 +144,7 @@ def dashboard_smoke() -> None:
         assert b'id="overview-ev"' in shell
         status, css = request(
             server,
-            prefix + "static/app.css?v=0.4.0",
+            prefix + "static/app.css?v=0.5.0",
             {"X-Ingress-Path": prefix},
         )
         assert status == 200 and b"prefers-color-scheme" in css

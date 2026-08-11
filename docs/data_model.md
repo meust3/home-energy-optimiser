@@ -1,5 +1,15 @@
 # Read-only operational data model
 
+## Alembic revision 20260812_01: forecast and reserve audit
+
+The additive v0.5.0 head creates `forecast_point_scores`,
+`forecast_operation_attempts`, `reserve_runs`, and
+`reserve_opportunity_evaluations`. Scores are one-to-one with immutable forecast
+points. Attempts use a unique aligned-boundary business key. Reserve runs reference
+the associated scheduled forecast and ordered opportunity children. JSON uses JSONB
+on PostgreSQL and portable JSON on SQLite; all operational timestamps are aware UTC.
+The observation table and legacy forecast columns are unchanged.
+
 Legacy SQLite uses schema version 6; Alembic revision `20260810_01` is the
 portable SQLite/PostgreSQL baseline and unreleased head `20260811_01` adds optional
 vehicle telemetry. There is one `observations` row per five-minute UTC slot.

@@ -1,5 +1,28 @@
 # SQLite to PostgreSQL migration
 
+## v0.5.0 revision 20260812_01
+
+Do not migrate production until the exact v0.5.0 commit image and immutable tag have
+passed validation and Home Assistant can discover the update. Then restore-test a
+fresh PostgreSQL dump, record observation/table counts, stop the v0.4.0 App and
+confirm no other collector, and run from reviewed v0.5.0 source:
+
+```powershell
+$env:DATABASE_URL = "postgresql+psycopg://energy_app:REDACTED@HOST:55432/home_energy"
+python -m alembic current
+python -m alembic upgrade head
+python -m alembic current
+python tools/check_database.py --application-readiness
+```
+
+Require revision `20260812_01` and unchanged observation/legacy counts, then update
+and start v0.5.0 immediately. The App does not migrate on startup.
+
+The physical rollback is `python -m alembic downgrade 20260811_01` from reviewed
+v0.5.0 source. It removes only v0.5.0 score/attempt/reserve tables and therefore
+discards their audit history; observations and legacy forecasts remain. Never use
+`alembic stamp` as schema rollback. A database restore is the alternative.
+
 Production migration to `home_energy` has completed and exact validation passed.
 This document remains the operational reference for development migrations,
 recovery exercises, and audit validation; it is not a pending production task.

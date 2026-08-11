@@ -6,8 +6,8 @@
   <meta name="color-scheme" content="light dark">
   <base href="__INGRESS_BASE_PATH__">
   <title>Energy Optimiser</title>
-  <link rel="stylesheet" href="static/app.css?v=0.4.0">
-  <script type="module" src="static/app.js?v=0.4.0"></script>
+  <link rel="stylesheet" href="static/app.css?v=0.5.0">
+  <script type="module" src="static/app.js?v=0.5.0"></script>
 </head>
 <body>
   <a class="skip-link" href="#main">Skip to dashboard content</a>
@@ -26,6 +26,7 @@
     <a href="#overview" data-tab="overview" aria-current="page">Overview</a>
     <a href="#history" data-tab="history">History</a>
     <a href="#forecasts" data-tab="forecasts">Forecasts</a>
+    <a href="#forecast-operations" data-tab="forecast-operations">Forecast Operations</a>
     <a href="#reserve" data-tab="reserve">Reserve</a>
     <a href="#data-quality" data-tab="data-quality">Data Quality</a>
   </nav>
@@ -62,6 +63,24 @@
       </div>
     </section>
 
+    <section id="forecast-operations" class="page" hidden aria-labelledby="operations-title">
+      <div class="section-heading">
+        <div><p class="eyebrow">Scheduled advisory analysis</p><h2 id="operations-title">Forecast Operations</h2></div>
+        <div class="operation-controls">
+          <label class="range-control">Forecast run
+            <select id="accuracy-run"><option value="">All scheduled runs</option></select>
+          </label>
+          <label class="range-control">Accuracy range
+            <select id="accuracy-range"><option value="24h">24 hours</option><option value="7d" selected>7 days</option><option value="30d">30 days</option></select>
+          </label>
+        </div>
+      </div>
+      <p id="operations-state" class="state-message" role="status">Select this tab to load scheduler status and scored forecasts.</p>
+      <div id="operations-status" class="quality-grid"></div>
+      <div id="accuracy-summary" class="summary-row"></div>
+      <div id="accuracy-content" class="chart-grid"></div>
+    </section>
+
     <section id="history" class="page" hidden aria-labelledby="history-title">
       <div class="section-heading">
         <div><p class="eyebrow">Stored observations</p><h2 id="history-title">History</h2></div>
@@ -95,6 +114,8 @@
       <p class="advisory prominent">Advisory only. No command was issued.</p>
       <p id="reserve-state" class="state-message" role="status">Select this tab to load the latest persisted reserve result.</p>
       <div id="reserve-content" class="reserve-grid"></div>
+      <h3 class="history-heading">Reserve history</h3>
+      <div id="reserve-history" class="panel"></div>
     </section>
 
     <section id="data-quality" class="page" hidden aria-labelledby="quality-title">
@@ -107,7 +128,7 @@
   </main>
 
   <footer>
-    <p>Read-only presentation of existing stored data. No control path, forecast scheduler, or command endpoint is present.</p>
+    <p>Read-only presentation and bounded advisory forecast operations. No control path, action button, or command endpoint is present.</p>
   </footer>
 </body>
 </html>

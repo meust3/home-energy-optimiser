@@ -31,8 +31,13 @@ pre-migration backup; it is not a production fallback.
 Home Assistant App v0.2.1 is installed and collecting successfully on the amd64
 Home Assistant OS 18.1 NUC. Version 0.3.2 publishes the experimental
 administrator-only Ingress dashboard and remains unverified on that host. Version
-0.4.0 is an unreleased release candidate adding optional read-only vehicle-cloud
-telemetry; it requires an explicit additive database migration before App update.
+0.4.0 is operational on Home Assistant OS with optional read-only vehicle-cloud
+telemetry and PostgreSQL revision `20260811_01`.
+Version 0.5.0 is an unreleased release candidate for strictly advisory forecast
+operations and reserve audit. Its opt-in coordinator must remain one lightweight
+thread in the existing process, preserve collector priority, create no second
+collector or cron service, and expose no action endpoint. Forecast scoring and
+reserve persistence are analytical database writes only; hardware remains read-only.
 
 ## Architecture
 
