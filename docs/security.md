@@ -1,5 +1,11 @@
 # Security and safety boundary
 
+v0.5.0 adds analytical database writes only. The coordinator imports no Home
+Assistant client, service API, Modbus or device-control implementation. It starts no
+worker/process/collector, exposes no run-now route, and stores only a bounded
+exception class in operation failures. APIs omit database URLs, tokens, passwords
+and raw App options; all query ranges and row counts are bounded.
+
 ## Read-only operation
 
 Phase 1 can call only `GET /api/`, `GET /api/states`, and

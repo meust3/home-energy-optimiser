@@ -9,6 +9,10 @@ import run_collector
 
 from energy_optimizer.config import load_config
 from energy_optimizer.db.redaction import display_database_url
+from energy_optimizer.forecast_operations import (
+    ForecastCoordinator,
+    ForecastOperationsConfig,
+)
 from energy_optimizer.home_assistant_app import (
     HEALTH_PORT,
     AppHealth,
@@ -19,6 +23,7 @@ from energy_optimizer.home_assistant_app import (
     validate_startup,
 )
 from energy_optimizer.logging_config import configure_logging
+from energy_optimizer.persistence import open_bounded_forecast_repository
 
 LOGGER = logging.getLogger(__name__)
 
@@ -87,6 +92,31 @@ def _run(options) -> int:
         HEALTH_PORT,
     )
     stop_event = threading.Event()
+    coordinator = ForecastCoordinator(
+        repository_factory=lambda: open_bounded_forecast_repository(
+            environment["DATABASE_URL"],
+            max_runtime_seconds=options.forecast_max_runtime_seconds,
+        ),
+        collector_config=config,
+        operations_config=ForecastOperationsConfig(
+            enabled=options.forecast_operations_enabled,
+            interval_minutes=options.forecast_interval_minutes,
+            horizon_hours=options.forecast_horizon_hours,
+            alignment_minutes=options.forecast_alignment_minutes,
+            scoring_delay_minutes=options.forecast_scoring_delay_minutes,
+            max_runtime_seconds=options.forecast_max_runtime_seconds,
+            reserve_snapshot_enabled=options.reserve_snapshot_enabled,
+            timezone=options.timezone,
+        ),
+        health=health,
+    )
+    forecast_thread = threading.Thread(
+        target=coordinator.run,
+        args=(stop_event,),
+        name="forecast-coordinator",
+        daemon=True,
+    )
+    forecast_thread.start()
 
     def stop(_signum, _frame) -> None:
         LOGGER.info("Shutdown requested; stopping before the next collection attempt")
@@ -102,6 +132,7 @@ def _run(options) -> int:
         )
     finally:
         stop_event.set()
+        forecast_thread.join(timeout=options.forecast_max_runtime_seconds + 5)
         server.shutdown()
         server.server_close()
         thread.join(timeout=5)

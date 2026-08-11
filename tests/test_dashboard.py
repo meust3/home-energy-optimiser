@@ -370,7 +370,7 @@ class _FakeService:
         from energy_optimizer.dashboard_api import StatusResponse
 
         return StatusResponse(
-            app_version="0.4.1",
+            app_version="0.5.0",
             overall_status="healthy",
             collector_status="healthy",
             database_status="healthy",
@@ -381,6 +381,48 @@ class _FakeService:
             database_schema_revision="test",
             expected_schema_revision="test",
         )
+
+    def forecast_operations_status(self):
+        from energy_optimizer.dashboard_api import ForecastOperationStatusResponse
+
+        return ForecastOperationStatusResponse(
+            enabled=False,
+            scheduler_status="disabled",
+            reserve_scheduler_status="disabled",
+            next_scheduled_run_utc=None,
+            last_attempt=None,
+            last_successful_run=None,
+        )
+
+    def forecast_accuracy(self, **_kwargs):
+        from energy_optimizer.dashboard_api import (
+            AccuracyMetric,
+            ForecastAccuracyResponse,
+        )
+
+        return ForecastAccuracyResponse(
+            available=False,
+            message="No scores",
+            metrics=AccuracyMetric(
+                sample_count=0,
+                total_count=0,
+                coverage_percent=0,
+                mae=None,
+                bias=None,
+                rmse=None,
+            ),
+            by_horizon={},
+            by_local_hour={},
+            by_day_type={},
+            by_forecast_type={},
+            by_model_version={},
+            points=[],
+        )
+
+    def reserve_history(self, **_kwargs):
+        from energy_optimizer.dashboard_api import ReserveHistoryResponse
+
+        return ReserveHistoryResponse(available=False, message="No reserve audits")
 
 
 def _serve(policy):
@@ -416,14 +458,14 @@ def test_web_shell_static_nested_ingress_api_and_security_headers():
         assert status == 200
         html = body.decode()
         assert f'<base href="{prefix}">' in html
-        assert 'href="static/app.css?v=0.4.1"' in html
+        assert 'href="static/app.css?v=0.5.0"' in html
         assert "Advisory only. No command was issued." in html
         assert "Content-Security-Policy" in headers
         assert "X-Frame-Options" not in headers
         status, _, css = _request(
             server,
             "GET",
-            prefix + "static/app.css?v=0.4.1",
+            prefix + "static/app.css?v=0.5.0",
             {"X-Ingress-Path": prefix},
         )
         assert status == 200
@@ -433,6 +475,21 @@ def test_web_shell_static_nested_ingress_api_and_security_headers():
         )
         assert status == 200
         assert json.loads(body)["available"] is False
+        for route in (
+            "forecast-operations/status",
+            "forecast-accuracy?range=7d",
+            "reserve-history?range=30d",
+        ):
+            status, _, body = _request(
+                server,
+                "GET",
+                prefix + "api/v1/" + route,
+                {"X-Ingress-Path": prefix},
+            )
+            assert status == 200
+            payload = json.loads(body)
+            if "status" not in route:
+                assert payload["available"] is False
         status, _, _ = _request(
             server, "GET", prefix + "history", {"X-Ingress-Path": prefix}
         )
@@ -548,7 +605,7 @@ def test_reserve_states_are_explicit_and_advisory_remains_visible():
     assert '"not-stored": "Not stored"' in javascript
     assert 'unavailable: "Unavailable in this run"' in javascript
     assert '"not-calculated": "Not calculated"' in javascript
-    assert "This dashboard shows only fields persisted" in javascript
+    assert "complete typed estimator output is persisted" in javascript
     assert 'notStoredRow("Opportunity details")' in javascript
     assert 'reserveRow("Overall", confidence)' in javascript
 

@@ -1,11 +1,17 @@
 # Home Energy Optimiser
 
+Version 0.5.0 retains the UID/GID 10001,
+one-process, one-collector, PostgreSQL-only App and adds one opt-in in-process
+forecast coordinator. Forecast operations default to disabled; all new dashboard
+routes are GET-only and no device command path exists. Explicit Alembic revision
+`20260812_01` is required before App update.
+
 Home Assistant App (formerly called an add-on) packaging for the existing
 strictly read-only collector and Ingress dashboard. It reads Home Assistant Core
 through the Supervisor proxy, stores observations in external PostgreSQL, and
 presents existing stored data through administrator-only Home Assistant Ingress.
 
-Version 0.4.1 retains the minimal root bootstrap introduced in v0.2.1 to copy
+Version 0.5.0 retains the minimal root bootstrap introduced in v0.2.1 to copy
 Supervisor's root-owned options file into protected ephemeral storage, then runs
 Python as UID/GID 10001. The original `/data/options.json` is never modified.
 

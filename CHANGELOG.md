@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.5.0
+
+- Added an opt-in, single-threaded in-process forecast coordinator. It creates
+  genuine out-of-sample 24-hour baseline forecasts after aligned boundaries,
+  uses durable database claims for restart deduplication, and gives the
+  five-minute collector a boundary grace period.
+- Added separate immutable forecast-point scoring with delayed actuals,
+  availability and health eligibility, missing reasons, absolute/signed/squared
+  error, and bounded MAE, bias, RMSE and coverage reporting.
+- Added complete advisory reserve snapshots and opportunity evaluations. Every
+  result records `command_issued = false`; unavailable tradable energy remains
+  `NULL`.
+- Added read-only Forecast Operations, Forecast Accuracy and Reserve History
+  dashboard/API views and separate non-fatal scheduler health.
+- Added additive Alembic revision `20260812_01` with a real downgrade that removes
+  only v0.5.0 audit tables. No App startup migration is performed.
+- Forecast operations default to disabled. No Home Assistant service, device,
+  Modbus, trading or command path was added.
+- Preserved the v0.4.1 normalized power-sign configuration, diagnostics, and
+  backup-gated historical derived-field repair.
+
 ## 0.4.1
 
 - Added validated Home Assistant App options for grid and battery power signs,

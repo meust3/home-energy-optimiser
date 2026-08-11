@@ -1,8 +1,13 @@
 # Read-only Ingress dashboard
 
-Version 0.4.1 is a focused hotfix for sign configuration and
-normalized-flow diagnostics. It does not change dashboard mutability or add a
-database migration.
+Version 0.5.0 adds three read-only presentations: Forecast Operations status,
+Forecast Accuracy (expected/actual, MAE, bias, RMSE, coverage and grouped metrics),
+and complete Reserve History. Empty and sparse states remain explicit. There are no
+buttons, run-now endpoints or mutation routes.
+
+Version 0.4.1 remains the confirmed production Home Assistant App before this
+release. It includes the v0.4.0 read-only vehicle presentation plus schema-neutral
+sign configuration and normalized-flow diagnostics.
 
 ## Architecture
 

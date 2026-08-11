@@ -98,6 +98,8 @@ main { min-height: 70vh; }
 .range-control, label { color: var(--muted); font-size: .82rem; font-weight: 650; }
 select { display: block; width: 100%; min-width: 0; margin-top: .3rem; min-height: 2.35rem; max-width: 100%; color: var(--text); background: var(--surface); border: 1px solid var(--line); border-radius: .5rem; padding: .4rem .65rem; }
 .summary-row { display: flex; flex-wrap: wrap; gap: .6rem; margin-bottom: .8rem; }
+.operation-controls { display: flex; flex-wrap: wrap; gap: .6rem; min-width: min(100%, 28rem); }
+.operation-controls label { flex: 1 1 12rem; }
 .summary-row span { border: 1px solid var(--line); border-radius: 999px; padding: .35rem .6rem; color: var(--muted); font-size: .76rem; }
 .chart-grid { display: grid; grid-template-columns: repeat(2, minmax(360px, 1fr)); gap: var(--layout-gap); align-items: stretch; }
 .chart-panel { display: flex; flex-direction: column; min-height: 0; }
@@ -135,6 +137,7 @@ th { position: sticky; top: 0; background: var(--surface); color: var(--muted); 
 .reserve-card .section-help { min-height: 2.5rem; margin: .4rem 0 0; overflow-wrap: break-word; word-break: normal; color: var(--muted); font-size: .78rem; }
 .schema-notice { grid-column: 1 / -1; border-color: color-mix(in srgb, var(--accent) 30%, var(--line)); background: color-mix(in srgb, var(--accent-soft) 55%, var(--surface)); }
 .schema-notice p { max-width: 70rem; margin: .35rem 0 0; color: var(--muted); font-size: .84rem; }
+.history-heading { margin: 1.5rem 0 .75rem; }
 .quality-metric { font-size: 1.5rem; font-weight: 750; margin: .35rem 0; }
 .issue-list { padding-left: 1.15rem; }
 .issue-list li { margin-bottom: .35rem; }

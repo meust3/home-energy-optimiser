@@ -1,6 +1,6 @@
 # Read-only vehicle telemetry integration
 
-Version 0.4.0 introduced optional, read-only vehicle telemetry. The initial
+Version 0.4.0 is operational with optional, read-only vehicle telemetry. The
 implementation is designed around the states exposed by a
 BYD vehicle cloud integration, but every Home Assistant entity ID is
 installation-specific configuration. No product-specific entity ID is a universal

@@ -196,6 +196,18 @@ def test_invalid_database_port_rejects_startup():
         _options(db_port=70000)
 
 
+def test_forecast_options_default_disabled_and_validate_bounds():
+    options = _options()
+    assert options.forecast_operations_enabled is False
+    assert options.forecast_interval_minutes == 30
+    assert options.forecast_horizon_hours == 24
+    assert options.reserve_snapshot_enabled is True
+    with pytest.raises(ValueError):
+        _options(forecast_max_runtime_seconds=10)
+    with pytest.raises(ValueError):
+        _options(forecast_interval_minutes=30, forecast_alignment_minutes=20)
+
+
 def test_postgresql_url_encodes_credentials():
     url = postgresql_url(_options())
     assert "test_user:test-password%40%3A%2F@db.example.invalid:55432" in url
@@ -221,6 +233,13 @@ def test_app_environment_uses_supervisor_proxy_and_never_sqlite():
     assert environment["SIGN_CONVENTION_CONFIDENCE"] == "high"
     assert environment["SIGN_CONVENTION_SUPPORTING_SAMPLES"] == "175"
     assert environment["BALANCE_TOLERANCE_W"] == "250.0"
+    assert environment["FORECAST_OPERATIONS_ENABLED"] == "false"
+    assert environment["FORECAST_INTERVAL_MINUTES"] == "30"
+    assert environment["FORECAST_HORIZON_HOURS"] == "24"
+    assert environment["FORECAST_ALIGNMENT_MINUTES"] == "30"
+    assert environment["FORECAST_SCORING_DELAY_MINUTES"] == "10"
+    assert environment["FORECAST_MAX_RUNTIME_SECONDS"] == "120"
+    assert environment["RESERVE_SNAPSHOT_ENABLED"] == "true"
 
 
 def test_app_requires_supervisor_token(monkeypatch):
@@ -305,6 +324,10 @@ def test_startup_home_assistant_check_is_get_only(monkeypatch):
                 observation_derivations=0,
                 ev_session_annotations=0,
                 ev_session_annotation_rows=0,
+                forecast_point_scores=0,
+                forecast_operation_attempts=0,
+                reserve_runs=0,
+                reserve_opportunity_evaluations=0,
             )
 
         def close(self):
@@ -436,6 +459,23 @@ def test_health_tolerates_one_transient_failure():
     assert payload["home_assistant"] == "unhealthy"
 
 
+def test_forecast_health_is_separate_from_collector_health():
+    health = AppHealth(max_observation_age_seconds=900)
+    now = datetime.now(UTC)
+    health.configure_forecast_scheduler(enabled=True, next_run=now)
+    health.record_forecast_failure(reserve=True)
+    status, payload = health.response(now=now)
+    assert status == 200
+    assert payload["collector"] == "healthy"
+    assert payload["forecast_scheduler"] == "warning"
+    assert payload["reserve_scheduler"] == "warning"
+    health.record_forecast_failure(reserve=True)
+    health.record_forecast_failure(reserve=True)
+    status, payload = health.response(now=now)
+    assert status == 200
+    assert payload["forecast_scheduler"] == "degraded"
+
+
 def test_windows_environment_configuration_remains_unchanged(monkeypatch):
     monkeypatch.setenv("HA_URL", "http://homeassistant.local:8123")
     monkeypatch.setenv("HA_TOKEN", "windows-token")
@@ -480,11 +520,11 @@ def test_app_patch_versions_are_consistent():
     manifest = Path("home_energy_optimiser/config.yaml").read_text(encoding="utf-8")
     dockerfile = Path("home_energy_optimiser/Dockerfile").read_text(encoding="utf-8")
     project = Path("pyproject.toml").read_text(encoding="utf-8")
-    assert APP_VERSION == "0.4.1"
-    assert 'version: "0.4.1"' in manifest
-    assert "ARG BUILD_VERSION=0.4.1" in dockerfile
-    assert "ARG APP_SOURCE_REF=v0.4.1" in dockerfile
-    assert 'version = "0.4.1"' in project
+    assert APP_VERSION == "0.5.0"
+    assert 'version: "0.5.0"' in manifest
+    assert "ARG BUILD_VERSION=0.5.0" in dockerfile
+    assert "ARG APP_SOURCE_REF=v0.5.0" in dockerfile
+    assert 'version = "0.5.0"' in project
 
 
 def test_app_launcher_execs_existing_collector_without_restart_loop():
@@ -578,6 +618,7 @@ def test_app_page_documentation_and_changelog_are_packaged():
     assert changelog.is_file()
     assert documentation.is_file()
     changelog_text = changelog.read_text(encoding="utf-8")
+    assert "## 0.5.0" in changelog_text
     assert "## 0.4.1" in changelog_text
     assert "## 0.4.0" in changelog_text
     assert "## 0.3.1" in changelog_text

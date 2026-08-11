@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.5.0
+
+- Adds opt-in in-process forecast operations, delayed scoring and complete
+  advisory reserve audit persistence while retaining one collector and one
+  application process.
+- Adds bounded GET-only Forecast Operations, Forecast Accuracy and Reserve
+  History views. There are no run-now or mutation routes.
+- Requires explicit Alembic revision `20260812_01` before App update. The App
+  never migrates PostgreSQL on startup and forecast operations remain disabled
+  by default.
+- Keeps UID/GID 10001, Supervisor watchdog behaviour, PostgreSQL fail-closed
+  startup and the strict read-only hardware boundary.
+- Preserves the v0.4.1 normalized power-sign configuration, diagnostics, and
+  backup-gated historical repair.
+
 ## 0.4.1
 
 - Added validated App options for grid/battery signs, confidence, supporting

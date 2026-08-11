@@ -5,6 +5,17 @@ schema change for optional read-only vehicle telemetry.
 Version `0.4.1` is a schema-neutral hotfix for power-sign configuration and
 normalized-flow history.
 
+For v0.5.0: validate; commit/push the candidate; build and container-test the exact
+commit; tag, push, build and validate the immutable tag; merge main; confirm Home
+Assistant offers v0.5.0 without updating; restore-test the backup and record counts;
+stop the sole collector; migrate with reviewed source; verify `20260812_01` and
+unchanged counts; immediately update/start the App. First confirm normal collection
+with `forecast_operations_enabled: false`, then explicitly enable operations if
+desired. Never migrate before the immutable artifact is discoverable.
+
+Version `0.4.1` is the operational pre-v0.5.0 App with optional read-only vehicle
+telemetry at revision `20260811_01`.
+
 ## Publish and install
 
 The repository root contains `repository.yaml` and one App folder,

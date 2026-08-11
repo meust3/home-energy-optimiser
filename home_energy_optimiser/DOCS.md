@@ -1,13 +1,36 @@
 # Home Energy Optimiser
 
+## v0.5.0 forecast operations options
+
+Upgrade PostgreSQL explicitly to
+`20260812_01` before installing; the App never migrates on startup.
+
+```yaml
+forecast_operations_enabled: false
+forecast_interval_minutes: 30
+forecast_horizon_hours: 24
+forecast_alignment_minutes: 30
+forecast_scoring_delay_minutes: 10
+forecast_max_runtime_seconds: 120
+reserve_snapshot_enabled: true
+```
+
+Start with operations disabled and confirm collector, PostgreSQL and Home Assistant
+health. Enabling operations adds only one lightweight thread inside the current
+process. The collector has priority, attempts are restart-deduplicated in PostgreSQL,
+and forecast/reserve failures have separate warning/degraded health. Forecast
+Operations, Accuracy and Reserve History are read-only; there is no run-now button
+or endpoint. Every reserve result is advisory and records `command_issued = false`.
+
 Home Energy Optimiser is a Home Assistant App that collects energy telemetry at
 five-minute intervals, stores it in an external PostgreSQL database, and presents
 the stored information in an administrator-only Ingress dashboard. It provides
 explainable, advisory analysis; it does not operate energy equipment.
 
-Version 0.4.1 is a schema-neutral hotfix awaiting production Home Assistant OS
-validation. It requires the existing Alembic revision `20260811_01`; startup never
-runs migrations or historical repair automatically.
+Version 0.4.1 is operational on the production Home Assistant OS host at Alembic
+revision `20260811_01`. Version 0.5.0 requires an explicit upgrade to
+`20260812_01` before the App is updated; startup never runs migrations or historical
+repair automatically.
 
 ## Read-only safety boundary
 

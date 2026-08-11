@@ -52,6 +52,13 @@ def parse_options() -> None:
     assert options.sign_convention_confidence == "high"
     assert options.sign_convention_supporting_samples == 175
     assert options.balance_tolerance_w == 250
+    assert not options.forecast_operations_enabled
+    assert options.forecast_interval_minutes == 30
+    assert options.forecast_horizon_hours == 24
+    assert options.forecast_alignment_minutes == 30
+    assert options.forecast_scoring_delay_minutes == 10
+    assert options.forecast_max_runtime_seconds == 120
+    assert options.reserve_snapshot_enabled
     assert os.environ.get("SUPERVISOR_TOKEN")
     environment = app_environment(options)
     assert environment["GRID_POWER_SIGN"] == "positive_export"
@@ -59,6 +66,13 @@ def parse_options() -> None:
     assert environment["SIGN_CONVENTION_CONFIDENCE"] == "high"
     assert environment["SIGN_CONVENTION_SUPPORTING_SAMPLES"] == "175"
     assert environment["BALANCE_TOLERANCE_W"] == "250.0"
+    assert environment["FORECAST_OPERATIONS_ENABLED"] == "false"
+    assert environment["FORECAST_INTERVAL_MINUTES"] == "30"
+    assert environment["FORECAST_HORIZON_HOURS"] == "24"
+    assert environment["FORECAST_ALIGNMENT_MINUTES"] == "30"
+    assert environment["FORECAST_SCORING_DELAY_MINUTES"] == "10"
+    assert environment["FORECAST_MAX_RUNTIME_SECONDS"] == "120"
+    assert environment["RESERVE_SNAPSHOT_ENABLED"] == "true"
     assert not runtime_path.exists()
     print(
         json.dumps(
@@ -69,6 +83,7 @@ def parse_options() -> None:
                 "runtime_copy_gid": runtime_metadata.st_gid,
                 "runtime_copy_mode": f"{runtime_mode:04o}",
                 "runtime_copy_uid": runtime_metadata.st_uid,
+                "forecast_environment": "propagated",
                 "sign_environment": "propagated",
                 "status": "ok",
                 "token_present": True,
@@ -119,7 +134,7 @@ def dashboard_smoke() -> None:
 
         def status(self):
             return StatusResponse(
-                app_version="0.4.1",
+                app_version="0.5.0",
                 overall_status="healthy",
                 collector_status="healthy",
                 database_status="healthy",
@@ -156,7 +171,7 @@ def dashboard_smoke() -> None:
         assert b'id="overview-ev"' in shell
         status, css = request(
             server,
-            prefix + "static/app.css?v=0.4.1",
+            prefix + "static/app.css?v=0.5.0",
             {"X-Ingress-Path": prefix},
         )
         assert status == 200 and b"prefers-color-scheme" in css

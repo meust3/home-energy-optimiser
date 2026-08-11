@@ -100,6 +100,13 @@ def write_root_only_options(volume: str) -> None:
             "ev_location_entity": "device_tracker.test_vehicle_location",
             "ev_home_state": "home",
             "ev_telemetry_stale_seconds": 900,
+            "forecast_operations_enabled": False,
+            "forecast_interval_minutes": 30,
+            "forecast_horizon_hours": 24,
+            "forecast_alignment_minutes": 30,
+            "forecast_scoring_delay_minutes": 10,
+            "forecast_max_runtime_seconds": 120,
+            "reserve_snapshot_enabled": True,
         }
     )
     docker(
@@ -163,6 +170,7 @@ def test_options_and_identity(
         "runtime_copy_gid": 10001,
         "runtime_copy_mode": "0600",
         "runtime_copy_uid": 10001,
+        "forecast_environment": "propagated",
         "sign_environment": "propagated",
         "status": "ok",
         "token_present": True,
@@ -173,6 +181,7 @@ def test_options_and_identity(
     print("PASS bootstrap copied options as app:app mode=0600")
     print("PASS configuration parsing succeeded")
     print("PASS all five sign options propagated to the application environment")
+    print("PASS all seven forecast options propagated to the application environment")
     print("PASS application process uid=10001 gid=10001")
     print("PASS ephemeral options copy removed")
     print("PASS no secret printed")

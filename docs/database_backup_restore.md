@@ -1,5 +1,14 @@
 # Database backup, restore, and rollback
 
+For v0.5.0, create and restore-test the production PostgreSQL dump only after the
+immutable release artifact is validated and discoverable. Keep v0.4.0 collecting
+until the maintenance window; then record counts and stop every collector before
+`alembic upgrade head`. If the App fails after migration, prefer keeping revision
+`20260812_01`, stopping the App, and running the reviewed v0.5.0 Windows collector
+with forecast operations disabled and exactly one collector while troubleshooting.
+Rollback to v0.4.0 requires a tested physical downgrade to `20260811_01` or restore
+of the verified pre-v0.5.0 dump.
+
 For SQLite, stop the collector and copy `data/energy_history.db`, or use SQLite's online backup API.
 
 Before the v0.4.0 migration, keep v0.3.2 running and create and restore-test the

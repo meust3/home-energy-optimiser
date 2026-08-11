@@ -65,3 +65,24 @@ configuration:
   ev_telemetry_stale_seconds:
     name: Vehicle telemetry freshness
     description: Maximum vehicle telemetry age before its charging state becomes unknown.
+  forecast_operations_enabled:
+    name: Enable forecast operations
+    description: Opt in to the bounded advisory in-process forecast coordinator.
+  forecast_interval_minutes:
+    name: Forecast interval
+    description: Minutes between aligned scheduled forecast attempts.
+  forecast_horizon_hours:
+    name: Forecast horizon
+    description: Hours covered by each genuine scheduled baseline forecast.
+  forecast_alignment_minutes:
+    name: Forecast alignment
+    description: Valid local wall-clock boundary alignment in minutes.
+  forecast_scoring_delay_minutes:
+    name: Scoring delay
+    description: Delay after an interval completes before its actual is scored.
+  forecast_max_runtime_seconds:
+    name: Maximum forecast runtime
+    description: Cooperative deadline for one forecast and reserve cycle.
+  reserve_snapshot_enabled:
+    name: Persist reserve snapshots
+    description: Store complete advisory reserve results after successful forecasts.

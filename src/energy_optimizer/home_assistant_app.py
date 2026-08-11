@@ -25,7 +25,7 @@ from energy_optimizer.models import (
 from energy_optimizer.persistence import ApplicationRepository, open_repository
 
 SUPERVISOR_CORE_API_URL = "http://supervisor/core/api"
-APP_VERSION = "0.4.1"
+APP_VERSION = "0.5.0"
 HEALTH_PORT = 8099
 OPTIONS_PATH_ENV = "HOME_ENERGY_APP_OPTIONS_PATH"
 SUPERVISOR_OPTIONS_PATH = Path("/data/options.json")
@@ -57,6 +57,21 @@ class HomeAssistantAppOptions(BaseModel):
     ev_location_entity: str = ""
     ev_home_state: str = Field(default="home", min_length=1)
     ev_telemetry_stale_seconds: int = Field(default=900, gt=0)
+    forecast_operations_enabled: bool = False
+    forecast_interval_minutes: int = Field(default=30, ge=15, le=1440)
+    forecast_horizon_hours: int = Field(default=24, ge=1, le=168)
+    forecast_alignment_minutes: int = Field(default=30)
+    forecast_scoring_delay_minutes: int = Field(default=10, ge=0, le=1440)
+    forecast_max_runtime_seconds: int = Field(default=120, ge=30, le=900)
+    reserve_snapshot_enabled: bool = True
+
+    @model_validator(mode="after")
+    def validate_forecast_schedule(self):
+        if self.forecast_alignment_minutes not in {5, 10, 15, 20, 30, 60}:
+            raise ValueError("unsupported forecast alignment")
+        if self.forecast_interval_minutes % self.forecast_alignment_minutes:
+            raise ValueError("forecast interval must be a multiple of alignment")
+        return self
 
     @model_validator(mode="after")
     def sign_settings_are_consistent(self) -> "HomeAssistantAppOptions":
@@ -175,6 +190,17 @@ def app_environment(
         "EV_LOCATION_ENTITY": options.ev_location_entity.strip(),
         "EV_HOME_STATE": options.ev_home_state.strip(),
         "EV_TELEMETRY_STALE_SECONDS": str(options.ev_telemetry_stale_seconds),
+        "FORECAST_OPERATIONS_ENABLED": str(
+            options.forecast_operations_enabled
+        ).lower(),
+        "FORECAST_INTERVAL_MINUTES": str(options.forecast_interval_minutes),
+        "FORECAST_HORIZON_HOURS": str(options.forecast_horizon_hours),
+        "FORECAST_ALIGNMENT_MINUTES": str(options.forecast_alignment_minutes),
+        "FORECAST_SCORING_DELAY_MINUTES": str(
+            options.forecast_scoring_delay_minutes
+        ),
+        "FORECAST_MAX_RUNTIME_SECONDS": str(options.forecast_max_runtime_seconds),
+        "RESERVE_SNAPSHOT_ENABLED": str(options.reserve_snapshot_enabled).lower(),
     }
     return environment
 
@@ -218,6 +244,10 @@ def validate_startup(
             "observation_derivations",
             "ev_session_annotations",
             "ev_session_annotation_rows",
+            "forecast_point_scores",
+            "forecast_operation_attempts",
+            "reserve_runs",
+            "reserve_opportunity_evaluations",
         }
         if not required_tables.issubset(repository.table_counts().__dict__):
             raise ConfigurationError("Database application-readiness check failed")
@@ -250,11 +280,18 @@ class AppHealth:
     home_assistant: str = "healthy"
     collector: str = "healthy"
     dashboard: str = "healthy"
+    forecast_scheduler: str = "disabled"
+    reserve_scheduler: str = "disabled"
+    last_forecast_success_utc: datetime | None = None
+    last_reserve_success_utc: datetime | None = None
+    next_forecast_run_utc: datetime | None = None
     last_successful_collection_utc: datetime | None = None
     last_slot_utc: datetime | None = None
     _started_at_utc: datetime = field(default_factory=lambda: datetime.now(UTC))
     _database_failures: int = 0
     _home_assistant_failures: int = 0
+    _forecast_failures: int = 0
+    _reserve_failures: int = 0
     _lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
 
     def record_success(self, observation: Any) -> None:
@@ -278,6 +315,44 @@ class AppHealth:
                 if self._home_assistant_failures >= 3:
                     self.home_assistant = "unhealthy"
 
+    def configure_forecast_scheduler(
+        self, *, enabled: bool, next_run: datetime | None
+    ) -> None:
+        with self._lock:
+            if not enabled:
+                self.forecast_scheduler = "disabled"
+                self.reserve_scheduler = "disabled"
+            elif self.forecast_scheduler == "disabled":
+                self.forecast_scheduler = "healthy"
+                self.reserve_scheduler = "healthy"
+            self.next_forecast_run_utc = (
+                next_run.astimezone(UTC) if next_run is not None else None
+            )
+
+    def record_forecast_success(self, timestamp: datetime) -> None:
+        with self._lock:
+            self.forecast_scheduler = "healthy"
+            self._forecast_failures = 0
+            self.last_forecast_success_utc = timestamp.astimezone(UTC)
+
+    def record_reserve_success(self, timestamp: datetime) -> None:
+        with self._lock:
+            self.reserve_scheduler = "healthy"
+            self._reserve_failures = 0
+            self.last_reserve_success_utc = timestamp.astimezone(UTC)
+
+    def record_forecast_failure(self, *, reserve: bool) -> None:
+        with self._lock:
+            self._forecast_failures += 1
+            self.forecast_scheduler = (
+                "degraded" if self._forecast_failures >= 3 else "warning"
+            )
+            if reserve:
+                self._reserve_failures += 1
+                self.reserve_scheduler = (
+                    "degraded" if self._reserve_failures >= 3 else "warning"
+                )
+
     def response(self, *, now: datetime | None = None) -> tuple[int, dict[str, Any]]:
         current = (now or datetime.now(UTC)).astimezone(UTC)
         with self._lock:
@@ -296,6 +371,21 @@ class AppHealth:
                 "home_assistant": self.home_assistant,
                 "collector": collector,
                 "dashboard": self.dashboard,
+                "forecast_scheduler": self.forecast_scheduler,
+                "last_forecast_success_utc": _iso(self.last_forecast_success_utc),
+                "forecast_age_seconds": (
+                    round((current - self.last_forecast_success_utc).total_seconds(), 1)
+                    if self.last_forecast_success_utc is not None
+                    else None
+                ),
+                "next_forecast_run_utc": _iso(self.next_forecast_run_utc),
+                "reserve_scheduler": self.reserve_scheduler,
+                "last_reserve_success_utc": _iso(self.last_reserve_success_utc),
+                "reserve_age_seconds": (
+                    round((current - self.last_reserve_success_utc).total_seconds(), 1)
+                    if self.last_reserve_success_utc is not None
+                    else None
+                ),
                 "last_successful_collection_utc": _iso(
                     self.last_successful_collection_utc
                 ),

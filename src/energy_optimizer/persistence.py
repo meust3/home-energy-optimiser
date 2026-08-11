@@ -41,6 +41,25 @@ def open_repository(database_url: str | None = None) -> ApplicationRepository:
     return repository
 
 
+def open_bounded_forecast_repository(
+    database_url: str, *, max_runtime_seconds: int
+) -> ApplicationRepository:
+    """Open a scheduler-only repository with bounded PostgreSQL waits."""
+    repository = ApplicationRepository(
+        create_database_engine(
+            database_url,
+            connect_timeout_seconds=min(max_runtime_seconds, 10),
+            statement_timeout_ms=min(max_runtime_seconds, 30) * 1000,
+        )
+    )
+    LOGGER.debug(
+        "Configured bounded forecast backend=%s target=%s",
+        repository.backend,
+        repository.target_display,
+    )
+    return repository
+
+
 def emit_database_info(repository: ApplicationRepository) -> None:
     latest = repository.latest_observation()
     latest_slot = latest["slot_utc"] if latest else None
