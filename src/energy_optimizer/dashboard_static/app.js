@@ -2,6 +2,7 @@ const state = { loaded: new Set(), controllers: new Map(), timers: new Map() };
 const $ = (selector, root = document) => root.querySelector(selector);
 const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
 const svgNS = "http://www.w3.org/2000/svg";
+const missingDirectionalFlowMessage = "Detailed directional flow breakdown is unavailable for this slot.";
 
 function apiUrl(path, params = {}) {
   const url = new URL(`api/v1/${path}`, document.baseURI);
@@ -34,13 +35,37 @@ function safeText(value) {
   return text.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;").replaceAll("'", "&#39;");
 }
 
+function isNumeric(value) { return typeof value === "number" && Number.isFinite(value); }
+
+function availabilityLabel(state) {
+  const labels = {
+    "not-stored": "Not stored",
+    unavailable: "Unavailable in this run",
+    "not-calculated": "Not calculated",
+  };
+  return `<span class="availability availability-${state}">${labels[state]}</span>`;
+}
+
 function setState(selector, message, kind = "") {
   const node = $(selector); if (!node) return;
   node.textContent = message; node.className = `state-message ${kind}`.trim();
 }
 
 function definition(entries) {
-  return `<dl class="definition-grid">${entries.map(([term, value]) => `<dt>${term}</dt><dd>${safeText(value)}</dd>`).join("")}</dl>`;
+  return `<dl class="definition-grid">${entries.map(([term, value, state]) => `<dt>${safeText(term)}</dt><dd>${state && state !== "available" ? availabilityLabel(state) : safeText(value)}</dd>`).join("")}</dl>`;
+}
+
+function reserveRow(term, value, formatter = String) {
+  return value == null || value === "" ? [term, null, "unavailable"] : [term, formatter(value), "available"];
+}
+
+function notStoredRow(term) { return [term, null, "not-stored"]; }
+
+function directionalState(importValue, exportValue, importLabel, exportLabel) {
+  if (!isNumeric(importValue) && !isNumeric(exportValue)) return "Unavailable";
+  if (importValue > 0) return `${importLabel} ${power(importValue)}`;
+  if (exportValue > 0) return `${exportLabel} ${power(exportValue)}`;
+  return "Idle";
 }
 
 async function loadStatus() {
@@ -60,30 +85,51 @@ function kpi(label, value, detail) { return `<article class="kpi"><p class="labe
 async function loadLive() {
   try {
     const data = await request("live", "live");
-    if (!data.available) { setState("#overview-state", "No stored observation is available."); $("#kpis").innerHTML = '<div class="empty-state">Waiting for the first persisted observation.</div>'; return; }
+    if (!data.available) {
+      setState("#overview-state", "No stored observation is available.");
+      $("#kpis").innerHTML = '<div class="empty-state">Waiting for the first persisted observation.</div>';
+      $("#energy-flow").innerHTML = '<div class="empty-state flow-empty">Waiting for normalized flow data.</div>';
+      $("#flow-note").textContent = missingDirectionalFlowMessage;
+      return;
+    }
     setState("#overview-state", `Stored slot ${localTime(data.slot_utc)}`);
     $("#latest-data").textContent = `Latest stored slot ${localTime(data.slot_utc)}`;
+    const gridState = directionalState(data.grid_import_power_w, data.grid_export_power_w, "Import", "Export");
+    const batteryState = directionalState(data.battery_charge_power_w, data.battery_discharge_power_w, "Charge", "Discharge");
+    const unavailableMetric = '<span class="metric-unavailable">Not available</span>';
     $("#kpis").innerHTML = [
       kpi("Battery SOC", percent(data.battery_soc_percent), energy(data.battery_energy_estimate_kwh)),
       kpi("Solar generation", power(data.pv_power_w), "Latest persisted PV power"),
       kpi("House load", power(data.house_consumption_w), `Baseline ${power(data.baseline_house_consumption_w)}`),
-      kpi("Grid", data.grid_import_power_w > 0 ? `Import ${power(data.grid_import_power_w)}` : data.grid_export_power_w > 0 ? `Export ${power(data.grid_export_power_w)}` : "Idle", `Raw ${power(data.grid_power_w)}`),
-      kpi("Battery flow", data.battery_charge_power_w > 0 ? `Charge ${power(data.battery_charge_power_w)}` : data.battery_discharge_power_w > 0 ? `Discharge ${power(data.battery_discharge_power_w)}` : "Idle", safeText(data.battery_mode)),
+      kpi("Grid", gridState === "Unavailable" ? unavailableMetric : gridState, `Raw ${power(data.grid_power_w)}`),
+      kpi("Battery flow", batteryState === "Unavailable" ? unavailableMetric : batteryState, safeText(data.battery_mode)),
       kpi("Amber buy", price(data.amber_buy_price_aud_per_kwh), "Import price"),
       kpi("Amber sell", price(data.amber_sell_price_aud_per_kwh), "Export price"),
-      kpi("Balance residual", power(data.energy_balance_residual_w), `Flow health ${data.flow_health?.healthy ? "healthy" : "unhealthy"}`),
+      kpi("Balance residual", data.energy_balance_residual_w == null ? unavailableMetric : power(data.energy_balance_residual_w), data.energy_balance_residual_w == null ? "Not available for this slot" : data.flow_health?.healthy == null ? "Flow health not available" : `Flow health ${data.flow_health.healthy ? "healthy" : "unhealthy"}`),
     ].join("");
-    $("#flow-confidence").textContent = `Signs ${safeText(data.sign_convention_confidence)}`;
+    const confidence = data.sign_convention_confidence;
+    const confidenceUnconfirmed = confidence == null || ["unknown", "unconfirmed"].includes(String(confidence).toLowerCase());
+    $("#flow-confidence").textContent = confidenceUnconfirmed ? "Signs unconfirmed" : `Signs ${confidence}`;
+    $("#flow-confidence").className = `badge ${confidenceUnconfirmed ? "badge-muted" : "badge-safe"}`;
     const flows = [
-      ["Grid → Home", data.grid_import_power_w], ["Home → Grid", data.grid_export_power_w],
-      ["Grid → Battery", data.battery_charge_power_w], ["Battery → Home/Grid", data.battery_discharge_power_w],
+      ["Grid → Home", data.grid_import_power_w],
+      ["Home → Grid", data.grid_export_power_w],
+      ["Grid → Battery", data.battery_charge_power_w],
+      ["Battery → Home/Grid", data.battery_discharge_power_w],
     ];
+    const availableFlows = flows.filter(([, value]) => isNumeric(value));
+    const missingFlowCount = flows.length - availableFlows.length;
     $("#energy-flow").innerHTML = `
       <div class="flow-node solar"><strong>${power(data.pv_power_w)}</strong><span>Solar</span></div>
       <div class="flow-node battery"><strong>${percent(data.battery_soc_percent)}</strong><span>Battery</span></div>
       <div class="flow-node home"><strong>${power(data.house_consumption_w)}</strong><span>Home</span></div>
-      <div class="flow-node grid"><strong>${data.grid_import_power_w > 0 ? "Import" : data.grid_export_power_w > 0 ? "Export" : "Idle"}</strong><span>Grid</span></div>
-      <div class="flow-labels">${flows.map(([label, value]) => `<span class="flow-label ${value > 0 ? "" : "inactive"}">${label} · ${power(value)}</span>`).join("")}</div>`;
+      <div class="flow-node grid"><strong>${gridState === "Unavailable" ? "—" : gridState}</strong><span>Grid</span></div>
+      ${availableFlows.length ? `<div class="flow-labels">${availableFlows.map(([label, value]) => `<span class="flow-label ${value > 0 ? "" : "inactive"}">${label} · ${power(value)}</span>`).join("")}</div>` : ""}`;
+    $("#flow-note").textContent = missingFlowCount === flows.length
+      ? missingDirectionalFlowMessage
+      : missingFlowCount
+        ? "Some detailed directional flow values are unavailable for this slot."
+        : "Directions use persisted normalized flow fields.";
   } catch (error) { setState("#overview-state", error.message, "error-state"); }
 }
 
@@ -91,48 +137,72 @@ async function loadReserve() {
   try {
     const data = await request("reserve", "reserve/latest");
     const summary = $("#overview-reserve"); const content = $("#reserve-content");
+    summary.querySelector(".loading-block")?.remove(); summary.querySelector("dl")?.remove(); summary.querySelector(".empty-state")?.remove();
     if (!data.available) {
-      summary.querySelector(".loading-block")?.remove(); summary.insertAdjacentHTML("beforeend", `<div class="empty-state">${safeText(data.message)}</div>`);
-      setState("#reserve-state", data.message); content.innerHTML = '<div class="panel empty-state">No persisted reserve result exists. The dashboard did not run the estimator.</div>'; return;
+      summary.querySelector(".advisory").insertAdjacentHTML("beforebegin", `<div class="empty-state">${safeText(data.message)}</div>`);
+      setState("#reserve-state", data.message); content.innerHTML = '<div class="panel empty-state schema-notice">No persisted reserve result exists. The dashboard did not run the estimator.</div>'; return;
     }
-    const confidence = data.confidence?.level || data.confidence?.confidence || "Unavailable";
-    const summaryBody = definition([["Calculated", localTime(data.calculation_timestamp_utc)], ["Capacity-capped reserve", energy(data.capacity_capped_reserve_kwh)], ["Confidence", confidence], ["Next boundary", localTime(data.horizon_end_utc)]]);
-    summary.querySelector(".loading-block")?.remove(); summary.querySelector("dl")?.remove(); summary.querySelector(".advisory").insertAdjacentHTML("beforebegin", summaryBody);
+    const confidence = data.confidence?.level || data.confidence?.confidence;
+    const tierUsage = Object.entries(data.forecast_tier_counts || {}).map(([key, value]) => `${key}: ${value}`).join(", ");
+    const storedFields = (data.persisted_fields || []).map(field => field.replaceAll("_", " ")).join(", ");
+    const summaryBody = definition([
+      reserveRow("Calculated", data.calculation_timestamp_utc, localTime),
+      reserveRow("Capacity-capped reserve", data.capacity_capped_reserve_kwh, energy),
+      reserveRow("Confidence", confidence),
+      reserveRow("Next boundary", data.horizon_end_utc, localTime),
+    ]);
+    summary.querySelector(".advisory").insertAdjacentHTML("beforebegin", summaryBody);
     setState("#reserve-state", `Persisted reserve forecast run ${data.forecast_run_id}. Only fields stored by the current schema are shown.`);
     const sections = [
-      ["Battery", [["SOC", percent(data.battery_soc_percent)], ["Estimated energy", energy(data.battery_energy_estimate_kwh)], ["Tradable energy", energy(data.potentially_tradable_energy_kwh)]]],
-      ["Demand", [["Expected household", energy(data.expected_household_demand_kwh)], ["Expected EV", energy(data.expected_ev_demand_kwh)], ["State source", data.state_source]]],
-      ["Reserve", [["Gross requirement", energy(data.gross_reserve_requirement_kwh)], ["Capacity-capped", energy(data.capacity_capped_reserve_kwh)], ["Readiness", data.readiness == null ? "Not persisted" : String(data.readiness)]]],
-      ["Opportunity", [["Horizon start", localTime(data.horizon_start_utc)], ["Effective boundary", localTime(data.horizon_end_utc)], ["Opportunity details", "Not persisted"]]],
-      ["Confidence", [["Overall", confidence], ["Tier usage", Object.entries(data.forecast_tier_counts).map(([k,v]) => `${k}: ${v}`).join(", ") || "Unavailable"], ["EV warning", "Independent EV telemetry is not persisted with the reserve result"]]],
-      ["Persistence", [["Stored fields", data.persisted_fields.join(", ")], ["Command issued", "False"], ["Limitation", "Full ReserveEstimate output is not stored in v0.2.x schema"]]],
+      ["Battery", "Battery state was not part of the persisted reserve-result record.", [notStoredRow("SOC"), notStoredRow("Estimated energy"), notStoredRow("Tradable energy")]],
+      ["Demand", "Only demand values recorded with this forecast run can be shown.", [reserveRow("Expected household", data.expected_household_demand_kwh, energy), notStoredRow("Expected EV"), reserveRow("State source", data.state_source)]],
+      ["Reserve", "Stored reserve requirements remain advisory.", [reserveRow("Gross requirement", data.gross_reserve_requirement_kwh, energy), reserveRow("Capacity-capped", data.capacity_capped_reserve_kwh, energy), notStoredRow("Readiness")]],
+      ["Opportunity", "Opportunity reasoning is not stored by the current schema.", [reserveRow("Horizon start", data.horizon_start_utc, localTime), reserveRow("Effective boundary", data.horizon_end_utc, localTime), notStoredRow("Opportunity details")]],
+      ["Confidence", "Independent EV telemetry is not persisted with the reserve result.", [reserveRow("Overall", confidence), reserveRow("Tier usage", tierUsage), notStoredRow("Independent EV telemetry")]],
+      ["Persistence", "The complete ReserveEstimate output is not stored by the current schema.", [reserveRow("Stored fields", storedFields), ["Command issued", "No", "available"], ["Full estimate", null, "not-stored"]]],
     ];
-    content.innerHTML = sections.map(([title, rows]) => `<article class="panel"><h3>${title}</h3>${definition(rows)}</article>`).join("");
+    content.innerHTML = `<aside class="panel schema-notice" role="note"><strong>Stored result coverage</strong><p>This dashboard shows only fields persisted by the current reserve-result schema. Missing stored values are labelled separately from fields the schema does not store.</p></aside>${sections.map(([title, help, rows]) => `<article class="panel reserve-card"><h3>${title}</h3><p class="section-help">${help}</p>${definition(rows)}</article>`).join("")}`;
   } catch (error) { setState("#reserve-state", error.message, "error-state"); }
 }
 
 const chartDefinitions = [
   ["House and baseline", "Power (kW)", [["House", "house_consumption_w"], ["Baseline", "baseline_house_consumption_w"]], v => v / 1000],
   ["Solar generation", "Power (kW)", [["PV", "pv_power_w"]], v => v / 1000],
-  ["Grid import / export", "Power (kW)", [["Import", "grid_import_power_w"], ["Export", "grid_export_power_w"]], v => v / 1000],
-  ["Battery charge / discharge", "Power (kW)", [["Charge", "battery_charge_power_w"], ["Discharge", "battery_discharge_power_w"]], v => v / 1000],
+  ["Grid import / export", "Power (kW)", [["Import", "grid_import_power_w"], ["Export", "grid_export_power_w"]], v => v / 1000, "No grid import/export data is available for this period."],
+  ["Battery charge / discharge", "Power (kW)", [["Charge", "battery_charge_power_w"], ["Discharge", "battery_discharge_power_w"]], v => v / 1000, "No battery charge/discharge data is available for this period."],
   ["Battery state of charge", "Percent", [["SOC", "battery_soc_percent"]], v => v],
   ["Amber prices", "AUD/kWh", [["Buy", "amber_buy_price_aud_per_kwh"], ["Sell", "amber_sell_price_aud_per_kwh"]], v => v],
 ];
 
-function makeChart(title, unit, series, points, transform = v => v) {
+function makeChart(title, unit, series, points, transform = value => value, emptyMessage = "No chartable data is available for this period.") {
   const article = document.createElement("article"); article.className = "panel chart-panel";
-  article.innerHTML = `<h3>${safeText(title)}</h3><p class="muted">${safeText(unit)} · gaps are not interpolated</p><div class="legend">${series.map(([name], i) => `<span class="series-${i}">${safeText(name)}</span>`).join("")}</div>`;
+  const plottedValue = (point, field) => point.has_observation && isNumeric(point[field]) ? transform(point[field]) : null;
+  const chartableSeries = series.map(([name, field], index) => ({ name, field, index })).filter(item => points.some(point => isNumeric(plottedValue(point, item.field))));
+  article.innerHTML = `<h3>${safeText(title)}</h3><p class="muted">${safeText(unit)} · gaps are not interpolated</p>`;
+  const details = document.createElement("details"); details.className = "table-fallback"; details.innerHTML = `<summary>Accessible data table</summary><div class="table-wrap"><table><thead><tr><th>Time</th>${series.map(([name]) => `<th>${safeText(name)}</th>`).join("")}</tr></thead><tbody>${points.length ? points.map(point => `<tr><td>${localTime(point.timestamp_utc)}</td>${series.map(([, field]) => `<td>${plottedValue(point, field) == null ? "Missing" : number(transform(point[field]), 3)}</td>`).join("")}</tr>`).join("") : `<tr><td colspan="${series.length + 1}">No stored rows for this period</td></tr>`}</tbody></table></div>`;
+  if (!chartableSeries.length) {
+    article.classList.add("chart-panel-empty");
+    article.insertAdjacentHTML("beforeend", `<div class="empty-state chart-empty" role="status"><strong>${safeText(emptyMessage)}</strong><span>Historical collection gaps and unavailable normalized flow values are shown as missing.</span></div>`);
+    article.append(details);
+    return article;
+  }
+  article.insertAdjacentHTML("beforeend", `<div class="legend">${chartableSeries.map(item => `<span class="series-${item.index}">${safeText(item.name)}</span>`).join("")}</div>`);
   const svg = document.createElementNS(svgNS, "svg"); svg.setAttribute("class", "chart"); svg.setAttribute("viewBox", "0 0 760 250"); svg.setAttribute("role", "img"); svg.setAttribute("aria-label", `${title} chart with missing observations shown as gaps`);
-  const all = series.flatMap(([, field]) => points.map(p => p[field]).filter(v => v != null).map(transform));
-  if (!all.length) { article.insertAdjacentHTML("beforeend", '<div class="empty-state">No stored series is available for this period.</div>'); return article; }
+  const all = chartableSeries.flatMap(item => points.map(point => plottedValue(point, item.field)).filter(isNumeric));
   let min = Math.min(...all), max = Math.max(...all); if (min === max) { min -= 1; max += 1; }
-  const x = i => 35 + (i / Math.max(points.length - 1, 1)) * 700; const y = v => 220 - ((transform(v) - min) / (max - min)) * 190;
-  [[35, 20, 35, 220], [35, 220, 735, 220]].forEach(coords => { const line = document.createElementNS(svgNS, "line"); ["x1","y1","x2","y2"].forEach((name, i) => line.setAttribute(name, coords[i])); line.setAttribute("class", "axis"); svg.append(line); });
-  series.forEach(([, field], si) => {
+  const x = index => 35 + (index / Math.max(points.length - 1, 1)) * 700; const y = value => 220 - ((value - min) / (max - min)) * 190;
+  [[35, 20, 35, 220], [35, 220, 735, 220]].forEach(coords => { const line = document.createElementNS(svgNS, "line"); ["x1", "y1", "x2", "y2"].forEach((name, index) => line.setAttribute(name, coords[index])); line.setAttribute("class", "axis"); svg.append(line); });
+  chartableSeries.forEach(({ field, index }) => {
     let segment = [];
-    const draw = () => { if (segment.length > 1) { const poly = document.createElementNS(svgNS, "polyline"); poly.setAttribute("points", segment.join(" ")); poly.setAttribute("class", `series-${si}`); svg.append(poly); } segment = []; };
-    points.forEach((point, i) => { const value = point[field]; if (!point.has_observation || value == null) { draw(); return; } segment.push(`${x(i)},${y(value)}`); }); draw();
+    const draw = () => {
+      if (segment.length > 1) {
+        const poly = document.createElementNS(svgNS, "polyline"); poly.setAttribute("points", segment.join(" ")); poly.setAttribute("class", `series-${index}`); svg.append(poly);
+      } else if (segment.length === 1) {
+        const [cx, cy] = segment[0].split(","); const point = document.createElementNS(svgNS, "circle"); point.setAttribute("cx", cx); point.setAttribute("cy", cy); point.setAttribute("r", "3.5"); point.setAttribute("class", `series-${index}`); svg.append(point);
+      }
+      segment = [];
+    };
+    points.forEach((point, pointIndex) => { const value = plottedValue(point, field); if (!isNumeric(value)) { draw(); return; } segment.push(`${x(pointIndex)},${y(value)}`); }); draw();
   });
   const chartWrap = document.createElement("div"); chartWrap.className = "chart-wrap";
   const tooltip = document.createElement("div"); tooltip.className = "chart-tooltip"; tooltip.setAttribute("role", "status");
@@ -141,11 +211,11 @@ function makeChart(title, unit, series, points, transform = v => v) {
     const rect = svg.getBoundingClientRect();
     const index = Math.max(0, Math.min(points.length - 1, Math.round(((event.clientX - rect.left) / rect.width) * (points.length - 1))));
     const point = points[index];
-    tooltip.innerHTML = `<strong>${localTime(point.timestamp_utc)}</strong><br>${series.map(([name, field]) => `${safeText(name)}: ${point[field] == null ? "Missing" : `${number(transform(point[field]), 3)} ${safeText(unit)}`}`).join("<br>")}`;
+    tooltip.innerHTML = `<strong>${localTime(point.timestamp_utc)}</strong><br>${chartableSeries.map(({ name, field }) => `${safeText(name)}: ${plottedValue(point, field) == null ? "Missing" : `${number(transform(point[field]), 3)} ${safeText(unit)}`}`).join("<br>")}`;
     tooltip.style.display = "block"; tooltip.style.left = `${Math.min(event.clientX - rect.left + 12, rect.width - 180)}px`; tooltip.style.top = `${Math.max(event.clientY - rect.top - 20, 0)}px`;
   });
   svg.addEventListener("pointerleave", () => { tooltip.style.display = "none"; });
-  const details = document.createElement("details"); details.className = "table-fallback"; details.innerHTML = `<summary>Accessible data table</summary><div class="table-wrap"><table><thead><tr><th>Time</th>${series.map(([name]) => `<th>${name}</th>`).join("")}</tr></thead><tbody>${points.map(p => `<tr><td>${localTime(p.timestamp_utc)}</td>${series.map(([,field]) => `<td>${p[field] == null ? "Missing" : number(transform(p[field]), 3)}</td>`).join("")}</tr>`).join("")}</tbody></table></div>`; article.append(details);
+  article.append(details);
   return article;
 }
 
@@ -155,7 +225,7 @@ async function loadHistory() {
     const data = await request("history", "timeseries", { range, resolution: "auto" });
     setState("#history-state", `Stored observations from ${localTime(data.requested_start_utc)} to ${localTime(data.requested_end_utc)}.`);
     $("#history-summary").innerHTML = `<span>${data.actual_resolution} resolution</span><span>${data.point_count} chart points</span><span>${number(data.coverage_percent, 1)}% coverage</span><span>${data.missing_slot_count} missing five-minute slots</span>`;
-    const root = $("#history-charts"); chartDefinitions.forEach(def => root.append(makeChart(...def.slice(0, 3), data.points, def[3])));
+    const root = $("#history-charts"); chartDefinitions.forEach(def => root.append(makeChart(def[0], def[1], def[2], data.points, def[3], def[4])));
   } catch (error) { setState("#history-state", error.message, "error-state"); $("#history-charts").innerHTML = `<div class="panel error-state">${safeText(error.message)}</div>`; }
 }
 

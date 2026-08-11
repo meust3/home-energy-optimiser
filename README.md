@@ -12,7 +12,7 @@ collects and analyses data but does not control Home Assistant or energy hardwar
 - **PostgreSQL production:** working and manually validated end to end
 - **Continuous collector:** App v0.2.1 is installed and collecting successfully on
   the Home Assistant OS 18.1 NUC
-- **Ingress dashboard:** v0.3.1 release candidate passes local image validation and
+- **Ingress dashboard:** v0.3.2 release candidate passes local image validation and
   awaits real-NUC installation verification
 - **Reserve forecasting:** working and advisory
 - **Solar and price forecasts:** Solcast and Amber Electric integrated
@@ -23,9 +23,11 @@ PostgreSQL 17 on the Synology NAS is the canonical production source of truth. T
 SQLite-to-PostgreSQL migration and exact validation are complete. Home Assistant
 App v0.2.1 fixed Supervisor options-file permissions while retaining an
 unprivileged application process; it is now the working production collector.
-Version 0.3.0 added a strictly read-only Ingress presentation layer. Version 0.3.1
-corrects App packaging metadata and documentation; the dashboard remains an
-unverified release candidate until installed on that host.
+Version 0.3.0 added a strictly read-only Ingress presentation layer, and version
+0.3.1 corrected App packaging metadata and documentation. Version 0.3.2 makes
+sparse forecast, reserve, and normalized-flow data look intentional rather than
+broken. The dashboard remains unverified on the production host until installation
+testing is complete.
 
 Forecast confidence can remain medium or low while household history is limited,
 and EV charging may still be embedded in historical household demand.
@@ -81,6 +83,11 @@ Unavailable values remain unavailable rather than becoming zero. See
 [dashboard architecture](docs/dashboard.md), [API routes](docs/dashboard_api.md),
 and the [data contract](docs/dashboard_data_contract.md).
 
+Fully missing chart series now show explicit accessible empty states instead of
+blank axes. Partially available charts retain their valid series, reserve fields
+distinguish unavailable run data from values not stored by the current schema, and
+the Overview consolidates missing normalized directions into one concise note.
+
 ## Safety model
 
 Safety is a hard architectural boundary:
@@ -123,7 +130,7 @@ The amd64 Home Assistant App deployment wrapper:
 - presents existing stored data through administrator-only Ingress and a bounded
   GET-only API introduced in v0.3.0.
 
-Version 0.2.1 is the confirmed production collector. Version 0.3.1 is ready for
+Version 0.2.1 is the confirmed production collector. Version 0.3.2 is ready for
 release-candidate review and local image validation but has not been installed on
 the production NUC. See:
 

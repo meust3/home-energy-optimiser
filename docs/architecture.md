@@ -17,7 +17,7 @@ only assemble these reusable components.
 
 The production deployment is Home Assistant App v0.2.1 (formerly called an add-on)
 on the amd64 Home Assistant OS 18.1 NUC, where it is collecting successfully.
-Version 0.3.0 is a dashboard release candidate that has not yet been installed or
+Version 0.3.2 is a dashboard release candidate that has not yet been installed or
 verified on that host. Supervisor injects `SUPERVISOR_TOKEN`; the App uses it only as a
 bearer token for `http://supervisor/core/api`. The existing GET-only client and
 collector are unchanged. Observations are written over the LAN to the external

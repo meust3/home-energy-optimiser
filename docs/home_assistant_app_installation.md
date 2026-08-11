@@ -1,8 +1,9 @@
 # Home Assistant App installation
 
 Version `0.2.1` is installed and collecting successfully on Home Assistant OS 18.1.
-Version `0.3.0` adds the experimental administrator-only Ingress dashboard and is a
-release candidate until the image and update are verified on that host.
+Version `0.3.2` packages the experimental administrator-only Ingress dashboard with
+improved sparse-data presentation and is a release candidate until the image and
+update are verified on that host.
 
 ## Publish and install
 
@@ -12,7 +13,7 @@ The repository root contains `repository.yaml` and one App folder,
 1. After review, commit and privately push the release-candidate changes, then
    validate a full image build.
 2. Only after that validation, create the immutable tag matching `config.yaml` and
-   Docker `APP_SOURCE_REF` (`v0.3.0`).
+   Docker `APP_SOURCE_REF` (`v0.3.2`).
 3. In Home Assistant, open **Settings > Apps > App store**.
 4. Open the repository menu, choose **Repositories**, and add
    `https://github.com/meust3/home-energy-optimiser`.
@@ -77,24 +78,24 @@ The Dockerfile downloads the canonical application source because Supervisor
 builds with the App folder as its context; this avoids duplicating collector code
 inside the deployment wrapper.
 
-For the installed v0.2.1 App, publish and apply the reviewed v0.3.0 release candidate
+For the installed v0.2.1 App, publish and apply the reviewed v0.3.2 release candidate
 as follows:
 
 1. Create a Home Assistant backup containing the v0.2.1 App and its configuration.
    This is an App rollback artifact, not a PostgreSQL backup.
 2. Push the reviewed commit, verify an amd64 image from its commit SHA, then create
-   and push tag `v0.3.0` only when that validation passes. Repeat the image build
+   and push tag `v0.3.2` only when that validation passes. Repeat the image build
    from that tag.
 3. In **Settings > Apps > App store**, choose **Check for updates** or **Update
    information** from the repository menu.
-4. Open **Home Energy Optimiser**, confirm version `0.3.0` is offered, and select
+4. Open **Home Energy Optimiser**, confirm version `0.3.2` is offered, and select
    **Update**. Preserve the existing App configuration.
 5. Start the App if Supervisor does not start it automatically, then verify the
    startup and first collection using the checklist above.
 
 ## Roll back to v0.2.1
 
-If v0.3.0 fails before real-host validation, stop it and restore the pre-update Home
+If v0.3.2 fails before real-host validation, stop it and restore the pre-update Home
 Assistant backup containing App v0.2.1 and its options. If that backup is unavailable,
 publish the immutable `v0.2.1` source through a temporary private/local App repository
 and reinstall it with the preserved options. PostgreSQL remains external and is not

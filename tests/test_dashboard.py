@@ -265,7 +265,7 @@ class _FakeService:
         from energy_optimizer.dashboard_api import StatusResponse
 
         return StatusResponse(
-            app_version="0.3.0",
+            app_version="0.3.2",
             overall_status="healthy",
             collector_status="healthy",
             database_status="healthy",
@@ -311,14 +311,14 @@ def test_web_shell_static_nested_ingress_api_and_security_headers():
         assert status == 200
         html = body.decode()
         assert f'<base href="{prefix}">' in html
-        assert 'href="static/app.css?v=0.3.0"' in html
+        assert 'href="static/app.css?v=0.3.2"' in html
         assert "Advisory only. No command was issued." in html
         assert "Content-Security-Policy" in headers
         assert "X-Frame-Options" not in headers
         status, _, css = _request(
             server,
             "GET",
-            prefix + "static/app.css?v=0.3.0",
+            prefix + "static/app.css?v=0.3.2",
             {"X-Ingress-Path": prefix},
         )
         assert status == 200
@@ -387,3 +387,62 @@ def test_frontend_has_no_external_assets_or_control_actions():
         assert section in html
     assert "prefers-reduced-motion" in combined
     assert "Accessible data table" in javascript
+
+
+def test_forecast_metadata_uses_stable_readable_key_value_layout():
+    directory = Path("src/energy_optimizer/dashboard_static")
+    html = (directory / "index.html").read_text(encoding="utf-8")
+    javascript = (directory / "app.js").read_text(encoding="utf-8")
+    css = (directory / "app.css").read_text(encoding="utf-8")
+    assert '<div id="forecast-run-meta" class="forecast-meta"></div>' in html
+    assert '<div id="forecast-run-meta" class="definition-grid">' not in html
+    assert ".forecast-meta .definition-grid" in css
+    assert "overflow-wrap: break-word" in css
+    assert "word-break: normal" in css
+    assert "overflow-wrap: anywhere" not in css
+    assert '["Created", localTime(data.created_at_utc)]' in javascript
+    assert '["Model", data.model_version]' in javascript
+
+
+def test_fully_missing_and_mixed_chart_series_have_intentional_rendering():
+    javascript = Path("src/energy_optimizer/dashboard_static/app.js").read_text(
+        encoding="utf-8"
+    )
+    assert "No grid import/export data is available for this period." in javascript
+    assert (
+        "No battery charge/discharge data is available for this period." in javascript
+    )
+    assert "if (!chartableSeries.length)" in javascript
+    assert 'class="empty-state chart-empty" role="status"' in javascript
+    assert "chartableSeries.forEach" in javascript
+    assert "chartableSeries.map" in javascript
+    assert "segment.length === 1" in javascript
+    assert 'createElementNS(svgNS, "circle")' in javascript
+    assert "Historical collection gaps" in javascript
+    assert javascript.count("article.append(details)") == 2
+
+
+def test_reserve_states_are_explicit_and_advisory_remains_visible():
+    directory = Path("src/energy_optimizer/dashboard_static")
+    html = (directory / "index.html").read_text(encoding="utf-8")
+    javascript = (directory / "app.js").read_text(encoding="utf-8")
+    assert "Advisory only. No command was issued." in html
+    assert '"not-stored": "Not stored"' in javascript
+    assert 'unavailable: "Unavailable in this run"' in javascript
+    assert '"not-calculated": "Not calculated"' in javascript
+    assert "This dashboard shows only fields persisted" in javascript
+    assert 'notStoredRow("Opportunity details")' in javascript
+    assert 'reserveRow("Overall", confidence)' in javascript
+
+
+def test_missing_directional_flows_use_one_concise_fallback():
+    javascript = Path("src/energy_optimizer/dashboard_static/app.js").read_text(
+        encoding="utf-8"
+    )
+    fallback = "Detailed directional flow breakdown is unavailable for this slot."
+    assert javascript.count(fallback) == 1
+    assert "textContent = missingDirectionalFlowMessage" in javascript
+    assert "availableFlows.map" in javascript
+    assert "flows.map" not in javascript
+    assert "directionalState(data.grid_import_power_w" in javascript
+    assert "data.energy_balance_residual_w == null" in javascript

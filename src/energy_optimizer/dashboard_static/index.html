@@ -6,8 +6,8 @@
   <meta name="color-scheme" content="light dark">
   <base href="__INGRESS_BASE_PATH__">
   <title>Energy Optimiser</title>
-  <link rel="stylesheet" href="static/app.css?v=0.3.0">
-  <script type="module" src="static/app.js?v=0.3.0"></script>
+  <link rel="stylesheet" href="static/app.css?v=0.3.2">
+  <script type="module" src="static/app.js?v=0.3.2"></script>
 </head>
 <body>
   <a class="skip-link" href="#main">Skip to dashboard content</a>
@@ -48,7 +48,7 @@
         <article class="panel flow-panel">
           <div class="panel-heading"><div><p class="eyebrow">Latest five-minute slot</p><h3>Energy flow</h3></div><span id="flow-confidence" class="badge">Unconfirmed</span></div>
           <div id="energy-flow" class="energy-flow" aria-label="Latest stored energy flow"></div>
-          <p class="muted">Directions use persisted normalized flow fields. Missing values remain unavailable.</p>
+          <p id="flow-note" class="flow-note muted" role="note"></p>
         </article>
         <article class="panel" id="overview-reserve">
           <div class="panel-heading"><div><p class="eyebrow">Existing result</p><h3>Reserve summary</h3></div></div>
@@ -78,9 +78,9 @@
       <div class="section-heading"><div><p class="eyebrow">Persisted runs only</p><h2 id="forecasts-title">Forecasts</h2></div></div>
       <p id="forecast-state" class="state-message" role="status">Select this tab to load persisted forecasts.</p>
       <div class="forecast-layout">
-        <article class="panel">
+        <article class="panel forecast-meta-card">
           <label>Forecast run<select id="forecast-run"><option value="">Loading…</option></select></label>
-          <div id="forecast-run-meta" class="definition-grid"></div>
+          <div id="forecast-run-meta" class="forecast-meta"></div>
         </article>
         <div id="forecast-comparison" class="panel chart-panel"></div>
       </div>

@@ -1,6 +1,6 @@
 # Read-only Ingress dashboard
 
-Version 0.3.0 is an experimental release candidate that presents existing stored
+Version 0.3.2 is an experimental release candidate that presents existing stored
 energy data through Home Assistant Ingress. It has not yet been installed or
 verified on the production NUC. Home Assistant App v0.2.1 remains the confirmed
 working collector.
@@ -36,13 +36,16 @@ Ingress origin.
 ## Pages and refresh
 
 - **Overview** shows collector/PostgreSQL/Home Assistant state, latest stored KPIs,
-  normalized flow directions, and a limited persisted reserve summary.
+  normalized flow directions, and a limited persisted reserve summary. Missing
+  normalized directions produce one explanation instead of repeated labels.
 - **History** charts house/baseline, PV, grid, battery, SOC, and Amber prices over
-  6 hours through 30 days. Missing buckets remain gaps.
+  6 hours through 30 days. Missing buckets remain gaps, wholly missing series use
+  explicit empty states, and partially available series remain chartable.
 - **Forecasts** selects existing persisted runs and compares their stored expected
   values with observations at request time without a database write.
 - **Reserve** shows only fields currently persisted with the latest
-  `reserve_estimator` run and clearly labels unavailable fields.
+  `reserve_estimator` run and distinguishes unavailable run values from fields not
+  stored by the current schema.
 - **Data Quality** summarizes coverage, gaps, domain health, baseline eligibility,
   forecast tiers, EV limitations, sign confidence, and balance residuals.
 
@@ -68,4 +71,6 @@ System fonts, semantic sections/headings, keyboard-operable navigation and selec
 high-contrast status text plus shapes, light/dark color schemes, narrow-screen
 layouts, and reduced-motion preferences support desktop, tablet, and Home Assistant
 mobile views. Charts include text legends, units, pointer tooltips, missing-gap
-semantics, and expandable data tables.
+semantics, explicit screen-reader-readable empty states, and expandable data
+tables. Metadata grids wrap long values by words and collapse to stacked label/value
+pairs on narrow screens.

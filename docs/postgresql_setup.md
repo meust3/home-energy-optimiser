@@ -2,7 +2,7 @@
 
 The production `home_energy` cutover is complete and has been manually validated
 with a fresh live observation. Home Assistant App v0.2.1 is the active 24/7
-collector. The v0.3.0 Ingress dashboard remains an uninstalled release candidate.
+collector. The v0.3.2 Ingress dashboard remains an uninstalled release candidate.
 
 Recommended Synology layout:
 

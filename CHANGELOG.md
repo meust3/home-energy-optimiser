@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.3.2
+
+- Fixed forecast metadata collapsing into character-by-character vertical text by
+  using a stable responsive key/value layout and natural word wrapping.
+- Added explicit accessible empty states for wholly missing chart series while
+  retaining valid series, single-point markers, and expandable data tables.
+- Distinguished reserve fields that are unavailable in a run from fields not
+  stored by the current schema, with a clearer schema-coverage notice.
+- Replaced repeated unavailable directional-flow pills with one concise summary
+  and made unavailable live metrics informational rather than dominant.
+- Standardized dashboard spacing, card sizing, table overflow, and desktop,
+  tablet, and narrow-screen layouts.
+- Made no API, collector, database, forecast, reserve-estimation, security,
+  Ingress, Home Assistant service, or device-control changes.
+
 ## 0.3.1
 
 - Added the Home Assistant App's detailed App-page documentation and user-facing
@@ -27,8 +42,8 @@
 - Made no household-demand, confidence-tier, reserve-estimation, database-schema,
   Home Assistant entity, forecast-worker, scheduler, or device-control changes.
 
-Version 0.3.0 was not installed on the production Home Assistant OS NUC. Version
-0.3.1 supersedes its App packaging metadata and remains unverified on that host.
+Versions 0.3.0 and 0.3.1 were not installed on the production Home Assistant OS
+NUC. Version 0.3.2 supersedes their App package and remains unverified on that host.
 
 ## 0.2.1
 

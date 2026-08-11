@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.3.2
+
+- Fixed forecast metadata wrapping and introduced a stable responsive key/value
+  layout.
+- Added intentional empty states for missing grid and battery chart data while
+  retaining accessible tables and any valid series.
+- Distinguished reserve fields that are unavailable in a run from fields not
+  stored by the current schema.
+- Replaced repeated unavailable directional-flow labels with one concise note and
+  improved card, table, desktop, tablet, and narrow-screen layouts.
+- Retained local HTML, CSS, JavaScript, and SVG assets with no analytics or
+  external frontend dependencies.
+- Made no API, collector, database, forecast, reserve-estimation, security,
+  Ingress, Home Assistant service, or device-control changes.
+
 ## 0.3.1
 
 - Added detailed App-page documentation and an App-local user-facing changelog.
