@@ -370,7 +370,7 @@ class _FakeService:
         from energy_optimizer.dashboard_api import StatusResponse
 
         return StatusResponse(
-            app_version="0.5.0",
+            app_version="0.5.1",
             overall_status="healthy",
             collector_status="healthy",
             database_status="healthy",
@@ -458,14 +458,14 @@ def test_web_shell_static_nested_ingress_api_and_security_headers():
         assert status == 200
         html = body.decode()
         assert f'<base href="{prefix}">' in html
-        assert 'href="static/app.css?v=0.5.0"' in html
+        assert 'href="static/app.css?v=0.5.1"' in html
         assert "Advisory only. No command was issued." in html
         assert "Content-Security-Policy" in headers
         assert "X-Frame-Options" not in headers
         status, _, css = _request(
             server,
             "GET",
-            prefix + "static/app.css?v=0.5.0",
+            prefix + "static/app.css?v=0.5.1",
             {"X-Ingress-Path": prefix},
         )
         assert status == 200

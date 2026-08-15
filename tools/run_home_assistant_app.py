@@ -84,6 +84,10 @@ def _run(options) -> int:
         sign_convention_supporting_samples=options.sign_convention_supporting_samples,
         balance_tolerance_w=options.balance_tolerance_w,
     )
+    health.forecast_point_retention_days = options.forecast_point_retention_days
+    health.forecast_run_retention_days = options.forecast_run_retention_days
+    health.retention_enabled = options.retention_enabled
+    health.demand_training_policy = options.demand_training_policy
     server, thread = start_dashboard_server(
         health, database_url=environment["DATABASE_URL"], port=HEALTH_PORT
     )

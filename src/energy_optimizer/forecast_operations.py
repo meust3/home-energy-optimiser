@@ -12,11 +12,17 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 from energy_optimizer.demand_forecast import forecast_household_demand
+from energy_optimizer.forecast_alignment import (
+    FULL_FIVE_MINUTE_ALIGNMENT,
+    operational_forecast_window,
+)
+from energy_optimizer.forecast_calibration import CURRENT_FORECAST_MODEL_VERSION
+from energy_optimizer.forecast_retention import run_forecast_retention
 from energy_optimizer.models import CollectorConfig, ForecastPoint, ForecastRun
 from energy_optimizer.reserve import estimate_battery_reserve
 
 LOGGER = logging.getLogger(__name__)
-FORECAST_MODEL_VERSION = "household-demand-hierarchy-v1"
+FORECAST_MODEL_VERSION = CURRENT_FORECAST_MODEL_VERSION
 RESERVE_MODEL_VERSION = "reserve-estimator-v1"
 
 
@@ -85,8 +91,10 @@ class ForecastCoordinator:
         self.clock = clock
         self.monotonic = monotonic
         self._active = threading.Lock()
+        self._stop_requested: Callable[[], bool] = lambda: False
 
     def run(self, stop_event: threading.Event) -> None:
+        self._stop_requested = stop_event.is_set
         if not self.config.enabled:
             self.health.configure_forecast_scheduler(enabled=False, next_run=None)
             return
@@ -189,6 +197,9 @@ class ForecastCoordinator:
                     source="history",
                     as_of=started_at,
                 )
+                estimate.operational_context["linked_forecast_reconciliation"] = (
+                    build_reserve_forecast_reconciliation(estimate, forecast_run)
+                )
                 reserve_run_id = repository.save_reserve_run(
                     estimate,
                     forecast_run_id=forecast_run_id,
@@ -208,6 +219,32 @@ class ForecastCoordinator:
                 forecast_point_count=len(forecast_run.points),
                 metadata={"scored_point_count": scored},
             )
+            repository.release_forecast_operation_lock(durable_lock)
+            durable_lock = None
+            if self.collector_config.retention_enabled:
+                try:
+                    retention = run_forecast_retention(
+                        repository,
+                        now=finished,
+                        point_retention_days=(
+                            self.collector_config.forecast_point_retention_days
+                        ),
+                        run_retention_days=(
+                            self.collector_config.forecast_run_retention_days
+                        ),
+                        runtime_guard=lambda: self._check_deadline(started_monotonic),
+                        should_stop=self._stop_requested,
+                    )
+                    LOGGER.info(
+                        "Forecast retention status=%s points_deleted=%s",
+                        retention["status"],
+                        retention.get("points_deleted", 0),
+                    )
+                except Exception:
+                    LOGGER.error(
+                        "Forecast retention failed; forecast and collection remain "
+                        "active"
+                    )
             self.health.record_forecast_success(started_at)
             return True
         except Exception as exc:
@@ -236,8 +273,11 @@ class ForecastCoordinator:
             self._active.release()
 
     def _build_forecast(self, repository: Any, created_at: datetime) -> ForecastRun:
-        local_start = created_at.astimezone(ZoneInfo(self.config.timezone))
-        local_end = local_start + timedelta(hours=self.config.horizon_hours)
+        window = operational_forecast_window(
+            created_at, horizon_hours=self.config.horizon_hours
+        )
+        local_start = window.start_utc.astimezone(ZoneInfo(self.config.timezone))
+        local_end = window.end_utc.astimezone(ZoneInfo(self.config.timezone))
         rows = repository.reserve_history_rows_read_only(
             days=self.collector_config.reserve_history_days,
             now=created_at,
@@ -271,6 +311,7 @@ class ForecastCoordinator:
             weak_tier_share_ceiling=(
                 self.collector_config.demand_weak_tier_share_ceiling
             ),
+            training_policy=self.collector_config.demand_training_policy,
         )
         points = [
             ForecastPoint(
@@ -303,6 +344,16 @@ class ForecastCoordinator:
             model_version=FORECAST_MODEL_VERSION,
             metadata={
                 "run_kind": "genuine_out_of_sample",
+                "alignment_version": FULL_FIVE_MINUTE_ALIGNMENT,
+                "training_policy": self.collector_config.demand_training_policy,
+                "training_cohort_counts": (demand.diagnostics.training_cohort_counts),
+                "training_cohort_shares": {
+                    "verified": demand.diagnostics.verified_share,
+                    "unverified": demand.diagnostics.unverified_share,
+                },
+                "contamination_risk": (
+                    demand.diagnostics.unidentified_ev_contamination_risk
+                ),
                 "configuration": {
                     "horizon_hours": self.config.horizon_hours,
                     "history_days": self.collector_config.reserve_history_days,
@@ -325,3 +376,66 @@ def _safe_failure(exc: Exception) -> str:
     if isinstance(exc, TimeoutError):
         return "Configured forecast runtime exceeded"
     return f"{type(exc).__name__} during forecast operation"[:500]
+
+
+def build_reserve_forecast_reconciliation(
+    estimate: Any, forecast_run: ForecastRun
+) -> dict[str, Any]:
+    """Explain how reserve demand spans the linked forecast's aligned start."""
+    evaluation = estimate.evaluation_time_local.astimezone(UTC)
+    reserve_end = estimate.forecast_end_local.astimezone(UTC)
+    linked_start = forecast_run.horizon_start_utc.astimezone(UTC)
+    linked_end = forecast_run.horizon_end_utc.astimezone(UTC)
+    linked_intervals = {
+        (
+            point.period_start_utc.astimezone(UTC),
+            point.period_end_utc.astimezone(UTC),
+        ): point
+        for point in forecast_run.points
+    }
+    gap_end = min(linked_start, reserve_end)
+    gap_energy = 0.0
+    shared_reserve_energy = 0.0
+    shared_linked_energy = 0.0
+    shared_count = 0
+    for slot in estimate.demand_forecast.slot_decisions:
+        start = slot.period_start_local.astimezone(UTC)
+        end = slot.period_end_local.astimezone(UTC)
+        if end <= gap_end:
+            gap_energy += slot.expected_energy_kwh
+        linked_point = linked_intervals.get((start, end))
+        if linked_point is not None:
+            shared_count += 1
+            shared_reserve_energy += slot.expected_energy_kwh
+            shared_linked_energy += float(linked_point.expected_value) / 12_000
+    total = float(estimate.demand_forecast.expected_energy_kwh)
+    boundary_remainder = max(total - gap_energy - shared_reserve_energy, 0.0)
+    reconciled = gap_energy + shared_reserve_energy + boundary_remainder
+    return {
+        "semantics": "reserve_starts_at_evaluation_with_partial_boundaries",
+        "evaluation_time_utc": evaluation.isoformat(),
+        "reserve_horizon_start_utc": (
+            estimate.forecast_start_local.astimezone(UTC).isoformat()
+        ),
+        "reserve_horizon_end_utc": reserve_end.isoformat(),
+        "linked_forecast_start_utc": linked_start.isoformat(),
+        "linked_forecast_end_utc": linked_end.isoformat(),
+        "history_as_of_utc": evaluation.isoformat(),
+        "alignment_gap_minutes": round(
+            max((gap_end - evaluation).total_seconds() / 60, 0.0), 6
+        ),
+        "alignment_gap_demand_kwh": round(gap_energy, 6),
+        "shared_full_interval_count": shared_count,
+        "shared_full_interval_reserve_demand_kwh": round(shared_reserve_energy, 6),
+        "shared_full_interval_linked_demand_kwh": round(shared_linked_energy, 6),
+        "reserve_only_boundary_demand_kwh": round(boundary_remainder, 6),
+        "reserve_expected_household_demand_kwh": round(total, 6),
+        "reconciled_reserve_demand_kwh": round(reconciled, 6),
+        "reconciliation_error_kwh": round(total - reconciled, 9),
+        "linked_operational_point_count": len(forecast_run.points),
+        "linked_operational_points_are_full_five_minutes": all(
+            point.period_end_utc - point.period_start_utc == timedelta(minutes=5)
+            for point in forecast_run.points
+        ),
+        "linked_forecast_demand_is_not_added_to_reserve_total": True,
+    }

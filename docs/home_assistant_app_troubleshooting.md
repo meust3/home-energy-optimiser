@@ -1,5 +1,18 @@
 # Home Assistant App troubleshooting
 
+Calibration `poor` or `insufficient_data` is not a watchdog failure. Confirm a new
+run has 288 points, `full_5m_v1`, and a scoreable first slot. If startup fails after
+migration, keep the additive schema and use reviewed v0.5.1 Windows code with
+exactly one collector while troubleshooting.
+
+After updating an existing v0.5.0 App, explicitly save
+`demand_training_policy: verified_preferred` and `retention_enabled: false` in the
+configuration UI. Missing keys are safely supplied with those runtime defaults,
+and Supervisor's effective options merge new manifest defaults beneath persisted
+overrides. The production configuration should still record both values explicitly.
+Current calibration must show the exact full-alignment model/policy cohort;
+pre-v0.5.1 metrics are comparison only.
+
 Forecast warnings are independent from collector/database/Home Assistant health.
 Inspect the GET-only Forecast Operations view for the latest bounded failure class.
 Do not add a cron retry or start another collector. If the v0.5.0 App fails after

@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Supervisor source remains root-owned; v0.5.1 still copies before dropping privilege.
 readonly source_options="/data/options.json"
 readonly runtime_dir="/run/home-energy-optimiser"
 readonly runtime_options="${runtime_dir}/options.json"

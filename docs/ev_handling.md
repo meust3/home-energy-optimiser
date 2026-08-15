@@ -1,5 +1,10 @@
 # EV handling
 
+v0.5.1 classifies training provenance per sample and adds a read-only candidate
+detector. A candidate is not an EV label and cannot change eligibility. See
+[training_data_provenance.md](training_data_provenance.md) and
+[historical_ev_review.md](historical_ev_review.md).
+
 Read-only vehicle-cloud telemetry is operational from v0.4.0 while direct charger
 AC power remains
 unavailable. Until AC power is integrated and validated, EV energy separation is

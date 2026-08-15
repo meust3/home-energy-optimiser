@@ -1,5 +1,9 @@
 # Phase 1 architecture
 
+v0.5.1 keeps one process, collector, and Forecast Operations coordinator.
+Calibration/candidate comparison are bounded read-only services/tools; retention
+is a daily coordinator phase. No executor or control layer is added.
+
 ## v0.5.0 advisory operations
 
 The existing App process now has three threads of responsibility: the primary

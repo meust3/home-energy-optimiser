@@ -1,5 +1,10 @@
 # Read-only Ingress dashboard
 
+The v0.5.1 Calibration tab compares the documented benchmark with aligned runs and
+explains heuristic thresholds. Data Quality adds residual percentiles/anomalies,
+weather limitations, and forecast-storage health. Analytical quality never changes
+watchdog process health.
+
 Version 0.5.0 adds three read-only presentations: Forecast Operations status,
 Forecast Accuracy (expected/actual, MAE, bias, RMSE, coverage and grouped metrics),
 and complete Reserve History. Empty and sparse states remain explicit. There are no

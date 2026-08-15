@@ -208,6 +208,30 @@ def test_forecast_options_default_disabled_and_validate_bounds():
         _options(forecast_interval_minutes=30, forecast_alignment_minutes=20)
 
 
+def test_existing_v050_options_receive_safe_v051_runtime_defaults(tmp_path):
+    """Supervisor may preserve old JSON; missing fields still fail safe in App code."""
+    path = tmp_path / "v050-options.json"
+    path.write_text(
+        json.dumps(
+            {
+                "db_host": "db.example.invalid",
+                "db_port": 55432,
+                "db_name": "home_energy",
+                "db_user": "test_user",
+                "db_password": "test-password",
+                "forecast_operations_enabled": True,
+            }
+        ),
+        encoding="utf-8",
+    )
+    options = load_app_options(path)
+    assert options.demand_training_policy == "verified_preferred"
+    assert options.retention_enabled is False
+    environment = app_environment(options, supervisor_token="example-token")
+    assert environment["DEMAND_TRAINING_POLICY"] == "verified_preferred"
+    assert environment["RETENTION_ENABLED"] == "false"
+
+
 def test_postgresql_url_encodes_credentials():
     url = postgresql_url(_options())
     assert "test_user:test-password%40%3A%2F@db.example.invalid:55432" in url
@@ -239,6 +263,11 @@ def test_app_environment_uses_supervisor_proxy_and_never_sqlite():
     assert environment["FORECAST_ALIGNMENT_MINUTES"] == "30"
     assert environment["FORECAST_SCORING_DELAY_MINUTES"] == "10"
     assert environment["FORECAST_MAX_RUNTIME_SECONDS"] == "120"
+    assert environment["DEMAND_TRAINING_POLICY"] == "verified_preferred"
+    assert environment["FORECAST_POINT_RETENTION_DAYS"] == "90"
+    assert environment["FORECAST_RUN_RETENTION_DAYS"] == "365"
+    assert environment["RETENTION_ENABLED"] == "false"
+    assert environment["CALIBRATION_WINDOW_DAYS"] == "30"
     assert environment["RESERVE_SNAPSHOT_ENABLED"] == "true"
 
 
@@ -520,11 +549,11 @@ def test_app_patch_versions_are_consistent():
     manifest = Path("home_energy_optimiser/config.yaml").read_text(encoding="utf-8")
     dockerfile = Path("home_energy_optimiser/Dockerfile").read_text(encoding="utf-8")
     project = Path("pyproject.toml").read_text(encoding="utf-8")
-    assert APP_VERSION == "0.5.0"
-    assert 'version: "0.5.0"' in manifest
-    assert "ARG BUILD_VERSION=0.5.0" in dockerfile
-    assert "ARG APP_SOURCE_REF=v0.5.0" in dockerfile
-    assert 'version = "0.5.0"' in project
+    assert APP_VERSION == "0.5.1"
+    assert 'version: "0.5.1"' in manifest
+    assert "ARG BUILD_VERSION=0.5.1" in dockerfile
+    assert "ARG APP_SOURCE_REF=v0.5.1" in dockerfile
+    assert 'version = "0.5.1"' in project
 
 
 def test_app_launcher_execs_existing_collector_without_restart_loop():
@@ -618,7 +647,7 @@ def test_app_page_documentation_and_changelog_are_packaged():
     assert changelog.is_file()
     assert documentation.is_file()
     changelog_text = changelog.read_text(encoding="utf-8")
-    assert "## 0.5.0" in changelog_text
+    assert "## 0.5.1" in changelog_text
     assert "## 0.4.1" in changelog_text
     assert "## 0.4.0" in changelog_text
     assert "## 0.3.1" in changelog_text

@@ -1,5 +1,33 @@
 # Changelog
 
+## 0.5.1
+
+- Fixed scheduled 24-hour forecasts to start on the first full five-minute slot,
+  persist `full_5m_v1` alignment provenance, and contain exactly 288 points.
+- Added canonical aligned-slot scoring, typed sample-level EV training cohorts,
+  deterministic `verified_preferred` selection, and explicit mixed-history risk.
+- Added read-only historical EV candidate detection and evaluation-only mean,
+  median, trimmed-mean, and winsorized-mean comparison. Production Tier 2 remains
+  the arithmetic mean and reserve mathematics are unchanged.
+- Added aligned-run calibration metrics/status, reserve calibration warnings,
+  residual anomaly visibility, entity-specific staleness states, and dashboard
+  calibration/storage views.
+- Added bounded tiered retention, permanent daily accuracy rollups, and audited
+  daily maintenance. Retention is disabled by default.
+- Hardened retention to six independently committed 5,000-row detail batches per
+  daily invocation (30,000 rows/table/day), with capacity and backlog diagnostics.
+- Isolated Current model calibration by forecast type, model, alignment, and
+  training policy; legacy scores remain a separate displayed baseline.
+- Persisted scheduled reserve reconciliation for the partial creation-to-aligned-
+  start interval without changing reserve or opportunity mathematics.
+- Verified existing v0.5.0 option files resolve missing training policy to
+  `verified_preferred` and missing retention enablement to `false`; production must
+  save both explicitly.
+- Added revision `20260813_01`; its physical downgrade removes only v0.5.1
+  rollup/maintenance data. Production is already at this revision, so the v0.5.1
+  App deployment requires no schema migration. No startup migration or control
+  path was added.
+
 ## 0.5.0
 
 - Added an opt-in, single-threaded in-process forecast coordinator. It creates
@@ -115,7 +143,7 @@
   Home Assistant entity, forecast-worker, scheduler, or device-control changes.
 
 Versions 0.3.0 and 0.3.1 were not installed on the production Home Assistant OS
-NUC. Version 0.3.2 supersedes their App package and remains unverified on that host.
+NUC. Version 0.3.2 subsequently superseded their App package.
 
 ## 0.2.1
 

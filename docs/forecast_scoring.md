@@ -1,5 +1,11 @@
 # Forecast scoring
 
+For `full_5m_v1`, actual matching uses the healthy observation whose `slot_utc`
+equals the point start. Missing values remain missing and are never interpolated
+or changed to zero. Missing metadata means `legacy_execution_time`; historical
+interval-range matching remains for those immutable runs. Scoring, comparison,
+charts, and calibration share this provenance-aware rule.
+
 Scheduled baseline points are eligible for scoring only after their interval has
 ended and the configured delay has elapsed. Scoring never modifies expected, lower,
 upper, unit, horizon or point metadata.

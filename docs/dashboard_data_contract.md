@@ -1,5 +1,18 @@
 # Dashboard data contract
 
+v0.5.1 distinguishes `available_and_fresh`, `available_but_unchanged`,
+`source_update_stale`, `unavailable`, `unknown`, `missing`, and `invalid` entity
+states. SOC has a bounded unchanged grace period; zero PV may remain unchanged;
+active instantaneous power still requires source updates. Unknown/unavailable and
+missing required entities remain failures. `last_updated` is used for source
+freshness; `last_changed` alone is not proof that an entity stopped reporting.
+
+Data Quality separates old gap totals from current collector/process health and
+never reconstructs gaps. Weather absence is informational and temperature model
+adjustment is explicitly disabled. Residual median, P95, maximum, tolerance count,
+and recent anomaly context are diagnostic only; the sign equation and raw rows are
+not changed.
+
 Scheduled accuracy distinguishes `actual_available`, `health_eligible`, and a
 nullable/missing reason; null is never serialized as zero. Reserve history preserves
 nullable tradable energy and always exposes `command_issued: false`. Scheduler

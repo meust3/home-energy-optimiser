@@ -29,6 +29,7 @@ SHELL_ROUTES = {
     "/history",
     "/forecasts",
     "/forecast-operations",
+    "/calibration",
     "/reserve",
     "/data-quality",
 }
@@ -258,6 +259,14 @@ def make_handler(
                         maximum=2_147_483_647,
                     ),
                 )
+            elif route == "/api/v1/forecast-calibration":
+                self._require_params(params, {"range"})
+                response = service.forecast_calibration(
+                    range_name=self._single(params, "range") or "30d"
+                )
+            elif route == "/api/v1/forecast-storage":
+                self._require_params(params, set())
+                response = service.forecast_storage()
             elif route == "/api/v1/reserve-history":
                 self._require_params(params, {"range"})
                 response = service.reserve_history(

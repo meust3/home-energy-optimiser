@@ -28,16 +28,13 @@ migration and an end-to-end live observation write have been manually validated.
 SQLite remains supported for local/offline development and as the retained final
 pre-migration backup; it is not a production fallback.
 
-Home Assistant App v0.2.1 is installed and collecting successfully on the amd64
-Home Assistant OS 18.1 NUC. Version 0.3.2 publishes the experimental
-administrator-only Ingress dashboard and remains unverified on that host. Version
-0.4.0 is operational on Home Assistant OS with optional read-only vehicle-cloud
-telemetry and PostgreSQL revision `20260811_01`.
-Version 0.5.0 is an unreleased release candidate for strictly advisory forecast
-operations and reserve audit. Its opt-in coordinator must remain one lightweight
-thread in the existing process, preserve collector priority, create no second
-collector or cron service, and expose no action endpoint. Forecast scoring and
-reserve persistence are analytical database writes only; hardware remains read-only.
+Home Assistant App v0.5.0 is the current production release on the amd64 Home
+Assistant OS 18.1 NUC. It provides strictly advisory forecast operations and
+reserve audit against PostgreSQL revision `20260813_01`. Its opt-in coordinator
+must remain one lightweight thread in the existing process, preserve collector
+priority, create no second collector or cron service, and expose no action
+endpoint. Forecast scoring and reserve persistence are analytical database writes
+only; hardware remains read-only.
 
 ## Architecture
 
@@ -412,3 +409,10 @@ observation health.
 Forecast runs and projected-vs-actual points are stored in the database selected by
 `DATABASE_URL`. Forecast
 storage and comparison are analytical only and must not trigger device actions.
+
+Scheduled operational demand forecasts start at the first full five-minute UTC
+boundary at or after creation and use `full_5m_v1` alignment. A 24-hour run has
+exactly 288 points. Ad-hoc reserve horizons may retain partial-boundary semantics.
+Training provenance is sample-level; unverified pre-EV history must remain visibly
+risky, and candidate detection alone must never exclude an observation. Retention
+must never prune observations, EV annotations, or derivation audits.

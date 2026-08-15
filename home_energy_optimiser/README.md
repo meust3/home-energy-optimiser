@@ -1,10 +1,12 @@
 # Home Energy Optimiser
 
-Version 0.5.0 retains the UID/GID 10001,
+Version 0.5.1 retains the UID/GID 10001,
 one-process, one-collector, PostgreSQL-only App and adds one opt-in in-process
 forecast coordinator. Forecast operations default to disabled; all new dashboard
 routes are GET-only and no device command path exists. Explicit Alembic revision
-`20260812_01` is required before App update.
+`20260813_01` is required before App update and is already expected in production;
+no migration is needed for this deployment. The revision adds only forecast
+accuracy rollups and retention-maintenance audit tables.
 
 Home Assistant App (formerly called an add-on) packaging for the existing
 strictly read-only collector and Ingress dashboard. It reads Home Assistant Core

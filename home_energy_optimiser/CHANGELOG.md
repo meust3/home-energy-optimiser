@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.5.1
+
+- Corrected operational forecasts to 288 aligned five-minute slots.
+- Added EV-aware training provenance, calibration/storage visibility, and
+  disabled-by-default bounded retention.
+- Hardened daily retention to 30,000 detail rows per table in short batches,
+  isolated current-model calibration cohorts, and persisted reserve alignment-gap
+  reconciliation. Existing installs keep retention off by runtime default.
+- Requires Alembic revision `20260813_01`; production is already at this revision,
+  so this App update needs no schema migration. No startup migration or Home
+  Assistant/device write path was added.
+
 ## 0.5.0
 
 - Adds opt-in scheduled Forecast Operations with genuine out-of-sample forecasts,
@@ -44,8 +56,8 @@
   remains an explicit operator step and is not run at startup.
 - Retained GET-only Home Assistant access, UID/GID 10001 runtime, protected App
   options, PostgreSQL fail-closed startup, and no device-control path.
-- This package is not yet released or verified on the production Home Assistant
-  OS host.
+- This package was subsequently validated on the production Home Assistant OS
+  host.
 
 ## 0.3.2
 

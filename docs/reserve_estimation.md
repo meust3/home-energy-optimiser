@@ -1,5 +1,10 @@
 # Battery reserve estimation
 
+v0.5.1 does not change reserve arithmetic, opportunity selection, battery
+assumptions, or the Tier 2 mean. The dashboard overlays forecast calibration;
+tradable energy remains advisory and is shown as not calibration-certified while
+status is insufficient, degraded, or poor.
+
 Version 0.5.0 does not change this estimator. When explicitly enabled, the scheduled
 coordinator evaluates it at the forecast creation timestamp using history bounded to
 that timestamp and stores the complete typed result described in
@@ -21,6 +26,15 @@ Demand slots retain their actual start and end boundaries, including partial
 five-minute slots. Reserve output validates slot ordering, timezone awareness,
 total duration, and integrated energy. A failed horizon makes potentially tradable
 energy unavailable and blocks manual-review readiness.
+
+Scheduled reserve uses the actual creation/evaluation timestamp, not the later
+aligned operational forecast start. For example, at `10:00:20` the reserve horizon
+begins at `10:00:20`; its first partial demand slot runs to `10:05:00`, while the
+linked operational run begins at `10:05:00` with 288 full points. Reconciliation
+metadata partitions reserve demand into this pre-alignment energy, exact shared
+full intervals, and any reserve-only end boundary. The linked forecast is not added
+to reserve demand, so the gap is neither omitted nor double-counted. Both forecast
+inputs remain bounded to evaluation time; no future observations enter either run.
 
 ## Active replenishment opportunities
 

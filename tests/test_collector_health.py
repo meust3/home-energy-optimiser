@@ -39,7 +39,7 @@ def test_health_scoring_stale_and_malformed(healthy_states, config, now):
     healthy_states[ids.GOODWE_PV_POWER].last_updated = now - timedelta(hours=1)
     health = evaluate_data_health(healthy_states, config, now=now)
     codes = {issue.code for issue in health.telemetry.issues}
-    assert {"malformed_number", "stale_state"} <= codes
+    assert {"malformed_number", "source_update_stale"} <= codes
     assert health.telemetry.score == 75
     assert not health.is_healthy
 
@@ -57,6 +57,45 @@ def test_stale_modes_do_not_reduce_telemetry_health(healthy_states, config, now)
     health = evaluate_data_health(healthy_states, config, now=now)
     assert health.telemetry.is_healthy
     assert health.telemetry.score == 100
+
+
+def test_unchanged_soc_remains_available_with_entity_specific_grace(
+    healthy_states, config, now
+):
+    healthy_states[ids.GOODWE_BATTERY_SOC].last_updated = now - timedelta(minutes=30)
+    health = evaluate_data_health(healthy_states, config, now=now)
+    assert health.telemetry.entity_freshness[ids.GOODWE_BATTERY_SOC] == (
+        "available_but_unchanged"
+    )
+    assert not any(
+        issue.entity_id == ids.GOODWE_BATTERY_SOC for issue in health.telemetry.issues
+    )
+
+
+def test_zero_pv_can_remain_unchanged_but_active_pv_must_advance(
+    healthy_states, config, now
+):
+    pv = healthy_states[ids.GOODWE_PV_POWER]
+    pv.state = "0"
+    pv.last_updated = now - timedelta(hours=3)
+    health = evaluate_data_health(healthy_states, config, now=now)
+    assert health.telemetry.entity_freshness[ids.GOODWE_PV_POWER] == (
+        "available_but_unchanged"
+    )
+    pv.state = "4200"
+    health = evaluate_data_health(healthy_states, config, now=now)
+    assert health.telemetry.entity_freshness[ids.GOODWE_PV_POWER] == (
+        "source_update_stale"
+    )
+
+
+def test_unknown_and_unavailable_remain_failures(healthy_states, config, now):
+    healthy_states[ids.GOODWE_BATTERY_SOC].state = "unknown"
+    healthy_states[ids.GOODWE_PV_POWER].state = "unavailable"
+    health = evaluate_data_health(healthy_states, config, now=now)
+    assert not health.telemetry.is_healthy
+    assert health.telemetry.entity_freshness[ids.GOODWE_BATTERY_SOC] == "unknown"
+    assert health.telemetry.entity_freshness[ids.GOODWE_PV_POWER] == "unavailable"
 
 
 def test_stale_price_spike_does_not_reduce_price_health(healthy_states, config, now):

@@ -1,5 +1,5 @@
 name: Home Energy Optimiser
-version: "0.5.0"
+version: "0.5.1"
 slug: home_energy_optimiser
 description: Read-only energy dashboard and five-minute PostgreSQL collector
 url: https://github.com/meust3/home-energy-optimiser
@@ -44,6 +44,11 @@ options:
   forecast_scoring_delay_minutes: 10
   forecast_max_runtime_seconds: 120
   reserve_snapshot_enabled: true
+  demand_training_policy: verified_preferred
+  forecast_point_retention_days: 90
+  forecast_run_retention_days: 365
+  retention_enabled: false
+  calibration_window_days: 30
 schema:
   db_host: str
   db_port: port
@@ -74,3 +79,8 @@ schema:
   forecast_scoring_delay_minutes: int(0,1440)
   forecast_max_runtime_seconds: int(30,900)
   reserve_snapshot_enabled: bool
+  demand_training_policy: list(legacy_all_eligible|verified_preferred|verified_only)
+  forecast_point_retention_days: int(30,3650)
+  forecast_run_retention_days: int(90,3650)
+  retention_enabled: bool
+  calibration_window_days: int(1,365)

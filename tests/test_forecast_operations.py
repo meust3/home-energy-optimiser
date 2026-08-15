@@ -267,6 +267,7 @@ def test_scoring_delay_missing_health_metrics_and_immutability(
             horizon_start_utc=start,
             horizon_end_utc=start + timedelta(minutes=15),
             model_version="test-model",
+            metadata={"alignment_version": "full_5m_v1"},
             points=[
                 ForecastPointModel(
                     period_start_utc=start,
@@ -410,12 +411,14 @@ def test_migration_upgrade_downgrade_reupgrade_preserves_observations(tmp_path):
         column["name"] for column in inspect(engine).get_columns("observations")
     }
     command.upgrade(config, "head")
-    assert current_revision(engine) == "20260812_01"
+    assert current_revision(engine) == "20260813_01"
     assert set(inspect(engine).get_table_names()) >= {
         "forecast_point_scores",
         "forecast_operation_attempts",
         "reserve_runs",
         "reserve_opportunity_evaluations",
+        "forecast_accuracy_rollups",
+        "forecast_maintenance_runs",
     }
     command.downgrade(config, "20260811_01")
     assert current_revision(engine) == "20260811_01"
@@ -424,7 +427,7 @@ def test_migration_upgrade_downgrade_reupgrade_preserves_observations(tmp_path):
     } == legacy_columns
     assert "reserve_runs" not in inspect(engine).get_table_names()
     command.upgrade(config, "head")
-    assert current_revision(engine) == "20260812_01"
+    assert current_revision(engine) == "20260813_01"
 
 
 def test_migration_compiles_reversible_postgresql_ddl():
@@ -445,6 +448,22 @@ def test_migration_compiles_reversible_postgresql_ddl():
         assert f"CREATE TABLE {table}" in sql
         assert f"DROP TABLE {table}" in sql
     assert "JSONB" in sql
+    assert "DROP TABLE observations" not in sql
+    assert "ALTER TABLE observations" not in sql
+
+
+def test_v051_migration_compiles_reversible_postgresql_ddl():
+    output = StringIO()
+    config = alembic_config(
+        "postgresql+psycopg://migration:placeholder@example.invalid/home_energy"
+    )
+    config.output_buffer = output
+    command.upgrade(config, "20260812_01:20260813_01", sql=True)
+    command.downgrade(config, "20260813_01:20260812_01", sql=True)
+    sql = output.getvalue()
+    for table in ("forecast_accuracy_rollups", "forecast_maintenance_runs"):
+        assert f"CREATE TABLE {table}" in sql
+        assert f"DROP TABLE {table}" in sql
     assert "DROP TABLE observations" not in sql
     assert "ALTER TABLE observations" not in sql
 

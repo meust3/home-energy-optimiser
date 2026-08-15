@@ -128,6 +128,18 @@ def load_config(env_file: Path | None = Path(".env")) -> CollectorConfig:
         ev_home_state=os.getenv("EV_HOME_STATE", "home").strip() or "home",
         ev_telemetry_stale_seconds=_positive_env_int("EV_TELEMETRY_STALE_SECONDS", 900),
         forecast_retention_days=int(os.getenv("FORECAST_RETENTION_DAYS", "365")),
+        demand_training_policy=os.getenv(
+            "DEMAND_TRAINING_POLICY", "legacy_all_eligible"
+        ),
+        forecast_point_retention_days=_positive_env_int(
+            "FORECAST_POINT_RETENTION_DAYS", 90
+        ),
+        forecast_run_retention_days=_positive_env_int(
+            "FORECAST_RUN_RETENTION_DAYS",
+            int(os.getenv("FORECAST_RETENTION_DAYS", "365")),
+        ),
+        retention_enabled=_env_bool("RETENTION_ENABLED"),
+        calibration_window_days=_positive_env_int("CALIBRATION_WINDOW_DAYS", 30),
         minimum_soc_percent=float(os.getenv("MINIMUM_SOC_PERCENT", "20")),
         emergency_reserve_kwh=float(os.getenv("EMERGENCY_RESERVE_KWH", "6")),
         reserve_history_days=int(os.getenv("RESERVE_HISTORY_DAYS", "28")),
@@ -304,6 +316,18 @@ def load_reserve_config(env_file: Path | None = Path(".env")) -> CollectorConfig
         load_profile_minimum_samples=int(
             os.getenv("LOAD_PROFILE_MINIMUM_SAMPLES", "3")
         ),
+        demand_training_policy=os.getenv(
+            "DEMAND_TRAINING_POLICY", "legacy_all_eligible"
+        ),
+        forecast_point_retention_days=_positive_env_int(
+            "FORECAST_POINT_RETENTION_DAYS", 90
+        ),
+        forecast_run_retention_days=_positive_env_int(
+            "FORECAST_RUN_RETENTION_DAYS",
+            int(os.getenv("FORECAST_RETENTION_DAYS", "365")),
+        ),
+        retention_enabled=_env_bool("RETENTION_ENABLED"),
+        calibration_window_days=_positive_env_int("CALIBRATION_WINDOW_DAYS", 30),
     )
 
 

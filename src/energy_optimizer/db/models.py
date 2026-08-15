@@ -1,6 +1,6 @@
 """Complete portable SQLAlchemy schema for history, forecasts, and audits."""
 
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any
 
 from sqlalchemy import (
@@ -223,6 +223,72 @@ class ForecastPointScore(Base):
     missing_reason: Mapped[str | None] = mapped_column(Text)
     metadata_json: Mapped[Any] = mapped_column(JSON_TYPE, nullable=False, default=dict)
     __table_args__ = (Index("idx_forecast_scores_scored_at", "scored_at_utc"),)
+
+
+class ForecastAccuracyRollup(Base):
+    """Compact daily accuracy retained after detailed forecast points expire."""
+
+    __tablename__ = "forecast_accuracy_rollups"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    rollup_date: Mapped[date] = mapped_column(nullable=False)
+    forecast_type: Mapped[str] = mapped_column(String(64), nullable=False)
+    model_version: Mapped[str] = mapped_column(String(128), nullable=False)
+    alignment_version: Mapped[str] = mapped_column(String(32), nullable=False)
+    training_policy: Mapped[str] = mapped_column(String(32), nullable=False)
+    horizon_bucket: Mapped[str] = mapped_column(String(16), nullable=False)
+    day_type: Mapped[str] = mapped_column(String(16), nullable=False)
+    eligible_points: Mapped[int] = mapped_column(Integer, nullable=False)
+    missing_points: Mapped[int] = mapped_column(Integer, nullable=False)
+    total_points: Mapped[int] = mapped_column(Integer, nullable=False)
+    sum_signed_error: Mapped[float] = mapped_column(Float, nullable=False)
+    sum_absolute_error: Mapped[float] = mapped_column(Float, nullable=False)
+    sum_squared_error: Mapped[float] = mapped_column(Float, nullable=False)
+    forecast_energy_kwh: Mapped[float] = mapped_column(Float, nullable=False)
+    actual_energy_kwh: Mapped[float] = mapped_column(Float, nullable=False)
+    __table_args__ = (
+        UniqueConstraint(
+            "rollup_date",
+            "forecast_type",
+            "model_version",
+            "alignment_version",
+            "training_policy",
+            "horizon_bucket",
+            "day_type",
+            name="uq_forecast_accuracy_rollup_dimensions",
+        ),
+        Index("idx_forecast_accuracy_rollup_date", "rollup_date"),
+    )
+
+
+class ForecastMaintenanceRun(Base):
+    """Durable once-per-day retention claim and audit result."""
+
+    __tablename__ = "forecast_maintenance_runs"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    operation: Mapped[str] = mapped_column(String(32), nullable=False)
+    boundary_date: Mapped[date] = mapped_column(nullable=False)
+    started_at_utc: Mapped[datetime] = mapped_column(AwareDateTime(), nullable=False)
+    finished_at_utc: Mapped[datetime | None] = mapped_column(AwareDateTime())
+    status: Mapped[str] = mapped_column(String(16), nullable=False)
+    rows_rolled_up: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    scores_deleted: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    points_deleted: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    runs_deleted: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    reserve_runs_deleted: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0
+    )
+    attempts_deleted: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    metadata_json: Mapped[Any] = mapped_column(JSON_TYPE, nullable=False, default=dict)
+    __table_args__ = (
+        UniqueConstraint(
+            "operation", "boundary_date", name="uq_forecast_maintenance_boundary"
+        ),
+        CheckConstraint(
+            "status IN ('running', 'success', 'failed')",
+            name="forecast_maintenance_status",
+        ),
+        Index("idx_forecast_maintenance_started", "started_at_utc"),
+    )
 
 
 class ForecastOperationAttempt(Base):

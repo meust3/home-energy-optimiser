@@ -40,6 +40,18 @@ class HealthDomain(BaseModel):
     score: int = Field(ge=0, le=100)
     issues: list[HealthIssue] = Field(default_factory=list)
     required_for: list[HealthUse] = Field(default_factory=list)
+    entity_freshness: dict[
+        str,
+        Literal[
+            "available_and_fresh",
+            "available_but_unchanged",
+            "source_update_stale",
+            "unavailable",
+            "unknown",
+            "missing",
+            "invalid",
+        ],
+    ] = Field(default_factory=dict)
 
 
 EVVehicleStatus = Literal[
@@ -302,6 +314,13 @@ class CollectorConfig(BaseModel):
     ev_home_state: str = Field(default="home", min_length=1)
     ev_telemetry_stale_seconds: int = Field(default=900, gt=0)
     forecast_retention_days: int = Field(default=365, gt=0)
+    demand_training_policy: Literal[
+        "legacy_all_eligible", "verified_preferred", "verified_only"
+    ] = "legacy_all_eligible"
+    forecast_point_retention_days: int = Field(default=90, gt=0)
+    forecast_run_retention_days: int = Field(default=365, gt=0)
+    retention_enabled: bool = False
+    calibration_window_days: int = Field(default=30, gt=0, le=365)
     minimum_soc_percent: float = Field(default=20.0, ge=0, le=100)
     emergency_reserve_kwh: float = Field(default=6.0, ge=0)
     reserve_history_days: int = Field(default=28, gt=0)

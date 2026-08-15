@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from http.server import ThreadingHTTPServer
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field, SecretStr, ValidationError, model_validator
 from sqlalchemy.engine import URL
@@ -25,7 +25,7 @@ from energy_optimizer.models import (
 from energy_optimizer.persistence import ApplicationRepository, open_repository
 
 SUPERVISOR_CORE_API_URL = "http://supervisor/core/api"
-APP_VERSION = "0.5.0"
+APP_VERSION = "0.5.1"
 HEALTH_PORT = 8099
 OPTIONS_PATH_ENV = "HOME_ENERGY_APP_OPTIONS_PATH"
 SUPERVISOR_OPTIONS_PATH = Path("/data/options.json")
@@ -64,6 +64,13 @@ class HomeAssistantAppOptions(BaseModel):
     forecast_scoring_delay_minutes: int = Field(default=10, ge=0, le=1440)
     forecast_max_runtime_seconds: int = Field(default=120, ge=30, le=900)
     reserve_snapshot_enabled: bool = True
+    demand_training_policy: Literal[
+        "legacy_all_eligible", "verified_preferred", "verified_only"
+    ] = "verified_preferred"
+    forecast_point_retention_days: int = Field(default=90, ge=30, le=3650)
+    forecast_run_retention_days: int = Field(default=365, ge=90, le=3650)
+    retention_enabled: bool = False
+    calibration_window_days: int = Field(default=30, ge=1, le=365)
 
     @model_validator(mode="after")
     def validate_forecast_schedule(self):
@@ -197,6 +204,11 @@ def app_environment(
         "FORECAST_SCORING_DELAY_MINUTES": str(options.forecast_scoring_delay_minutes),
         "FORECAST_MAX_RUNTIME_SECONDS": str(options.forecast_max_runtime_seconds),
         "RESERVE_SNAPSHOT_ENABLED": str(options.reserve_snapshot_enabled).lower(),
+        "DEMAND_TRAINING_POLICY": options.demand_training_policy,
+        "FORECAST_POINT_RETENTION_DAYS": str(options.forecast_point_retention_days),
+        "FORECAST_RUN_RETENTION_DAYS": str(options.forecast_run_retention_days),
+        "RETENTION_ENABLED": str(options.retention_enabled).lower(),
+        "CALIBRATION_WINDOW_DAYS": str(options.calibration_window_days),
     }
     return environment
 

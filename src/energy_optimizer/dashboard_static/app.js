@@ -192,7 +192,8 @@ async function loadReserve() {
       ["Confidence", "Vehicle SOC is context only and does not change the reserve algorithm.", [reserveRow("Overall", confidence), reserveRow("Tier usage", tierUsage), reserveRow("Vehicle SOC (context only)", data.ev_vehicle_soc_percent, percent)]],
       ["Persistence", "The complete ReserveEstimate output is not stored by the current schema.", [reserveRow("Stored fields", storedFields), ["Command issued", "No", "available"], ["Full estimate", null, "not-stored"]]],
     ];
-    content.innerHTML = `<aside class="panel schema-notice" role="note"><strong>${completeAudit ? "Complete advisory audit" : "Legacy stored result coverage"}</strong><p>${completeAudit ? "The complete typed estimator output is persisted separately from immutable forecast values." : "Missing stored values are labelled separately from fields the legacy schema did not store."}</p></aside>${sections.map(([title, help, rows]) => `<article class="panel reserve-card"><h3>${title}</h3><p class="section-help">${help}</p>${definition(rows)}</article>`).join("")}`;
+    const calibrationWarning = data.calibration_warning ? `<aside class="panel schema-notice" role="note"><strong>Forecast calibration: ${safeText(data.forecast_calibration_status)}</strong><p>${safeText(data.calibration_warning)}</p></aside>` : "";
+    content.innerHTML = `${calibrationWarning}<aside class="panel schema-notice" role="note"><strong>${completeAudit ? "Complete advisory audit" : "Legacy stored result coverage"}</strong><p>${completeAudit ? "The complete typed estimator output is persisted separately from immutable forecast values." : "Missing stored values are labelled separately from fields the legacy schema did not store."}</p></aside>${sections.map(([title, help, rows]) => `<article class="panel reserve-card"><h3>${title}</h3><p class="section-help">${help}</p>${definition(rows)}</article>`).join("")}`;
   } catch (error) { setState("#reserve-state", error.message, "error-state"); }
 }
 
@@ -363,21 +364,48 @@ async function loadReserveHistory() {
 async function loadQuality() {
   setState("#quality-state", "Loading bounded collection and health summary…");
   try {
-    const data = await request("quality", "data-quality", { range: "30d" }); setState("#quality-state", `Quality from ${localTime(data.range_start_utc)} to ${localTime(data.range_end_utc)}.`);
+    const [data, storage] = await Promise.all([request("quality", "data-quality", { range: "30d" }), request("storage", "forecast-storage")]); setState("#quality-state", `Quality from ${localTime(data.range_start_utc)} to ${localTime(data.range_end_utc)}.`);
     const cards = [
       ["Coverage", `${number(data.coverage_percent, 1)}%`, `${data.collected_slots} of ${data.expected_five_minute_slots} slots`],
       ["Missing slots", data.missing_slots, `Longest gap ${data.longest_gap_minutes} min`],
+      ["Current collection", data.current_collection_healthy ? "Healthy" : "Needs attention", `Recent 24h coverage ${number(data.current_24h_coverage_percent, 1)}%; historic window missing ${data.historic_missing_slots}`],
       ["Complete days", data.complete_calendar_days, `${data.complete_overnight_periods} complete overnights`],
       ["Baseline training", data.eligible_baseline_rows, `${Object.values(data.ineligible_baseline_rows_by_reason).reduce((a,b) => a+b,0)} ineligible rows`],
       ["EV telemetry", data.ev_integration_configured ? data.ev_telemetry_fresh ? "Fresh" : "Needs attention" : "Disabled", data.ev_telemetry_available ? "Vehicle telemetry available" : "Vehicle telemetry unavailable"],
       ["Charger AC power", data.independent_ac_charger_power_available ? "Available" : "No", `${data.known_charging_rows_excluded} known charging rows excluded`],
       ["Power signs", `${data.configured_grid_power_sign} / ${data.configured_battery_power_sign}`, `${data.configured_sign_confidence} confidence; ${data.configured_sign_supporting_samples} samples; ${number(data.configured_balance_tolerance_w, 1)} W tolerance`],
-      ["Balance residual", power(data.average_absolute_balance_residual_w), `Signs: ${Object.entries(data.sign_convention_confidence).map(([k,v]) => `${k} ${v}`).join(", ")}`],
+      ["Balance residual", `P95 ${power(data.residual_p95_w)}`, `Median ${power(data.residual_median_w)}; max ${power(data.residual_max_w)}; ${data.rows_above_tolerance} above tolerance`],
+      ["Weather features", data.weather_features, "Temperature model adjustment disabled / not implemented"],
+      ["Forecast storage", `${storage.tables.reduce((sum, item) => sum + item.row_count, 0)} rows`, `${storage.retention_health}; detail ${storage.point_retention_days}d, runs ${storage.run_retention_days}d`],
+      ["Training history", `${percent(data.verified_share * 100)} EV-verified`, `${percent(data.unverified_share * 100)} unverified; policy ${data.training_policy}`],
+      ["Tier 1 readiness", `${data.exact_slots_currently_qualified} / ${data.exact_slots_total}`, `${number(data.exact_slot_coverage_percent, 2)}% exact weekday/five-minute buckets qualified`],
     ];
     const domains = Object.entries(data.domain_health).map(([name, value]) => `<article class="panel"><h3>${safeText(name[0].toUpperCase()+name.slice(1))}</h3>${definition([["Healthy", value.healthy_count], ["Unhealthy", value.unhealthy_count], ["Average score", percent(value.average_score)], ["Warnings", value.warning_count], ["Errors", value.error_count]])}<ul class="issue-list">${value.most_common_issues.slice(0,3).map(issue => `<li>${safeText(issue.code)} · ${issue.count}</li>`).join("") || "<li>No persisted issues</li>"}</ul></article>`).join("");
     const evWarning = data.ev_contamination_warning ? '<aside class="panel schema-notice" role="note"><strong>EV contamination warning</strong><p>Confirmed fresh charging rows are excluded, but EV energy separation is incomplete until independent charger AC power is measured and validated.</p></aside>' : "";
     $("#quality-content").innerHTML = `<div class="quality-grid">${cards.map(([label,value,detail]) => `<article class="panel"><p class="eyebrow">${safeText(label)}</p><div class="quality-metric">${safeText(value)}</div><p class="muted">${safeText(detail)}</p></article>`).join("")}${evWarning}</div><h3>Domain health</h3><div class="quality-grid">${domains}</div>`;
   } catch (error) { setState("#quality-state", error.message, "error-state"); }
+}
+
+async function loadCalibration() {
+  setState("#calibration-state", "Loading aligned scheduled-run calibration...");
+  try {
+    const data = await request("calibration", "forecast-calibration", { range: "30d" });
+    const metric = data.metrics;
+    setState("#calibration-state", data.status_reason);
+    const baseline = data.baseline_reference;
+    const legacy = data.legacy_baseline_metrics;
+    const identity = data.current_identity;
+    const cards = [
+      ["Current model status", data.status, `${data.complete_run_count} complete 24-hour run(s); ${data.eligible_run_count} coherent current run(s)`],
+      ["Current model bias", power(metric.bias_w), "Positive means forecast above actual"],
+      ["Current model MAE", power(metric.mae_w), `RMSE ${power(metric.rmse_w)}`],
+      ["Current model coverage", percent(metric.coverage), `${metric.eligible_points} of ${metric.total_points} points`],
+      ["Pre-v0.5.1 / legacy baseline", legacy.eligible_points ? `Bias ${power(legacy.bias_w)}` : `Bias ${power(baseline.bias_w)}`, legacy.eligible_points ? `MAE ${power(legacy.mae_w)} from ${data.legacy_baseline_run_count} legacy run(s)` : `Measured reference MAE ${power(baseline.mae_w)}; 46.9 kWh forecast vs 27.8 kWh actual`],
+      ["Current cohort", identity.alignment_version, `Policy ${identity.training_policy}; model ${identity.model_version}`],
+    ];
+    const horizons = Object.entries(data.metrics_by_horizon).map(([name, value]) => `<article class="panel"><h3>${safeText(name)}</h3>${definition([["Bias", power(value.bias_w)], ["MAE", power(value.mae_w)], ["RMSE", power(value.rmse_w)], ["Coverage", percent(value.coverage)]])}</article>`).join("");
+    $("#calibration-content").innerHTML = `${cards.map(([label, value, detail]) => `<article class="panel"><p class="eyebrow">${safeText(label)}</p><div class="quality-metric">${safeText(value)}</div><p class="muted">${safeText(detail)}</p></article>`).join("")}${horizons}`;
+  } catch (error) { setState("#calibration-state", error.message, "error-state"); }
 }
 
 function activateTab() {
@@ -386,6 +414,7 @@ function activateTab() {
   if (valid === "history" && !state.loaded.has("history")) { state.loaded.add("history"); loadHistory(); }
   if (valid === "forecasts" && !state.loaded.has("forecasts")) { state.loaded.add("forecasts"); loadForecastRuns(); }
   if (valid === "forecast-operations" && !state.loaded.has("operations")) { state.loaded.add("operations"); loadForecastOperations(); }
+  if (valid === "calibration" && !state.loaded.has("calibration")) { state.loaded.add("calibration"); loadCalibration(); }
   if (valid === "reserve" && !state.loaded.has("reserve")) { state.loaded.add("reserve"); loadReserve(); loadReserveHistory(); }
   if (valid === "data-quality" && !state.loaded.has("quality")) { state.loaded.add("quality"); loadQuality(); }
 }
@@ -400,4 +429,4 @@ $("#accuracy-run").addEventListener("change", loadForecastOperations);
 
 loadStatus(); loadLive(); loadReserve(); loadReserveHistory(); state.loaded.add("reserve"); activateTab();
 schedule("status", loadStatus, 30000); schedule("live", loadLive, 30000);
-schedule("slow", () => { if (!document.hidden) { if (state.loaded.has("history")) loadHistory(); if (state.loaded.has("forecasts")) loadForecastRuns(); if (state.loaded.has("operations")) loadForecastOperations(); if (state.loaded.has("reserve")) { loadReserve(); loadReserveHistory(); } if (state.loaded.has("quality")) loadQuality(); } }, 300000);
+schedule("slow", () => { if (!document.hidden) { if (state.loaded.has("history")) loadHistory(); if (state.loaded.has("forecasts")) loadForecastRuns(); if (state.loaded.has("operations")) loadForecastOperations(); if (state.loaded.has("calibration")) loadCalibration(); if (state.loaded.has("reserve")) { loadReserve(); loadReserveHistory(); } if (state.loaded.has("quality")) loadQuality(); } }, 300000);

@@ -15,6 +15,14 @@ effective boundary are retained as portable JSON/JSONB. Every evaluated opportun
 has an ordered child row in `reserve_opportunity_evaluations`, including its full
 analysis and expected replenishment details.
 
+For a scheduled run created between boundaries, `operational_context_json` records
+the linked forecast reconciliation. Reserve begins at evaluation time and its
+existing partial slot covers evaluation to the linked `full_5m_v1` start. Exact
+shared full intervals are identified without adding the linked forecast energy a
+second time; any partial reserve end is recorded separately. The components
+reconcile to persisted household demand, while the linked operational run remains
+exactly 288 full five-minute points.
+
 `potentially_tradable_kwh` remains SQL `NULL` when the estimator says it is
 unavailable; it is never changed to zero. `command_issued` is always false and is
 protected by a database check constraint. These rows are an audit trail, not an

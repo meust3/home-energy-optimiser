@@ -18,6 +18,8 @@ from energy_optimizer.db.models import (
     Base,
     EVSessionAnnotation,
     EVSessionAnnotationRow,
+    ForecastAccuracyRollup,
+    ForecastMaintenanceRun,
     ForecastOperationAttempt,
     ForecastPoint,
     ForecastPointScore,
@@ -26,6 +28,12 @@ from energy_optimizer.db.models import (
     ObservationDerivation,
     ReserveOpportunityEvaluation,
     ReserveRun,
+)
+from energy_optimizer.forecast_alignment import (
+    FULL_FIVE_MINUTE_ALIGNMENT,
+)
+from energy_optimizer.forecast_alignment import (
+    alignment_version as forecast_alignment_version,
 )
 from energy_optimizer.history_analysis import (
     calculate_gap_report,
@@ -53,6 +61,8 @@ class DatabaseCounts:
     forecast_operation_attempts: int = 0
     reserve_runs: int = 0
     reserve_opportunity_evaluations: int = 0
+    forecast_accuracy_rollups: int = 0
+    forecast_maintenance_runs: int = 0
 
 
 class DatabaseRepository:
@@ -271,6 +281,8 @@ class DatabaseRepository:
             "ev_charging_active",
             "ev_session_id",
             "ev_telemetry_fresh",
+            "ev_detection_confidence",
+            "ev_vehicle_status",
         )
         return self.observation_rows(
             start=end - timedelta(days=days), end=end, columns=columns
@@ -515,7 +527,9 @@ class DatabaseRepository:
                 ForecastRun.id.label("forecast_run_id"),
                 ForecastRun.created_at_utc,
                 ForecastRun.forecast_type,
+                ForecastRun.source,
                 ForecastRun.model_version,
+                ForecastRun.metadata_json.label("run_metadata_json"),
                 ForecastPoint.period_start_utc,
                 ForecastPoint.period_end_utc,
                 ForecastPoint.expected_value,
@@ -546,6 +560,47 @@ class DatabaseRepository:
         statement = statement.order_by(ForecastPoint.period_start_utc).limit(limit)
         with Session(self.engine) as session:
             return [dict(row) for row in session.execute(statement).mappings()]
+
+    def forecast_calibration_rows_read_only(
+        self, *, after: datetime, before: datetime, limit: int = 25000
+    ) -> list[dict[str, Any]]:
+        """Return a bounded recent calibration sample without widening chart APIs."""
+        _require_aware(after)
+        _require_aware(before)
+        if after >= before or not 1 <= limit <= 25000:
+            raise ValueError("invalid bounded forecast calibration query")
+        statement = (
+            select(
+                ForecastRun.id.label("forecast_run_id"),
+                ForecastRun.created_at_utc,
+                ForecastRun.forecast_type,
+                ForecastRun.source,
+                ForecastRun.model_version,
+                ForecastRun.metadata_json.label("run_metadata_json"),
+                ForecastPoint.period_start_utc,
+                ForecastPoint.period_end_utc,
+                ForecastPoint.expected_value,
+                ForecastPointScore.actual_value,
+                ForecastPointScore.actual_available,
+                ForecastPointScore.health_eligible,
+            )
+            .join(ForecastPoint, ForecastPoint.forecast_run_id == ForecastRun.id)
+            .outerjoin(
+                ForecastPointScore,
+                ForecastPointScore.forecast_point_id == ForecastPoint.id,
+            )
+            .where(
+                ForecastRun.forecast_type == "baseline_household_load",
+                ForecastPoint.period_start_utc >= after.astimezone(UTC),
+                ForecastPoint.period_start_utc < before.astimezone(UTC),
+            )
+            .order_by(ForecastPoint.period_start_utc.desc())
+            .limit(limit)
+        )
+        with Session(self.engine) as session:
+            rows = [dict(row) for row in session.execute(statement).mappings()]
+        rows.reverse()
+        return rows
 
     def reserve_history_read_only(
         self, *, after: datetime, before: datetime, limit: int = 1000
@@ -591,8 +646,8 @@ class DatabaseRepository:
         cutoff = now.astimezone(UTC) - timedelta(minutes=delay_minutes)
         with self.transaction() as session:
             points = list(
-                session.scalars(
-                    select(ForecastPoint)
+                session.execute(
+                    select(ForecastPoint, ForecastRun.metadata_json)
                     .join(ForecastRun, ForecastRun.id == ForecastPoint.forecast_run_id)
                     .outerjoin(
                         ForecastPointScore,
@@ -607,7 +662,7 @@ class DatabaseRepository:
                     .limit(limit)
                 )
             )
-            for point in points:
+            for point, run_metadata in points:
                 if runtime_guard is not None:
                     runtime_guard()
                 rows = list(
@@ -616,10 +671,7 @@ class DatabaseRepository:
                             Observation.baseline_house_consumption_w,
                             Observation.telemetry_is_healthy,
                             Observation.baseline_training_eligible,
-                        ).where(
-                            Observation.slot_utc >= point.period_start_utc,
-                            Observation.slot_utc < point.period_end_utc,
-                        )
+                        ).where(*_actual_slot_conditions(point, run_metadata))
                     )
                 )
                 available = [float(row[0]) for row in rows if row[0] is not None]
@@ -823,6 +875,17 @@ class DatabaseRepository:
         with Session(self.engine) as session:
             return [dict(row) for row in session.execute(statement).mappings()]
 
+    def latest_scheduled_forecast_metadata_read_only(self) -> dict[str, Any] | None:
+        statement = (
+            select(ForecastRun.__table__)
+            .where(ForecastRun.source == "scheduled_forecast_operations")
+            .order_by(ForecastRun.created_at_utc.desc())
+            .limit(1)
+        )
+        with Session(self.engine) as session:
+            row = session.execute(statement).mappings().first()
+            return dict(row) if row else None
+
     def forecast_comparison_read_only(
         self,
         *,
@@ -869,8 +932,10 @@ class DatabaseRepository:
             actual = (
                 select(func.avg(actual_column))
                 .where(
-                    Observation.slot_utc >= ForecastPoint.period_start_utc,
-                    Observation.slot_utc < ForecastPoint.period_end_utc,
+                    *_actual_slot_conditions(
+                        ForecastPoint,
+                        run.get("metadata_json"),
+                    )
                 )
                 .correlate(ForecastPoint)
                 .scalar_subquery()
@@ -970,8 +1035,7 @@ class DatabaseRepository:
             for point in points:
                 actual = session.scalar(
                     select(func.avg(actual_column)).where(
-                        Observation.slot_utc >= point.period_start_utc,
-                        Observation.slot_utc < point.period_end_utc,
+                        *_actual_slot_conditions(point, run.metadata_json)
                     )
                 )
                 point.actual_value = actual
@@ -1384,6 +1448,8 @@ class DatabaseRepository:
             ForecastOperationAttempt,
             ReserveRun,
             ReserveOpportunityEvaluation,
+            ForecastAccuracyRollup,
+            ForecastMaintenanceRun,
         )
         with Session(self.engine) as session:
             values = [
@@ -1561,6 +1627,16 @@ def _eligibility_counts(
         )
         result["eligible" if eligible else "ineligible"] += 1
     return result
+
+
+def _actual_slot_conditions(point: Any, run_metadata: Any) -> tuple[Any, ...]:
+    """Return the SQL form of the canonical alignment-aware slot rule."""
+    if forecast_alignment_version(run_metadata) == FULL_FIVE_MINUTE_ALIGNMENT:
+        return (Observation.slot_utc == point.period_start_utc,)
+    return (
+        Observation.slot_utc >= point.period_start_utc,
+        Observation.slot_utc < point.period_end_utc,
+    )
 
 
 def _coerce_column_value(column, value):

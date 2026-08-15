@@ -32,6 +32,8 @@ COUNTED_TABLES = (
     "forecast_operation_attempts",
     "reserve_runs",
     "reserve_opportunity_evaluations",
+    "forecast_accuracy_rollups",
+    "forecast_maintenance_runs",
 )
 
 
@@ -232,6 +234,10 @@ def _application_readiness(engine) -> dict[str, dict[str, object]]:
             {"battery_soc_percent", "baseline_house_consumption_w"},
         ),
         "forecast_storage": ({"forecast_runs", "forecast_points"}, set()),
+        "forecast_retention": (
+            {"forecast_accuracy_rollups", "forecast_maintenance_runs"},
+            set(),
+        ),
         "ev_annotation": (
             {"observations", "ev_session_annotations", "ev_session_annotation_rows"},
             {"ev_session_id", "ev_power_w"},

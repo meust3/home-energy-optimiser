@@ -181,7 +181,10 @@ def test_options_and_identity(
     print("PASS bootstrap copied options as app:app mode=0600")
     print("PASS configuration parsing succeeded")
     print("PASS all five sign options propagated to the application environment")
-    print("PASS all seven forecast options propagated to the application environment")
+    print(
+        "PASS all forecast, training, retention, and calibration options "
+        "propagated to the application environment"
+    )
     print("PASS application process uid=10001 gid=10001")
     print("PASS ephemeral options copy removed")
     print("PASS no secret printed")

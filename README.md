@@ -1,9 +1,20 @@
 # Home Energy Optimiser
 
-> v0.5.0 adds Forecast Operations and complete
+> v0.5.1 calibrates Forecast Operations and improves data hygiene. It fixes the
+> operational five-minute interval alignment, adds sample-level EV provenance,
+> coherent-cohort calibration reporting, and opt-in bounded forecast retention.
+
+Retention remains disabled by default. When explicitly enabled after validation,
+one daily coordinator invocation can prune up to 30,000 expired points and their
+score rows in independently committed 5,000-row transactions, exceeding the
+estimated 13,824 rows/table/day creation rate. Current calibration is isolated by
+forecast type, model version, alignment version, and training policy; legacy
+results remain comparison-only.
+
+> v0.5.0 added Forecast Operations and complete
 > Reserve Audit are strictly advisory, opt-in, and disabled by default.
 
-Version 0.5.0 keeps the existing one-container, one-process, one-collector design
+Version 0.5.1 keeps the existing one-container, one-process, one-collector design
 and adds one lightweight coordinator thread. At aligned local boundaries it can
 create genuine out-of-sample baseline forecasts, score only completed intervals
 after a delay, and persist the existing reserve estimator's complete result. It
@@ -23,12 +34,12 @@ forecast_max_runtime_seconds: 120
 reserve_snapshot_enabled: true
 ```
 
-The v0.5.0 schema head is `20260812_01`. Migration is an explicit operator step;
-the App never migrates PostgreSQL during startup. Validate the immutable image and
-Home Assistant discovery before backing up, stopping the sole collector, upgrading
-with `python -m alembic upgrade head`, verifying counts/revision, and immediately
-updating the App. Forecast operations should be enabled only after collection is
-healthy on v0.5.0.
+The v0.5.1 schema head remains `20260813_01`, which is already the expected v0.5.0
+production revision. No production Alembic command is required for this App
+update, and the App never migrates PostgreSQL during startup. Validate the
+immutable image and Home Assistant discovery, then create and restore-test a fresh
+backup before stopping the sole collector and updating the App. Retention remains
+disabled during deployment.
 
 A Home Assistant-connected, PostgreSQL-backed household energy optimisation
 platform for forecasting demand, modelling battery reserve requirements, and
@@ -45,15 +56,15 @@ collects and analyses data but does not control Home Assistant or energy hardwar
 ## Current status
 
 - **PostgreSQL production:** working and manually validated end to end
-- **Continuous collector:** App v0.4.1 is installed and collecting successfully on
+- **Continuous collector:** App v0.5.0 is installed and collecting successfully on
   the Home Assistant OS 18.1 NUC
-- **Ingress dashboard:** deployed through App v0.4.1
+- **Ingress dashboard:** deployed through App v0.5.0
 - **Reserve forecasting:** working and advisory
 - **Solar and price forecasts:** Solcast and Amber Electric integrated
 - **EV telemetry:** optional read-only vehicle-cloud integration was introduced in
   v0.4.0
 - **Power-flow repair:** included in the v0.4.1 hotfix
-- **Forecast operations:** v0.5.0 adds opt-in read-only scheduling, scoring, and
+- **Forecast operations:** v0.5.0 provides opt-in read-only scheduling, scoring, and
   reserve audit views; operations remain disabled by default
 - **Automated control or trading:** not enabled
 
@@ -64,10 +75,9 @@ unprivileged application process.
 Version 0.3.0 added a strictly read-only Ingress presentation layer, and version
 0.3.1 corrected App packaging metadata and documentation. Version 0.3.2 makes
 sparse forecast, reserve, and normalized-flow data look intentional rather than
-broken. The dashboard remains unverified on the production host until installation
-testing is complete. Version 0.4.0 adds optional vehicle status, SOC, freshness,
+broken. Version 0.4.0 adds optional vehicle status, SOC, freshness,
 home/away, and confirmed-charging detection without pretending raw vehicle battery
-power is charger AC demand. Version 0.4.0 is the working production collector.
+power is charger AC demand. Version 0.5.0 is the working production collector.
 
 Forecast confidence can remain medium or low while household history is limited,
 and EV charging may still be embedded in historical household demand.
@@ -86,7 +96,7 @@ GoodWe / Amber / Solcast / weather
        |                            |
        v                            v
 Windows development          Home Assistant App
-and offline analysis         v0.4.0 production collector
+and offline analysis         v0.5.0 production collector
        |                            |
        +-------------+--------------+
                      v

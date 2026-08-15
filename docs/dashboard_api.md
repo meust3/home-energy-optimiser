@@ -1,5 +1,16 @@
 # Dashboard API
 
+v0.5.1 adds GET-only `/api/v1/forecast-calibration` and
+`/api/v1/forecast-storage`. No mutation or run-now route is present. Reserve
+responses add only a calibration warning; calculations are unchanged.
+
+Calibration reports one explicit current identity (`forecast_type`, model,
+alignment, and training policy) plus separate pre-v0.5.1/legacy metrics. Storage
+reports eligible/pruned/remaining detail rows, batch/capacity values, estimated
+daily creation, steady-state capacity health, and backlog-clearance estimate. An
+enabled retention configuration whose maximum is not above expected creation is
+reported as `unhealthy_capacity` even if its last maintenance row succeeded.
+
 v0.5.0 adds bounded GET-only routes:
 
 - `GET /api/v1/forecast-operations/status`;

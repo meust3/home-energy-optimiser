@@ -12,11 +12,23 @@ from zoneinfo import ZoneInfo
 from pydantic import BaseModel, ConfigDict, Field
 
 from energy_optimizer.db.migrations import current_revision, expected_revision
+from energy_optimizer.forecast_calibration import (
+    CURRENT_FORECAST_MODEL_VERSION,
+    CURRENT_FORECAST_TYPE,
+    CalibrationIdentity,
+    ForecastCalibrationReport,
+    calculate_forecast_calibration,
+)
+from energy_optimizer.forecast_retention import inspect_forecast_retention
 from energy_optimizer.history_analysis import (
     calculate_gap_report,
     summarize_health_issues,
 )
 from energy_optimizer.persistence import ApplicationRepository, open_repository
+from energy_optimizer.training_provenance import (
+    classify_training_cohort,
+    summarize_training_provenance,
+)
 
 MAX_RANGE = timedelta(days=31)
 MAX_RETURNED_POINTS = 2500
@@ -73,6 +85,8 @@ OBSERVATION_COLUMNS = (
     "sign_convention_status",
     "sign_convention_confidence",
     "balance_residual_w",
+    "temperature_c",
+    "weather_condition",
 )
 
 
@@ -301,6 +315,9 @@ class ReserveResponse(ApiModel):
     persisted_fields: list[str] = Field(default_factory=list)
     command_issued: Literal[False] = False
     ev_vehicle_soc_percent: float | None = None
+    forecast_calibration_status: str = "insufficient_data"
+    calibration_warning: str | None = None
+    tradable_energy_is_calibrated: bool = False
 
 
 class DataQualityResponse(ApiModel):
@@ -337,6 +354,38 @@ class DataQualityResponse(ApiModel):
     configured_balance_tolerance_w: float
     sign_convention_confidence: dict[str, int]
     average_absolute_balance_residual_w: float | None
+    residual_median_w: float | None = None
+    residual_p95_w: float | None = None
+    residual_max_w: float | None = None
+    rows_above_tolerance: int = 0
+    latest_anomaly: dict[str, Any] | None = None
+    top_recent_anomalies: list[dict[str, Any]] = Field(default_factory=list)
+    weather_features: str = "unavailable"
+    temperature_model_adjustment: str = "disabled_not_implemented"
+    training_policy: str = "legacy_all_eligible"
+    training_cohort_counts: dict[str, int] = Field(default_factory=dict)
+    verified_share: float = 0
+    unverified_share: float = 0
+    contamination_reason: str | None = None
+    first_verified_ev_telemetry_utc: datetime | None = None
+    exact_slots_currently_qualified: int = 0
+    exact_slots_total: int = 2016
+    exact_slot_coverage_percent: float = 0
+    historic_missing_slots: int = 0
+    current_24h_coverage_percent: float = 0
+    current_collection_healthy: bool = False
+
+
+class ForecastStorageResponse(ApiModel):
+    point_retention_days: int
+    run_retention_days: int
+    retention_enabled: bool
+    tables: list[dict[str, Any]]
+    latest_retention_run: dict[str, Any] | None
+    latest_rollup_date: Any | None
+    retention_health: str
+    retention_diagnostics: dict[str, Any]
+    database_size_bytes: int | None = None
 
 
 class DashboardQueryError(ValueError):
@@ -510,6 +559,55 @@ class DashboardService:
                 key: _accuracy_metric(value) for key, value in groups["model"].items()
             },
             points=points,
+        )
+
+    def forecast_calibration(
+        self, *, range_name: str = "30d", now: datetime | None = None
+    ) -> ForecastCalibrationReport:
+        start, end = resolve_window(
+            range_name=range_name, start=None, end=None, now=now
+        )
+        with self._repository() as repository:
+            rows = repository.forecast_calibration_rows_read_only(
+                after=start, before=end
+            )
+        return calculate_forecast_calibration(
+            rows, current_identity=self._current_calibration_identity()
+        )
+
+    def _current_calibration_identity(self) -> CalibrationIdentity:
+        return CalibrationIdentity(
+            forecast_type=CURRENT_FORECAST_TYPE,
+            model_version=CURRENT_FORECAST_MODEL_VERSION,
+            alignment_version="full_5m_v1",
+            training_policy=str(
+                getattr(self.health, "demand_training_policy", "verified_preferred")
+            ),
+        )
+
+    def forecast_storage(self) -> ForecastStorageResponse:
+        point_days = int(getattr(self.health, "forecast_point_retention_days", 90))
+        run_days = int(getattr(self.health, "forecast_run_retention_days", 365))
+        enabled = bool(getattr(self.health, "retention_enabled", False))
+        with self._repository() as repository:
+            report = inspect_forecast_retention(
+                repository,
+                now=datetime.now(UTC),
+                point_retention_days=point_days,
+            )
+        latest = report["latest_retention_run"]
+        diagnostics = report["retention_diagnostics"]
+        health = _retention_health(enabled, latest, diagnostics)
+        return ForecastStorageResponse(
+            point_retention_days=point_days,
+            run_retention_days=run_days,
+            retention_enabled=enabled,
+            tables=report["tables"],
+            latest_retention_run=latest,
+            latest_rollup_date=report["latest_rollup_date"],
+            retention_health=health,
+            retention_diagnostics=diagnostics,
+            database_size_bytes=report["database_size_bytes"],
         )
 
     def reserve_history(
@@ -767,10 +865,35 @@ class DashboardService:
         )
 
     def reserve_latest(self) -> ReserveResponse:
+        calibration = ForecastCalibrationReport(
+            status="insufficient_data",
+            status_reason="Aligned out-of-sample calibration is not yet sufficient.",
+            metrics={"total_points": 0, "eligible_points": 0, "coverage": 0},
+            metrics_by_horizon={},
+            metrics_by_local_hour={},
+            current_identity=self._current_calibration_identity(),
+        )
         with self._repository() as repository:
             audit = repository.latest_reserve_audit_read_only()
             run = repository.latest_reserve_run_read_only()
             latest = repository.latest_observation_read_only()
+            if hasattr(repository, "forecast_calibration_rows_read_only"):
+                current = datetime.now(UTC)
+                calibration = calculate_forecast_calibration(
+                    repository.forecast_calibration_rows_read_only(
+                        after=current - timedelta(days=30), before=current
+                    ),
+                    current_identity=self._current_calibration_identity(),
+                )
+        calibration_warning = (
+            None
+            if calibration.status in {"acceptable", "good"}
+            else (
+                "Tradable-energy estimates are advisory and not yet backed by "
+                "acceptable aligned forecast calibration."
+            )
+        )
+        tradable_calibrated = calibration.status in {"acceptable", "good"}
         if audit is not None:
             confidence_json = audit.get("confidence_json") or {}
             return ReserveResponse(
@@ -816,6 +939,9 @@ class DashboardService:
                 ev_vehicle_soc_percent=(
                     _number(latest.get("ev_vehicle_soc_percent")) if latest else None
                 ),
+                forecast_calibration_status=calibration.status,
+                calibration_warning=calibration_warning,
+                tradable_energy_is_calibrated=tradable_calibrated,
             )
         if run is None:
             return ReserveResponse(
@@ -856,6 +982,9 @@ class DashboardService:
             ev_vehicle_soc_percent=(
                 _number(latest.get("ev_vehicle_soc_percent")) if latest else None
             ),
+            forecast_calibration_status=calibration.status,
+            calibration_warning=calibration_warning,
+            tradable_energy_is_calibrated=tradable_calibrated,
         )
 
     def data_quality(
@@ -877,8 +1006,12 @@ class DashboardService:
                 limit=MAX_OBSERVATION_ROWS,
             )
             reserve = repository.latest_reserve_run_read_only()
+            scheduled = repository.latest_scheduled_forecast_metadata_read_only()
         slots = [_utc(row["slot_utc"]) for row in rows]
         gap = calculate_gap_report(slots, start=start_utc, end=end_utc)
+        recent_gap = calculate_gap_report(
+            slots, start=max(start_utc, end_utc - timedelta(hours=24)), end=end_utc
+        )
         health_rows = []
         for row in rows:
             item = dict(row)
@@ -900,7 +1033,17 @@ class DashboardService:
             if not row["baseline_training_eligible"]
         )
         complete_days, complete_overnights = _complete_periods(eligible_rows)
-        tier_counts = (reserve or {}).get("tier_counts", {})
+        scheduled_metadata = (scheduled or {}).get("metadata_json") or {}
+        scheduled_input = scheduled_metadata.get("input_summary") or {}
+        contributions = scheduled_input.get("tier_contributions") or {}
+        tier_counts = (
+            {
+                name: int(value.get("slot_count", 0))
+                for name, value in contributions.items()
+            }
+            if contributions
+            else (reserve or {}).get("tier_counts", {})
+        )
         tier_total = sum(tier_counts.values())
         tier_share = (
             {
@@ -924,6 +1067,20 @@ class DashboardService:
         direct_ev = any(
             row.get("ev_source") == "charger" and row.get("ev_power_w") is not None
             for row in rows
+        )
+        training_policy = str(
+            scheduled_metadata.get(
+                "training_policy",
+                getattr(self.health, "demand_training_policy", "legacy_all_eligible"),
+            )
+        )
+        provenance = summarize_training_provenance(
+            all_rows=rows,
+            selected_rows=[
+                (_utc(row["slot_utc"]), classify_training_cohort(dict(row)))
+                for row in eligible_rows
+            ],
+            policy=training_policy,
         )
         latest = rows[-1] if rows else {}
         latest_domains = latest.get("health_domains_json") or {}
@@ -949,6 +1106,28 @@ class DashboardService:
             for row in rows
             if (value := _number(row.get("balance_residual_w"))) is not None
         ]
+        residual_rows = sorted(
+            (
+                {
+                    "slot_utc": _utc(row["slot_utc"]).isoformat(),
+                    "residual_w": _number(row.get("balance_residual_w")),
+                    "house_consumption_w": _number(row.get("house_consumption_w")),
+                    "pv_power_w": _number(row.get("pv_power_w")),
+                    "grid_import_power_w": _number(row.get("grid_import_power_w")),
+                    "battery_charge_power_w": _number(
+                        row.get("battery_charge_power_w")
+                    ),
+                }
+                for row in rows
+                if _number(row.get("balance_residual_w")) is not None
+            ),
+            key=lambda item: abs(float(item["residual_w"])),
+            reverse=True,
+        )
+        tolerance = float(getattr(self.health, "balance_tolerance_w", 250.0))
+        anomalies = [
+            item for item in residual_rows if abs(float(item["residual_w"])) > tolerance
+        ]
         return DataQualityResponse(
             range_start_utc=start_utc,
             range_end_utc=end_utc,
@@ -970,7 +1149,7 @@ class DashboardService:
             forecast_tier_usage=tier_counts,
             forecast_tier_share=tier_share,
             independent_ev_telemetry_available=direct_ev,
-            ev_contamination_warning=not direct_ev,
+            ev_contamination_warning=provenance.unidentified_ev_contamination_risk,
             ev_integration_configured=ev_configured,
             ev_telemetry_available=bool(latest_ev_health.get("available")),
             ev_telemetry_fresh=latest.get("ev_telemetry_fresh"),
@@ -995,7 +1174,60 @@ class DashboardService:
             average_absolute_balance_residual_w=(
                 sum(residuals) / len(residuals) if residuals else None
             ),
+            residual_median_w=_percentile(residuals, 50),
+            residual_p95_w=_percentile(residuals, 95),
+            residual_max_w=max(residuals) if residuals else None,
+            rows_above_tolerance=len(anomalies),
+            latest_anomaly=(
+                max(anomalies, key=lambda item: str(item["slot_utc"]))
+                if anomalies
+                else None
+            ),
+            top_recent_anomalies=anomalies[:10],
+            weather_features=(
+                "available"
+                if any(row.get("temperature_c") is not None for row in rows)
+                else "unavailable"
+            ),
+            training_policy=training_policy,
+            training_cohort_counts={
+                "verified_non_ev": provenance.verified_non_ev_count,
+                "direct_ev_separated": provenance.direct_ev_separated_count,
+                "pre_ev_telemetry_unknown": provenance.pre_ev_unknown_count,
+                "suspected_historical_ev": provenance.suspected_unreviewed_count,
+                "unknown": provenance.unknown_count,
+            },
+            verified_share=provenance.verified_share,
+            unverified_share=provenance.unverified_share,
+            contamination_reason=provenance.contamination_reason,
+            first_verified_ev_telemetry_utc=(
+                provenance.first_verified_ev_telemetry_utc
+            ),
+            exact_slots_currently_qualified=int(
+                scheduled_input.get("exact_slots_currently_qualified", 0)
+            ),
+            exact_slot_coverage_percent=float(
+                scheduled_input.get("exact_slot_coverage_percent", 0)
+            ),
+            historic_missing_slots=gap["missing_slots"],
+            current_24h_coverage_percent=recent_gap["coverage_percent"],
+            current_collection_healthy=(
+                bool(slots)
+                and (end_utc - max(slots)).total_seconds() <= 15 * 60
+                and recent_gap["coverage_percent"] >= 95
+            ),
         )
+
+
+def _percentile(values: list[float], percentile: int) -> float | None:
+    if not values:
+        return None
+    ordered = sorted(values)
+    index = (len(ordered) - 1) * percentile / 100
+    lower = int(index)
+    upper = min(lower + 1, len(ordered) - 1)
+    fraction = index - lower
+    return ordered[lower] * (1 - fraction) + ordered[upper] * fraction
 
 
 def resolve_window(
@@ -1188,6 +1420,18 @@ def _attempt_json(row: dict[str, Any] | None) -> dict[str, Any] | None:
         if result.get(name) is not None:
             result[name] = _utc(result[name]).isoformat()
     return result
+
+
+def _retention_health(
+    enabled: bool,
+    latest: dict[str, Any] | None,
+    diagnostics: dict[str, Any],
+) -> str:
+    if not enabled:
+        return "disabled"
+    if not diagnostics.get("steady_state_capacity_ok", False):
+        return "unhealthy_capacity"
+    return "healthy" if latest and latest.get("status") == "success" else "pending"
 
 
 def _number(value: Any) -> float | None:

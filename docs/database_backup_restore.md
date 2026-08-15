@@ -1,5 +1,12 @@
 # Database backup, restore, and rollback
 
+v0.5.1 requires a fresh verified dump and disposable restore before the App
+update. Production is already expected at revision `20260813_01`, so no database
+migration or schema rollback is required. Record observation/audit counts before
+and after. If the v0.5.1 App fails, stop it, confirm zero collectors, restore/run
+v0.5.0 against the unchanged `20260813_01` schema, confirm exactly one collector,
+and verify observations advance.
+
 For v0.5.0, create and restore-test the production PostgreSQL dump only after the
 immutable release artifact is validated and discoverable. Keep v0.4.0 collecting
 until the maintenance window; then record counts and stop every collector before

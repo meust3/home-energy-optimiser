@@ -46,7 +46,7 @@ def test_v041_schema_reports_clean_migration_required_failure(revision_database_
 
     assert report["connectivity"] is True
     assert report["current_revision"] == "20260811_01"
-    assert report["expected_revision"] == "20260812_01"
+    assert report["expected_revision"] == "20260813_01"
     assert report["schema_status"] == "schema_outdated"
     assert report["migration_required"] is True
     assert report["summary"] == "FAIL"
@@ -69,7 +69,7 @@ def test_v050_schema_reports_healthy(revision_database_url):
 
     report = check_database(revision_database_url, application_readiness=True)
 
-    assert report["current_revision"] == "20260812_01"
+    assert report["current_revision"] == "20260813_01"
     assert report["schema_status"] == "schema_current"
     assert report["migration_required"] is False
     assert report["summary"] == "PASS"
@@ -90,7 +90,7 @@ def test_missing_v050_table_is_reported_without_querying_it(revision_database_ur
 
     report = check_database(revision_database_url, application_readiness=True)
 
-    assert report["current_revision"] == "20260812_01"
+    assert report["current_revision"] == "20260813_01"
     assert report["schema_status"] == "table_missing_unexpectedly"
     assert report["migration_required"] is False
     assert report["missing_tables"] == ["forecast_point_scores"]
@@ -122,12 +122,12 @@ def test_unknown_newer_revision_is_distinguished_as_ahead(revision_database_url)
     command.upgrade(alembic_config(revision_database_url), "head")
     engine = create_database_engine(revision_database_url)
     with engine.begin() as connection:
-        connection.execute(text("UPDATE alembic_version SET version_num='20260813_01'"))
+        connection.execute(text("UPDATE alembic_version SET version_num='20260814_01'"))
     engine.dispose()
 
     report = check_database(revision_database_url)
 
-    assert report["current_revision"] == "20260813_01"
+    assert report["current_revision"] == "20260814_01"
     assert report["schema_status"] == "schema_ahead"
     assert report["migration_required"] is False
     assert report["summary"] == "FAIL"

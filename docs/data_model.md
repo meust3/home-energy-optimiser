@@ -1,5 +1,10 @@
 # Read-only operational data model
 
+Revision `20260813_01` adds only `forecast_accuracy_rollups` and
+`forecast_maintenance_runs`. It does not alter/rebuild `observations`. EV candidate
+state is not persisted; reviewed exclusions reuse existing audited annotation
+tables.
+
 ## Alembic revision 20260812_01: forecast and reserve audit
 
 The additive v0.5.0 head creates `forecast_point_scores`,

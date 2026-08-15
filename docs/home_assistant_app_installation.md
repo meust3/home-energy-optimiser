@@ -1,5 +1,28 @@
 # Home Assistant App installation
 
+v0.5.1 adds `demand_training_policy` (new App default `verified_preferred`),
+90-day point detail, 365-day run metadata, a 30-day calibration window, and
+`retention_enabled=false`. Production is already expected at `20260813_01`, so
+confirm that revision but do not run an unnecessary migration. Prove
+collection/aligned forecasting before enabling retention.
+
+An existing v0.5.0 installation retains its persisted overrides, but Home Assistant
+Supervisor merges them over the new manifest defaults both for effective options
+and update-schema validation. It therefore receives
+`demand_training_policy=verified_preferred` and `retention_enabled=false`. The
+v0.5.1 App parser independently supplies the same values if handed an old-shaped
+JSON file without either key. For this production installation, still open the App
+configuration and explicitly save:
+
+```yaml
+demand_training_policy: verified_preferred
+retention_enabled: false
+```
+
+The implementation was verified against Home Assistant Supervisor source at
+commit `bebb5ab5cbd01f6560e0658952d29ab698ef932b`. Do not rely only on implicit
+merging for the production record, and do not enable retention during the upgrade.
+
 Version `0.3.2` is the pre-migration App. Version `0.4.0` introduced the additive
 schema change for optional read-only vehicle telemetry.
 Version `0.4.1` is a schema-neutral hotfix for power-sign configuration and
@@ -123,7 +146,7 @@ configured sign pair and the grid/battery history charts must populate.
 
 ## v0.4.1 publication and repair order
 
-No schema migration is required. Validate, commit the release candidate, push its
+No schema migration is required. Validate, commit the release, push its
 release branch, build/test the exact commit image, tag and push `v0.4.1`, build/test
 the immutable tag, merge or fast-forward `main`, refresh the App store, and confirm
 v0.4.1 is offered before updating. Configure the reviewed sign values, update the

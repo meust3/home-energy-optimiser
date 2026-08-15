@@ -1,5 +1,14 @@
 # SQLite to PostgreSQL migration
 
+The v0.5.1 application head is `20260813_01`, and production is expected to
+already be at that revision before this App-only update. Confirm with
+`python -m alembic current` and `python tools/check_database.py
+--application-readiness`; do not run an unnecessary upgrade or downgrade. Startup
+never migrates. For development and recovery exercises from `20260812_01`, the
+physical upgrade is `python -m alembic upgrade 20260813_01` and rollback is
+`python -m alembic downgrade 20260812_01`. The downgrade removes only v0.5.1
+rollup/maintenance data. Never substitute `alembic stamp`.
+
 ## v0.5.0 revision 20260812_01
 
 Do not migrate production until the exact v0.5.0 commit image and immutable tag have

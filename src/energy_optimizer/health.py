@@ -63,12 +63,18 @@ def _issue(
     )
 
 
-def _domain(issues: list[HealthIssue], required_for: list[HealthUse]) -> HealthDomain:
+def _domain(
+    issues: list[HealthIssue],
+    required_for: list[HealthUse],
+    *,
+    entity_freshness: dict[str, str] | None = None,
+) -> HealthDomain:
     return HealthDomain(
         is_healthy=not any(issue.severity == "error" for issue in issues),
         score=max(0, 100 - sum(issue.deduction for issue in issues)),
         issues=issues,
         required_for=required_for,
+        entity_freshness=entity_freshness or {},
     )
 
 
@@ -78,6 +84,8 @@ def _check_numeric_entity(
     *,
     current: datetime,
     freshness_minutes: int,
+    unchanged_grace_minutes: int | None = None,
+    zero_can_be_unchanged: bool = False,
 ) -> list[HealthIssue]:
     state = states.get(entity_id)
     if state is None:
@@ -91,13 +99,21 @@ def _check_numeric_entity(
         issues.append(
             _issue("malformed_number", "Numeric state could not be parsed", entity_id)
         )
-    if current - state.last_updated.astimezone(UTC) > timedelta(
-        minutes=freshness_minutes
-    ):
+    age = current - state.last_updated.astimezone(UTC)
+    value = parse_number(state.state)
+    stale = age > timedelta(minutes=freshness_minutes)
+    legitimate_unchanged = stale and (
+        (zero_can_be_unchanged and value == 0)
+        or (
+            unchanged_grace_minutes is not None
+            and age <= timedelta(minutes=unchanged_grace_minutes)
+        )
+    )
+    if stale and not legitimate_unchanged:
         issues.append(
             _issue(
-                "stale_state",
-                f"Entity update exceeds {freshness_minutes}-minute policy",
+                "source_update_stale",
+                f"Entity source update exceeds its {freshness_minutes}-minute policy",
                 entity_id,
                 warning=True,
             )
@@ -111,6 +127,7 @@ def _telemetry_health(
     current: datetime,
 ) -> HealthDomain:
     issues: list[HealthIssue] = []
+    freshness_statuses: dict[str, str] = {}
     for entity_id in TELEMETRY_ENTITIES:
         freshness = (
             config.battery_soc_freshness_minutes
@@ -123,7 +140,20 @@ def _telemetry_health(
                 entity_id,
                 current=current,
                 freshness_minutes=freshness,
+                unchanged_grace_minutes=(
+                    max(freshness, 60) if entity_id == ids.GOODWE_BATTERY_SOC else None
+                ),
+                zero_can_be_unchanged=entity_id == ids.GOODWE_PV_POWER,
             )
+        )
+        freshness_statuses[entity_id] = _freshness_status(
+            states.get(entity_id),
+            current=current,
+            freshness_minutes=freshness,
+            unchanged_grace_minutes=(
+                max(freshness, 60) if entity_id == ids.GOODWE_BATTERY_SOC else None
+            ),
+            zero_can_be_unchanged=entity_id == ids.GOODWE_PV_POWER,
         )
     soc_state = states.get(ids.GOODWE_BATTERY_SOC)
     soc = parse_number(soc_state.state) if soc_state else None
@@ -146,7 +176,40 @@ def _telemetry_health(
                     entity_id,
                 )
             )
-    return _domain(issues, ["display", "load_profile", "grid_charge", "battery_export"])
+    return _domain(
+        issues,
+        ["display", "load_profile", "grid_charge", "battery_export"],
+        entity_freshness=freshness_statuses,
+    )
+
+
+def _freshness_status(
+    state: HomeAssistantState | None,
+    *,
+    current: datetime,
+    freshness_minutes: int,
+    unchanged_grace_minutes: int | None = None,
+    zero_can_be_unchanged: bool = False,
+) -> str:
+    if state is None:
+        return "missing"
+    lowered = state.state.strip().lower()
+    if lowered == "unavailable":
+        return "unavailable"
+    if lowered == "unknown":
+        return "unknown"
+    value = parse_number(state.state)
+    if value is None:
+        return "invalid"
+    age = current - state.last_updated.astimezone(UTC)
+    if age <= timedelta(minutes=freshness_minutes):
+        return "available_and_fresh"
+    if (zero_can_be_unchanged and value == 0) or (
+        unchanged_grace_minutes is not None
+        and age <= timedelta(minutes=unchanged_grace_minutes)
+    ):
+        return "available_but_unchanged"
+    return "source_update_stale"
 
 
 def _price_health(

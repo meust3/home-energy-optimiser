@@ -8,7 +8,7 @@ from alembic.config import Config
 from alembic.script import ScriptDirectory
 from sqlalchemy import Engine, inspect, text
 
-ALEMBIC_HEAD = "20260812_01"
+ALEMBIC_HEAD = "20260813_01"
 LEGACY_SCHEMA_VERSION = 6
 
 

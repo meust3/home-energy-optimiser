@@ -6,8 +6,8 @@
   <meta name="color-scheme" content="light dark">
   <base href="__INGRESS_BASE_PATH__">
   <title>Energy Optimiser</title>
-  <link rel="stylesheet" href="static/app.css?v=0.5.0">
-  <script type="module" src="static/app.js?v=0.5.0"></script>
+  <link rel="stylesheet" href="static/app.css?v=0.5.1">
+  <script type="module" src="static/app.js?v=0.5.1"></script>
 </head>
 <body>
   <a class="skip-link" href="#main">Skip to dashboard content</a>
@@ -27,6 +27,7 @@
     <a href="#history" data-tab="history">History</a>
     <a href="#forecasts" data-tab="forecasts">Forecasts</a>
     <a href="#forecast-operations" data-tab="forecast-operations">Forecast Operations</a>
+    <a href="#calibration" data-tab="calibration">Calibration</a>
     <a href="#reserve" data-tab="reserve">Reserve</a>
     <a href="#data-quality" data-tab="data-quality">Data Quality</a>
   </nav>
@@ -79,6 +80,15 @@
       <div id="operations-status" class="quality-grid"></div>
       <div id="accuracy-summary" class="summary-row"></div>
       <div id="accuracy-content" class="chart-grid"></div>
+    </section>
+
+    <section id="calibration" class="page" hidden aria-labelledby="calibration-title">
+      <div class="section-heading">
+        <div><p class="eyebrow">Out-of-sample measurement</p><h2 id="calibration-title">Forecast calibration</h2></div>
+      </div>
+      <p id="calibration-state" class="state-message" role="status">Select this tab to load aligned-run calibration.</p>
+      <div id="calibration-content" class="quality-grid"></div>
+      <p class="muted">Statuses use project engineering heuristics. Poor calibration is analytical and does not trigger the App watchdog.</p>
     </section>
 
     <section id="history" class="page" hidden aria-labelledby="history-title">

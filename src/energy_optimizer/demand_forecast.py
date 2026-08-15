@@ -8,6 +8,12 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field
 
 from energy_optimizer.timestamps import aware_datetime
+from energy_optimizer.training_provenance import (
+    TrainingCohort,
+    TrainingPolicy,
+    classify_training_cohort,
+    summarize_training_provenance,
+)
 
 FallbackMode = Literal["banded", "flat"]
 ForecastTier = Literal[
@@ -85,6 +91,17 @@ class DemandDiagnostics(BaseModel):
     same_partial_day_samples_excluded: int = Field(ge=0)
     future_samples_excluded: int = Field(ge=0)
     prior_forecast_mape: float | None = Field(default=None, ge=0)
+    training_policy: TrainingPolicy = "legacy_all_eligible"
+    training_sample_count: int = Field(default=0, ge=0)
+    training_cohort_counts: dict[str, int] = Field(default_factory=dict)
+    verified_share: float = Field(default=0, ge=0, le=1)
+    unverified_share: float = Field(default=0, ge=0, le=1)
+    first_verified_ev_telemetry_utc: datetime | None = None
+    verified_history_start_utc: datetime | None = None
+    contamination_reason: str | None = None
+    exact_slots_total: int = Field(default=2016, gt=0)
+    exact_slot_coverage_percent: float = Field(default=0, ge=0, le=100)
+    exact_slots_currently_qualified: int = Field(default=0, ge=0, le=2016)
 
 
 class DemandForecast(BaseModel):
@@ -126,6 +143,7 @@ def forecast_household_demand(
     medium_low_ceiling_complete_days: int = 7,
     weak_tier_share_ceiling: float = 0.50,
     prior_forecast_mape: float | None = None,
+    training_policy: TrainingPolicy = "legacy_all_eligible",
 ) -> DemandForecast:
     """Forecast each five-minute slot using the strongest available tier."""
     if start_local.tzinfo is None or end_local.tzinfo is None:
@@ -167,6 +185,7 @@ def forecast_household_demand(
     insufficient_exact = 0
     no_exact = 0
     total_energy = 0.0
+    selected_samples: list[_Sample] = []
     while current_utc < end_utc:
         local = current_utc.astimezone(start_local.tzinfo)
         segment_start = max(current_utc, start_utc)
@@ -191,7 +210,9 @@ def forecast_household_demand(
             tier2_minimum=tier2_minimum_samples,
             tier3_minimum=tier3_minimum_samples,
             tier4_minimum=tier4_minimum_samples,
+            training_policy=training_policy,
         )
+        selected_samples.extend(selected)
         if tier == "tier5_fallback":
             power = band_powers[band]
             variability = None
@@ -269,7 +290,17 @@ def forecast_household_demand(
         if total_slots
         else 1.0
     )
-    independent_ev = any(sample.independent_ev_telemetry for sample in samples)
+    provenance = summarize_training_provenance(
+        all_rows=rows,
+        selected_rows=[(sample.local, sample.cohort) for sample in selected_samples],
+        policy=training_policy,
+    )
+    independent_ev = provenance.verified_share > 0
+    exact_slots_qualified = sum(
+        _policy_sample_count(values, training_policy, minimum_samples)
+        >= minimum_samples
+        for values in exact.values()
+    )
     confidence_score, confidence, ceilings = _forecast_confidence(
         contributions,
         fallback_share,
@@ -289,6 +320,16 @@ def forecast_household_demand(
             "medium",
             ["zero_length_horizon_no_load_samples_required"],
         )
+    if training_policy != "legacy_all_eligible" and provenance.unverified_share > 0:
+        confidence_score = min(confidence_score, 79)
+        if "unverified_ev_history_caps_medium" not in ceilings:
+            ceilings.append("unverified_ev_history_caps_medium")
+        if confidence_score >= 55:
+            confidence = "medium"
+        elif confidence_score >= 40:
+            confidence = "medium_low"
+        else:
+            confidence = "low"
     diagnostics = DemandDiagnostics(
         total_observations_examined=len(rows),
         eligible_baseline_observations=len(samples),
@@ -323,12 +364,7 @@ def forecast_household_demand(
         ),
         weak_estimate_share=None if total_slots == 0 else round(weak_share, 3),
         independent_ev_telemetry_available=independent_ev,
-        ev_contamination_risk=(
-            None
-            if independent_ev
-            else "No independent EV power telemetry in eligible history; household "
-            "demand may contain unidentified EV charging."
-        ),
+        ev_contamination_risk=provenance.contamination_reason,
         known_ev_session_rows_excluded=sum(
             1
             for original in rows
@@ -345,10 +381,30 @@ def forecast_household_demand(
             if dict(original).get("ev_power_w") is not None
             and bool(dict(original).get("baseline_training_eligible"))
         ),
-        unidentified_ev_contamination_risk=not independent_ev,
+        unidentified_ev_contamination_risk=(
+            provenance.unidentified_ev_contamination_risk
+        ),
         same_partial_day_samples_excluded=same_day_excluded,
         future_samples_excluded=future_excluded,
         prior_forecast_mape=prior_forecast_mape,
+        training_policy=training_policy,
+        training_sample_count=provenance.training_sample_count,
+        training_cohort_counts={
+            "verified_non_ev": provenance.verified_non_ev_count,
+            "verified_ev_excluded": provenance.verified_ev_excluded_count,
+            "direct_ev_separated": provenance.direct_ev_separated_count,
+            "manual_historical_ev": provenance.manual_ev_excluded_count,
+            "pre_ev_telemetry_unknown": provenance.pre_ev_unknown_count,
+            "suspected_historical_ev": provenance.suspected_unreviewed_count,
+            "unknown": provenance.unknown_count,
+        },
+        verified_share=provenance.verified_share,
+        unverified_share=provenance.unverified_share,
+        first_verified_ev_telemetry_utc=provenance.first_verified_ev_telemetry_utc,
+        verified_history_start_utc=provenance.verified_history_start_utc,
+        contamination_reason=provenance.contamination_reason,
+        exact_slot_coverage_percent=round(exact_slots_qualified / 2016 * 100, 2),
+        exact_slots_currently_qualified=exact_slots_qualified,
     )
     fallback_contributions = {
         band: FallbackContribution(
@@ -389,11 +445,15 @@ def forecast_household_demand(
 
 class _Sample:
     def __init__(
-        self, local: datetime, power_kw: float, independent_ev_telemetry: bool
+        self, local: datetime, power_kw: float, cohort: TrainingCohort
     ) -> None:
         self.local = local
         self.power_kw = power_kw
-        self.independent_ev_telemetry = independent_ev_telemetry
+        self.cohort = cohort
+
+    @property
+    def verified_clean(self) -> bool:
+        return self.cohort in {"verified_non_ev", "direct_ev_separated"}
 
 
 def _eligible_samples(
@@ -429,12 +489,7 @@ def _eligible_samples(
             _Sample(
                 local,
                 max(float(value), 0) / 1000,
-                row.get("ev_power_w") is not None
-                or row.get("ev_source") == "charger"
-                or (
-                    row.get("ev_source") == "byd_vehicle_cloud"
-                    and bool(row.get("ev_telemetry_fresh"))
-                ),
+                classify_training_cohort(row),
             )
         )
     return samples, ineligible, same_day_excluded, future_excluded
@@ -450,6 +505,7 @@ def _select_tier(
     tier2_minimum: int,
     tier3_minimum: int,
     tier4_minimum: int,
+    training_policy: TrainingPolicy,
 ) -> tuple[ForecastTier, list[_Sample], str]:
     choices = (
         ("tier1_exact", exact_values, tier1_minimum),
@@ -458,7 +514,13 @@ def _select_tier(
         ("tier4_recent_band", recent_band_values, tier4_minimum),
     )
     for tier, values, required in choices:
-        if len(values) >= required:
+        verified = [sample for sample in values if sample.verified_clean]
+        if (
+            training_policy in {"verified_preferred", "verified_only"}
+            and len(verified) >= required
+        ):
+            return tier, verified, _tier_description(tier)
+        if training_policy != "verified_only" and len(values) >= required:
             return tier, values, _tier_description(tier)
     return "tier5_fallback", [], _tier_description("tier5_fallback")
 
@@ -471,6 +533,17 @@ def _tier_description(tier: str) -> str:
         "tier4_recent_band": "Recent same-band median; not an exact time pattern.",
         "tier5_fallback": "Configured fallback assumption; not learned from history.",
     }[tier]
+
+
+def _policy_sample_count(
+    values: list[_Sample], policy: TrainingPolicy, required: int
+) -> int:
+    verified = sum(sample.verified_clean for sample in values)
+    if policy == "verified_only":
+        return verified
+    if policy == "verified_preferred" and verified >= required:
+        return verified
+    return len(values)
 
 
 def _ineligibility_reason(row: dict[str, Any]) -> str | None:

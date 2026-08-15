@@ -1,5 +1,10 @@
 # Forecast-series storage
 
+v0.5.1 adds compact daily accuracy rollups and audited maintenance at revision
+`20260813_01`; see [forecast_retention.md](forecast_retention.md). New run metadata
+includes model/alignment versions, policy, cohort composition, and contamination
+risk. Legacy rows remain immutable.
+
 Version 0.5.0 adds genuine scheduled `baseline_household_load` runs with source
 `scheduled_forecast_operations`. Their creation/horizon/model/input metadata and
 point values are immutable. Delayed actuals and errors are written only to

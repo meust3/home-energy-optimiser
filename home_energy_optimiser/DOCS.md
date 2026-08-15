@@ -1,9 +1,25 @@
 # Home Energy Optimiser
 
+## v0.5.1 forecast calibration and hygiene options
+
+New installs default `demand_training_policy` to `verified_preferred`. Detailed
+points/scores default to 90 days and run/reserve/operation metadata to 365 days.
+`retention_enabled` remains false until aligned collection and calibration are
+healthy. `calibration_window_days` defaults to 30. These add no control capability.
+
+Existing v0.5.0 persisted overrides are merged over the new manifest defaults by
+Supervisor, and the App parser independently defaults omitted keys. The effective
+values are therefore `verified_preferred` and `false`. For this production
+installation, explicitly save both values in the App UI after update and do not
+enable retention during the upgrade. When later enabled, retention runs once daily
+in at most six 5,000-row detail transactions (30,000 rows/table/day versus an
+estimated 13,824 created).
+
 ## v0.5.0 forecast operations options
 
-Upgrade PostgreSQL explicitly to
-`20260812_01` before installing; the App never migrates on startup.
+Production is already expected at `20260813_01`; verify that revision before
+installing v0.5.1, but do not run an unnecessary migration. The App never migrates
+on startup.
 
 ```yaml
 forecast_operations_enabled: false

@@ -1,5 +1,9 @@
 # Security and safety boundary
 
+v0.5.1 adds GET dashboard routes and local CLI tools only. Detection, calibration,
+comparison, and dry-run inspection do not call Home Assistant services or devices.
+Retention writes require explicit `--apply` or its disabled-by-default option.
+
 v0.5.0 adds analytical database writes only. The coordinator imports no Home
 Assistant client, service API, Modbus or device-control implementation. It starts no
 worker/process/collector, exposes no run-now route, and stores only a bounded

@@ -760,6 +760,7 @@ def _forecast_demand(
         medium_low_ceiling_complete_days=config.demand_medium_low_ceiling_complete_days,
         weak_tier_share_ceiling=config.demand_weak_tier_share_ceiling,
         prior_forecast_mape=prior_mape,
+        training_policy=config.demand_training_policy,
     )
 
 

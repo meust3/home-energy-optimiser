@@ -1,5 +1,19 @@
 # Forecast operations
 
+## v0.5.1 operational alignment
+
+Creation time and forecast start are distinct. A run created at `10:00:20` starts
+at `10:05:00`; a creation exactly on a five-minute boundary may start there. Every
+scheduled 24-hour run has 288 full five-minute points and records
+`alignment_version=full_5m_v1`. Live/ad-hoc reserve calculations retain their
+partial-boundary semantics. Scheduled reserve evaluation starts at the actual run
+creation time. The partial interval from creation to aligned forecast start is
+included once in reserve demand and is not added to the persisted operational
+forecast. Persisted reconciliation metadata records that interval, exact shared
+full intervals, any reserve-only end boundary, the 288-point linked run, and the
+history `as_of` cutoff. Retention, when enabled, is a bounded daily multi-batch
+phase in this same coordinator; there is no second scheduler.
+
 Version 0.5.0 is a strictly advisory release. Forecast
 operations are disabled by default and run inside the existing Home Assistant App
 Python process. There is no second container, collector, worker pool or cron daemon.
