@@ -140,6 +140,18 @@ def load_config(env_file: Path | None = Path(".env")) -> CollectorConfig:
         ),
         retention_enabled=_env_bool("RETENTION_ENABLED"),
         calibration_window_days=_positive_env_int("CALIBRATION_WINDOW_DAYS", 30),
+        calibration_min_complete_days=_positive_env_int(
+            "CALIBRATION_MIN_COMPLETE_DAYS", 7
+        ),
+        calibration_complete_day_coverage_percent=float(
+            os.getenv("CALIBRATION_COMPLETE_DAY_COVERAGE_PERCENT", "95")
+        ),
+        calibration_min_weekday_days=int(
+            os.getenv("CALIBRATION_MIN_WEEKDAY_DAYS", "5")
+        ),
+        calibration_min_weekend_days=int(
+            os.getenv("CALIBRATION_MIN_WEEKEND_DAYS", "1")
+        ),
         minimum_soc_percent=float(os.getenv("MINIMUM_SOC_PERCENT", "20")),
         emergency_reserve_kwh=float(os.getenv("EMERGENCY_RESERVE_KWH", "6")),
         reserve_history_days=int(os.getenv("RESERVE_HISTORY_DAYS", "28")),
@@ -328,6 +340,18 @@ def load_reserve_config(env_file: Path | None = Path(".env")) -> CollectorConfig
         ),
         retention_enabled=_env_bool("RETENTION_ENABLED"),
         calibration_window_days=_positive_env_int("CALIBRATION_WINDOW_DAYS", 30),
+        calibration_min_complete_days=_positive_env_int(
+            "CALIBRATION_MIN_COMPLETE_DAYS", 7
+        ),
+        calibration_complete_day_coverage_percent=float(
+            os.getenv("CALIBRATION_COMPLETE_DAY_COVERAGE_PERCENT", "95")
+        ),
+        calibration_min_weekday_days=int(
+            os.getenv("CALIBRATION_MIN_WEEKDAY_DAYS", "5")
+        ),
+        calibration_min_weekend_days=int(
+            os.getenv("CALIBRATION_MIN_WEEKEND_DAYS", "1")
+        ),
     )
 
 

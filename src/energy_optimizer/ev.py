@@ -4,6 +4,11 @@ from collections.abc import Sequence
 from datetime import UTC, datetime
 from typing import Any
 
+from energy_optimizer.data_validation import (
+    INVALID_NEGATIVE_HOUSEHOLD_DEMAND,
+    materially_negative_household_demand,
+    nonnegative_household_demand,
+)
 from energy_optimizer.models import (
     CollectorConfig,
     EVTelemetryHealth,
@@ -30,6 +35,9 @@ def calculate_baseline_load(
 ) -> tuple[float | None, bool, str | None]:
     if house_consumption_w is None:
         return None, False, "house_consumption_missing"
+    if materially_negative_household_demand(house_consumption_w):
+        return None, False, INVALID_NEGATIVE_HOUSEHOLD_DEMAND
+    house_consumption_w = nonnegative_household_demand(house_consumption_w)
     if ev_power_w is not None:
         return max(house_consumption_w - max(ev_power_w, 0.0), 0.0), True, None
     if ev_charging_active is False:

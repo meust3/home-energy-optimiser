@@ -1,5 +1,14 @@
 # Dashboard API
 
+GET `/api/v1/forecast-calibration` now reads durable rollups and exposes requested
+and actual ranges plus explicit truncation. GET
+`/api/v1/solar-forecast-diagnostics` returns privacy-minimized daily context.
+Reserve GET output includes linked-identity and empirical-underforecast fields.
+Calibration output gives explicit raw-row, eligible-score, unique-target,
+target/horizon, distinct-date, and durable-rollup counts. Reserve output gives an
+explicit reason whenever tradable calibration remains false, plus WAPE, signed
+energy error, and P90/P95 cumulative underforecast evidence.
+
 v0.5.1 adds GET-only `/api/v1/forecast-calibration` and
 `/api/v1/forecast-storage`. No mutation or run-now route is present. Reserve
 responses add only a calibration warning; calculations are unchanged.

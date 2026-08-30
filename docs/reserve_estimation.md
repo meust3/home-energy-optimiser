@@ -1,5 +1,9 @@
 # Battery reserve estimation
 
+v0.5.2 changes diagnostics and conservative readiness gating only. Tier hierarchy,
+Tier 2 arithmetic mean, technical/emergency/20% reserve policy, uncertainty
+arithmetic, opportunity selection, and reserve-energy calculations are unchanged.
+
 v0.5.1 does not change reserve arithmetic, opportunity selection, battery
 assumptions, or the Tier 2 mean. The dashboard overlays forecast calibration;
 tradable energy remains advisory and is shown as not calibration-certified while

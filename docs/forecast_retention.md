@@ -1,5 +1,10 @@
 # Forecast retention
 
+Retention remains disabled. If explicitly enabled later, v0.5.2 fails closed
+unless durable identity/date/horizon rollups already represent every candidate
+prediction row. Rollups are rebuilt as whole local-date units; partial batches are
+never treated as calibration-complete.
+
 Default policy retains detailed forecast points and scores for 90 days; forecast
 run metadata, reserve runs and their opportunity details, and operation attempts
 for 365 days; compact daily accuracy rollups indefinitely. Observations, EV
@@ -13,13 +18,19 @@ keeps 5,000 as the detail transaction size and permits at most six independently
 committed batches per invocation: 30,000 expired points and their corresponding
 score rows per table per day. Metadata uses separate 500-row bounded transactions.
 
-Every detail transaction writes or updates compact
+The v0.5.1 implementation wrote or updated compact
 date/model/alignment/policy/horizon/day-type rollups before deleting that batch. A
 rollup or delete failure rolls back only the current batch; earlier committed
 batches remain audited and later detail remains intact. The forecast-operation
 advisory lock is released before retention begins, so no transaction or database
 lock is held between batches. Deadline and shutdown checks occur between batches;
 there is no unbounded loop, second scheduler, or same-day retry.
+
+v0.5.2 supersedes that write-while-pruning path: complete local-date rollups are
+refreshed before retention, and pruning requires exact equality between supported
+candidate detail rows and calculated durable rollup row counts. Unsupported
+forecast types/sources, legacy defaulted rollups, partial-date boundaries, or any
+count mismatch block deletion. Retention remains disabled.
 
 Diagnostics expose eligible, pruned, and remaining rows for both detail tables,
 batches executed, batch size, the 30,000-row maximum, the 13,824-row/day estimate,

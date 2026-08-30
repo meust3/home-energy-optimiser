@@ -1,5 +1,10 @@
 # Forecast calibration
 
+v0.5.2 replaces overlap-based readiness with independent target-slot/local-date
+evidence while retaining raw row-weighted metrics. See
+[calibration_independence.md](calibration_independence.md). Seven 95%-complete
+dates, weekday/weekend evidence, and all horizons are required by default.
+
 Headline calibration uses one exact identity: `forecast_type`, `model_version`,
 `alignment_version`, and `training_policy`. For the intended v0.5.1 production
 configuration this is baseline household load,

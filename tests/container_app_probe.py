@@ -77,6 +77,10 @@ def parse_options() -> None:
     assert environment["FORECAST_RUN_RETENTION_DAYS"] == "365"
     assert environment["RETENTION_ENABLED"] == "false"
     assert environment["CALIBRATION_WINDOW_DAYS"] == "30"
+    assert environment["CALIBRATION_MIN_COMPLETE_DAYS"] == "7"
+    assert environment["CALIBRATION_COMPLETE_DAY_COVERAGE_PERCENT"] == "95.0"
+    assert environment["CALIBRATION_MIN_WEEKDAY_DAYS"] == "5"
+    assert environment["CALIBRATION_MIN_WEEKEND_DAYS"] == "1"
     assert environment["RESERVE_SNAPSHOT_ENABLED"] == "true"
     assert not runtime_path.exists()
     print(
@@ -139,7 +143,7 @@ def dashboard_smoke() -> None:
 
         def status(self):
             return StatusResponse(
-                app_version="0.5.1",
+                app_version="0.5.2",
                 overall_status="healthy",
                 collector_status="healthy",
                 database_status="healthy",
@@ -176,7 +180,7 @@ def dashboard_smoke() -> None:
         assert b'id="overview-ev"' in shell
         status, css = request(
             server,
-            prefix + "static/app.css?v=0.5.1",
+            prefix + "static/app.css?v=0.5.2",
             {"X-Ingress-Path": prefix},
         )
         assert status == 200 and b"prefers-color-scheme" in css

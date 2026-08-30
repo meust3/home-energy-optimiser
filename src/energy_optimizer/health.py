@@ -4,6 +4,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Literal
 
 from energy_optimizer import entity_ids as ids
+from energy_optimizer.data_validation import materially_negative_household_demand
 from energy_optimizer.models import (
     CollectorConfig,
     DataHealth,
@@ -176,6 +177,16 @@ def _telemetry_health(
                     entity_id,
                 )
             )
+    house_state = states.get(ids.GOODWE_HOUSE_CONSUMPTION)
+    house = parse_number(house_state.state) if house_state else None
+    if materially_negative_household_demand(house):
+        issues.append(
+            _issue(
+                "invalid_negative_household_demand",
+                "Household demand is materially negative; raw value is preserved",
+                ids.GOODWE_HOUSE_CONSUMPTION,
+            )
+        )
     return _domain(
         issues,
         ["display", "load_profile", "grid_charge", "battery_export"],

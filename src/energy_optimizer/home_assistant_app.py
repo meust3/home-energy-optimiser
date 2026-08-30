@@ -14,6 +14,7 @@ from sqlalchemy.engine import URL
 
 from energy_optimizer import entity_ids
 from energy_optimizer.config import ConfigurationError
+from energy_optimizer.data_validation import INVALID_NEGATIVE_HOUSEHOLD_DEMAND
 from energy_optimizer.db.migrations import current_revision, expected_revision
 from energy_optimizer.db.redaction import redact_database_urls
 from energy_optimizer.home_assistant import HomeAssistantClient, redact_secret
@@ -25,7 +26,7 @@ from energy_optimizer.models import (
 from energy_optimizer.persistence import ApplicationRepository, open_repository
 
 SUPERVISOR_CORE_API_URL = "http://supervisor/core/api"
-APP_VERSION = "0.5.1"
+APP_VERSION = "0.5.2"
 HEALTH_PORT = 8099
 OPTIONS_PATH_ENV = "HOME_ENERGY_APP_OPTIONS_PATH"
 SUPERVISOR_OPTIONS_PATH = Path("/data/options.json")
@@ -71,6 +72,10 @@ class HomeAssistantAppOptions(BaseModel):
     forecast_run_retention_days: int = Field(default=365, ge=90, le=3650)
     retention_enabled: bool = False
     calibration_window_days: int = Field(default=30, ge=1, le=365)
+    calibration_min_complete_days: int = Field(default=7, ge=1, le=365)
+    calibration_complete_day_coverage_percent: float = Field(default=95.0, gt=0, le=100)
+    calibration_min_weekday_days: int = Field(default=5, ge=0, le=365)
+    calibration_min_weekend_days: int = Field(default=1, ge=0, le=365)
 
     @model_validator(mode="after")
     def validate_forecast_schedule(self):
@@ -209,6 +214,12 @@ def app_environment(
         "FORECAST_RUN_RETENTION_DAYS": str(options.forecast_run_retention_days),
         "RETENTION_ENABLED": str(options.retention_enabled).lower(),
         "CALIBRATION_WINDOW_DAYS": str(options.calibration_window_days),
+        "CALIBRATION_MIN_COMPLETE_DAYS": str(options.calibration_min_complete_days),
+        "CALIBRATION_COMPLETE_DAY_COVERAGE_PERCENT": str(
+            options.calibration_complete_day_coverage_percent
+        ),
+        "CALIBRATION_MIN_WEEKDAY_DAYS": str(options.calibration_min_weekday_days),
+        "CALIBRATION_MIN_WEEKEND_DAYS": str(options.calibration_min_weekend_days),
     }
     return environment
 
@@ -256,6 +267,8 @@ def validate_startup(
             "forecast_operation_attempts",
             "reserve_runs",
             "reserve_opportunity_evaluations",
+            "forecast_accuracy_rollups",
+            "forecast_maintenance_runs",
         }
         if not required_tables.issubset(repository.table_counts().__dict__):
             raise ConfigurationError("Database application-readiness check failed")
@@ -290,6 +303,11 @@ class AppHealth:
     dashboard: str = "healthy"
     forecast_scheduler: str = "disabled"
     reserve_scheduler: str = "disabled"
+    calibration_rollups: str = "unknown"
+    calibration_status: str = "insufficient_data"
+    reserve_empirical_confidence: str = "unavailable"
+    solar_diagnostics: str = "optional"
+    invalid_household_demand: str = "none_current"
     last_forecast_success_utc: datetime | None = None
     last_reserve_success_utc: datetime | None = None
     next_forecast_run_utc: datetime | None = None
@@ -311,6 +329,12 @@ class AppHealth:
             self._home_assistant_failures = 0
             self.last_successful_collection_utc = datetime.now(UTC)
             self.last_slot_utc = observation.slot_utc.astimezone(UTC)
+            self.invalid_household_demand = (
+                "current_invalid"
+                if getattr(observation, "baseline_exclusion_reason", None)
+                == INVALID_NEGATIVE_HOUSEHOLD_DEMAND
+                else "none_current"
+            )
 
     def record_failure(self, component: str) -> None:
         with self._lock:
@@ -361,6 +385,10 @@ class AppHealth:
                     "degraded" if self._reserve_failures >= 3 else "warning"
                 )
 
+    def record_calibration_rollup(self, *, successful: bool) -> None:
+        with self._lock:
+            self.calibration_rollups = "healthy" if successful else "warning"
+
     def response(self, *, now: datetime | None = None) -> tuple[int, dict[str, Any]]:
         current = (now or datetime.now(UTC)).astimezone(UTC)
         with self._lock:
@@ -388,6 +416,11 @@ class AppHealth:
                 ),
                 "next_forecast_run_utc": _iso(self.next_forecast_run_utc),
                 "reserve_scheduler": self.reserve_scheduler,
+                "calibration_rollups": self.calibration_rollups,
+                "calibration_status": self.calibration_status,
+                "reserve_empirical_confidence": self.reserve_empirical_confidence,
+                "solar_diagnostics": self.solar_diagnostics,
+                "invalid_household_demand": self.invalid_household_demand,
                 "last_reserve_success_utc": _iso(self.last_reserve_success_utc),
                 "reserve_age_seconds": (
                     round((current - self.last_reserve_success_utc).total_seconds(), 1)

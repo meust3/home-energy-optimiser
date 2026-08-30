@@ -1,5 +1,9 @@
 # Forecast scoring
 
+Materially negative actual household demand (below -1 W) is preserved but scored
+ineligible with `invalid_actual_negative_household_demand`; errors remain null.
+Positive, zero, negative-zero, and documented sub-watt noise behavior is unchanged.
+
 For `full_5m_v1`, actual matching uses the healthy observation whose `slot_utc`
 equals the point start. Missing values remain missing and are never interpolated
 or changed to zero. Missing metadata means `legacy_execution_time`; historical

@@ -13,6 +13,11 @@ from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session
 
+from energy_optimizer.data_validation import (
+    INVALID_ACTUAL_NEGATIVE_HOUSEHOLD_DEMAND,
+    INVALID_NEGATIVE_HOUSEHOLD_DEMAND,
+    materially_negative_household_demand,
+)
 from energy_optimizer.db.engine import translate_database_error
 from energy_optimizer.db.models import (
     Base,
@@ -561,16 +566,17 @@ class DatabaseRepository:
         with Session(self.engine) as session:
             return [dict(row) for row in session.execute(statement).mappings()]
 
-    def forecast_calibration_rows_read_only(
-        self, *, after: datetime, before: datetime, limit: int = 25000
-    ) -> list[dict[str, Any]]:
-        """Return a bounded recent calibration sample without widening chart APIs."""
+    def forecast_rollup_detail_rows_read_only(
+        self, *, after: datetime, before: datetime, limit: int = 100_000
+    ) -> tuple[list[dict[str, Any]], bool]:
+        """Read one bounded rebuild window and explicitly report truncation."""
         _require_aware(after)
         _require_aware(before)
-        if after >= before or not 1 <= limit <= 25000:
-            raise ValueError("invalid bounded forecast calibration query")
+        if after >= before or not 1 <= limit <= 100_000:
+            raise ValueError("invalid bounded forecast rollup query")
         statement = (
             select(
+                ForecastPoint.id,
                 ForecastRun.id.label("forecast_run_id"),
                 ForecastRun.created_at_utc,
                 ForecastRun.forecast_type,
@@ -581,26 +587,70 @@ class DatabaseRepository:
                 ForecastPoint.period_end_utc,
                 ForecastPoint.expected_value,
                 ForecastPointScore.actual_value,
+                ForecastPointScore.signed_error,
+                ForecastPointScore.absolute_error,
+                ForecastPointScore.squared_error,
                 ForecastPointScore.actual_available,
                 ForecastPointScore.health_eligible,
             )
-            .join(ForecastPoint, ForecastPoint.forecast_run_id == ForecastRun.id)
+            .join(ForecastRun, ForecastRun.id == ForecastPoint.forecast_run_id)
             .outerjoin(
                 ForecastPointScore,
                 ForecastPointScore.forecast_point_id == ForecastPoint.id,
             )
             .where(
                 ForecastRun.forecast_type == "baseline_household_load",
+                ForecastRun.source == "scheduled_forecast_operations",
                 ForecastPoint.period_start_utc >= after.astimezone(UTC),
                 ForecastPoint.period_start_utc < before.astimezone(UTC),
             )
-            .order_by(ForecastPoint.period_start_utc.desc())
-            .limit(limit)
+            .order_by(ForecastPoint.period_start_utc, ForecastPoint.id)
+            .limit(limit + 1)
         )
         with Session(self.engine) as session:
             rows = [dict(row) for row in session.execute(statement).mappings()]
-        rows.reverse()
-        return rows
+        return rows[:limit], len(rows) > limit
+
+    def forecast_rollup_rows_read_only(
+        self, *, after_date: Any, before_date: Any, limit: int = 10_000
+    ) -> tuple[list[dict[str, Any]], bool]:
+        """Read durable bounded rollups; the caller always sees truncation."""
+        if after_date >= before_date or not 1 <= limit <= 10_000:
+            raise ValueError("invalid bounded forecast rollup query")
+        statement = (
+            select(ForecastAccuracyRollup.__table__)
+            .where(
+                ForecastAccuracyRollup.rollup_date >= after_date,
+                ForecastAccuracyRollup.rollup_date < before_date,
+            )
+            .order_by(ForecastAccuracyRollup.rollup_date, ForecastAccuracyRollup.id)
+            .limit(limit + 1)
+        )
+        with Session(self.engine) as session:
+            rows = [dict(row) for row in session.execute(statement).mappings()]
+        return rows[:limit], len(rows) > limit
+
+    def forecast_detail_target_bounds_read_only(
+        self,
+    ) -> tuple[datetime | None, datetime | None]:
+        """Return scored scheduled-detail bounds for rollup backfill planning."""
+        with Session(self.engine) as session:
+            row = session.execute(
+                select(
+                    func.min(ForecastPoint.period_start_utc),
+                    func.max(ForecastPoint.period_start_utc),
+                )
+                .join(ForecastRun, ForecastRun.id == ForecastPoint.forecast_run_id)
+                .join(
+                    ForecastPointScore,
+                    ForecastPointScore.forecast_point_id == ForecastPoint.id,
+                )
+                .where(
+                    ForecastRun.forecast_type == "baseline_household_load",
+                    ForecastRun.source == "scheduled_forecast_operations",
+                )
+            ).one()
+        return row[0], row[1]
 
     def reserve_history_read_only(
         self, *, after: datetime, before: datetime, limit: int = 1000
@@ -669,18 +719,37 @@ class DatabaseRepository:
                     session.execute(
                         select(
                             Observation.baseline_house_consumption_w,
+                            Observation.house_consumption_w,
                             Observation.telemetry_is_healthy,
                             Observation.baseline_training_eligible,
+                            Observation.baseline_exclusion_reason,
                         ).where(*_actual_slot_conditions(point, run_metadata))
                     )
                 )
                 available = [float(row[0]) for row in rows if row[0] is not None]
+                invalid_negative = any(
+                    materially_negative_household_demand(row[1])
+                    or row[4] == INVALID_NEGATIVE_HOUSEHOLD_DEMAND
+                    for row in rows
+                )
                 eligible = [
                     float(row[0])
                     for row in rows
-                    if row[0] is not None and bool(row[1]) and bool(row[2])
+                    if row[0] is not None
+                    and not materially_negative_household_demand(row[1])
+                    and bool(row[2])
+                    and bool(row[3])
                 ]
-                actual = sum(available) / len(available) if available else None
+                invalid_actuals = [
+                    float(row[1])
+                    for row in rows
+                    if materially_negative_household_demand(row[1])
+                ]
+                actual = (
+                    sum(invalid_actuals) / len(invalid_actuals)
+                    if invalid_negative and invalid_actuals
+                    else (sum(available) / len(available) if available else None)
+                )
                 health_eligible = bool(eligible)
                 scored_actual = sum(eligible) / len(eligible) if eligible else None
                 signed = (
@@ -691,6 +760,11 @@ class DatabaseRepository:
                 missing_reason = None
                 if not rows:
                     missing_reason = "no_observation"
+                elif invalid_negative:
+                    missing_reason = INVALID_ACTUAL_NEGATIVE_HOUSEHOLD_DEMAND
+                    health_eligible = False
+                    scored_actual = None
+                    signed = None
                 elif not available:
                     missing_reason = "actual_value_missing"
                 elif not health_eligible:
@@ -874,6 +948,39 @@ class DatabaseRepository:
         statement = statement.order_by(ForecastRun.created_at_utc.desc()).limit(limit)
         with Session(self.engine) as session:
             return [dict(row) for row in session.execute(statement).mappings()]
+
+    def solar_diagnostic_rows_read_only(
+        self, *, after: datetime, before: datetime, limit: int = 9000
+    ) -> tuple[list[dict[str, Any]], bool]:
+        """Return a bounded read-only PV/Solcast context window."""
+        _require_aware(after)
+        _require_aware(before)
+        if after >= before or not 1 <= limit <= 9000:
+            raise ValueError("invalid bounded solar diagnostic query")
+        statement = (
+            select(
+                Observation.slot_utc,
+                Observation.observed_at_local,
+                Observation.pv_power_w,
+                Observation.battery_soc_percent,
+                Observation.battery_charge_power_w,
+                Observation.battery_discharge_power_w,
+                Observation.grid_export_power_w,
+                Observation.work_mode,
+                Observation.solar_is_healthy,
+                Observation.telemetry_is_healthy,
+                Observation.solcast_today_kwh_json,
+            )
+            .where(
+                Observation.slot_utc >= after.astimezone(UTC),
+                Observation.slot_utc < before.astimezone(UTC),
+            )
+            .order_by(Observation.slot_utc)
+            .limit(limit + 1)
+        )
+        with Session(self.engine) as session:
+            rows = [dict(row) for row in session.execute(statement).mappings()]
+        return rows[:limit], len(rows) > limit
 
     def latest_scheduled_forecast_metadata_read_only(self) -> dict[str, Any] | None:
         statement = (

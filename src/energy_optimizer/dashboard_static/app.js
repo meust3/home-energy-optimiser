@@ -182,7 +182,7 @@ async function loadReserve() {
       ["Demand", "Existing estimator demand components.", [reserveRow("Expected household", data.expected_household_demand_kwh, energy), reserveRow("Expected EV", data.expected_ev_demand_kwh, energy), reserveRow("State source", data.state_source)]],
       ["Reserve", "Complete advisory requirement and readiness.", [reserveRow("Technical minimum", data.technical_reserve_kwh, energy), reserveRow("Emergency", data.emergency_reserve_kwh, energy), reserveRow("Uncertainty", data.uncertainty_buffer_kwh, energy), reserveRow("Gross requirement", data.gross_reserve_requirement_kwh, energy), reserveRow("Recommended", data.recommended_reserve_kwh, energy), reserveRow("Current shortfall", data.current_reserve_shortfall_kwh, energy), ["Ready for manual review", data.readiness ? "Yes" : "No", "available"]]],
       ["Opportunity", "Persisted candidate and effective reserve boundary.", [reserveRow("State", data.opportunity_state), reserveRow("First candidate", data.first_candidate?.expected_start_local, localTime), reserveRow("Effective boundary", data.effective_boundary?.expected_start_local, localTime), reserveRow("Horizon end", data.horizon_end_utc, localTime)]],
-      ["Confidence", "Vehicle SOC remains context only and does not alter the algorithm.", [reserveRow("Overall", confidence), reserveRow("Vehicle SOC (context only)", data.ev_vehicle_soc_percent, percent)]],
+      ["Confidence", "Calibration evidence is diagnostic only and does not alter reserve arithmetic.", [reserveRow("Overall", confidence), reserveRow("Vehicle SOC (context only)", data.ev_vehicle_soc_percent, percent), reserveRow("Forecast calibration", data.forecast_calibration_status), reserveRow("Linked identity matches", data.linked_forecast_identity_matches_calibration ? "Yes" : "No"), reserveRow("WAPE", data.calibration_wape_percent, percent), reserveRow("Signed energy error", data.calibration_signed_energy_error_kwh, energy), reserveRow("P90 / P95 underforecast", `${energy(data.empirical_underforecast_p90_kwh)} / ${energy(data.empirical_underforecast_p95_kwh)}`), reserveRow("Tradable calibration reason", data.tradable_calibration_reason)]],
       ["Persistence", "Complete v0.5.0 audit record.", [["Command issued", "No", "available"], ["Complete estimate", "Stored", "available"]]],
     ] : [
       ["Battery", "Battery state was not part of the persisted reserve-result record.", [notStoredRow("SOC"), notStoredRow("Estimated energy"), notStoredRow("Tradable energy")]],
@@ -396,16 +396,29 @@ async function loadCalibration() {
     const legacy = data.legacy_baseline_metrics;
     const identity = data.current_identity;
     const cards = [
-      ["Current model status", data.status, `${data.complete_run_count} complete 24-hour run(s); ${data.eligible_run_count} coherent current run(s)`],
+      ["Current model status", data.status, `${data.complete_date_count} complete independent local date(s); ${data.complete_weekday_count} weekday and ${data.complete_weekend_count} weekend`],
+      ["Raw rolling predictions", number(data.raw_prediction_row_count, 0), `${number(data.eligible_score_row_count, 0)} eligible score row(s); overlaps retained as operational volume`],
+      ["Unique actual targets", number(data.unique_actual_target_slot_count, 0), `${number(data.eligible_actual_target_slot_count, 0)} eligible target slot(s); ${number(data.independent_target_horizon_slot_count, 0)} target/horizon cell(s)`],
+      ["Durable rollup coverage", percent(data.rollup_completeness_percent), `${number(data.calculated_rollup_row_count, 0)} of ${number(data.expected_rollup_row_count, 0)} expected date/horizon rollup(s); ${data.truncated ? "explicitly truncated" : "not truncated"}`],
       ["Current model bias", power(metric.bias_w), "Positive means forecast above actual"],
-      ["Current model MAE", power(metric.mae_w), `RMSE ${power(metric.rmse_w)}`],
+      ["Current model MAE", power(metric.mae_w), `RMSE ${power(metric.rmse_w)}; WAPE ${percent(metric.wape_percent)}`],
       ["Current model coverage", percent(metric.coverage), `${metric.eligible_points} of ${metric.total_points} points`],
+      ["Cumulative underforecast", energy(data.cumulative_underforecast_kwh), `P90 ${energy(data.p90_cumulative_underforecast_kwh)}; P95 ${energy(data.p95_cumulative_underforecast_kwh)}`],
       ["Pre-v0.5.1 / legacy baseline", legacy.eligible_points ? `Bias ${power(legacy.bias_w)}` : `Bias ${power(baseline.bias_w)}`, legacy.eligible_points ? `MAE ${power(legacy.mae_w)} from ${data.legacy_baseline_run_count} legacy run(s)` : `Measured reference MAE ${power(baseline.mae_w)}; 46.9 kWh forecast vs 27.8 kWh actual`],
       ["Current cohort", identity.alignment_version, `Policy ${identity.training_policy}; model ${identity.model_version}`],
     ];
     const horizons = Object.entries(data.metrics_by_horizon).map(([name, value]) => `<article class="panel"><h3>${safeText(name)}</h3>${definition([["Bias", power(value.bias_w)], ["MAE", power(value.mae_w)], ["RMSE", power(value.rmse_w)], ["Coverage", percent(value.coverage)]])}</article>`).join("");
     $("#calibration-content").innerHTML = `${cards.map(([label, value, detail]) => `<article class="panel"><p class="eyebrow">${safeText(label)}</p><div class="quality-metric">${safeText(value)}</div><p class="muted">${safeText(detail)}</p></article>`).join("")}${horizons}`;
   } catch (error) { setState("#calibration-state", error.message, "error-state"); }
+}
+
+async function loadSolarDiagnostics() {
+  setState("#solar-state", "Loading daily Solcast and realised-PV evidence...");
+  try {
+    const data = await request("solar", "solar-forecast-diagnostics", { range: "30d" });
+    setState("#solar-state", data.truncated ? "The bounded result was explicitly truncated." : "Daily diagnostics loaded; no automatic derating is applied.");
+    $("#solar-content").innerHTML = data.days.map(day => `<article class="panel"><h3>${safeText(day.local_date)}</h3>${definition([["Evidence label", day.classification], ["Coverage", percent(day.coverage_percent)], ["Actual PV", energy(day.actual_pv_kwh)], ["Solcast P10 / P50 / P90", `${energy(day.solcast_p10_kwh)} / ${energy(day.solcast_p50_kwh)} / ${energy(day.solcast_p90_kwh)}`], ["Actual minus P50", energy(day.actual_minus_p50_kwh)], ["P50 percentage error", percent(day.p50_percentage_error)], ["Inside Solcast range", day.actual_in_solcast_range == null ? "Unavailable" : (day.actual_in_solcast_range ? "Yes" : "No")], ["Minimum battery headroom", percent(day.minimum_battery_headroom_percent)], ["Battery charge / discharge", `${number(day.battery_charge_minutes, 0)} / ${number(day.battery_discharge_minutes, 0)} min`], ["Near-full battery", `${number(day.near_full_battery_minutes, 0)} min`], ["Possible clipping context", `${number(day.possible_inverter_clipping_minutes, 0)} min`], ["Export context", `${number(day.export_minutes, 0)} min`], ["Observed work modes", (day.observed_work_modes || []).join(", ") || "Unavailable"]])}<p class="muted">${safeText(day.interpretation)}</p></article>`).join("") || '<article class="panel"><p>No sufficiently bounded daily data is available.</p></article>';
+  } catch (error) { setState("#solar-state", error.message, "error-state"); }
 }
 
 function activateTab() {
@@ -415,6 +428,7 @@ function activateTab() {
   if (valid === "forecasts" && !state.loaded.has("forecasts")) { state.loaded.add("forecasts"); loadForecastRuns(); }
   if (valid === "forecast-operations" && !state.loaded.has("operations")) { state.loaded.add("operations"); loadForecastOperations(); }
   if (valid === "calibration" && !state.loaded.has("calibration")) { state.loaded.add("calibration"); loadCalibration(); }
+  if (valid === "solar-diagnostics" && !state.loaded.has("solar")) { state.loaded.add("solar"); loadSolarDiagnostics(); }
   if (valid === "reserve" && !state.loaded.has("reserve")) { state.loaded.add("reserve"); loadReserve(); loadReserveHistory(); }
   if (valid === "data-quality" && !state.loaded.has("quality")) { state.loaded.add("quality"); loadQuality(); }
 }
@@ -429,4 +443,4 @@ $("#accuracy-run").addEventListener("change", loadForecastOperations);
 
 loadStatus(); loadLive(); loadReserve(); loadReserveHistory(); state.loaded.add("reserve"); activateTab();
 schedule("status", loadStatus, 30000); schedule("live", loadLive, 30000);
-schedule("slow", () => { if (!document.hidden) { if (state.loaded.has("history")) loadHistory(); if (state.loaded.has("forecasts")) loadForecastRuns(); if (state.loaded.has("operations")) loadForecastOperations(); if (state.loaded.has("calibration")) loadCalibration(); if (state.loaded.has("reserve")) { loadReserve(); loadReserveHistory(); } if (state.loaded.has("quality")) loadQuality(); } }, 300000);
+schedule("slow", () => { if (!document.hidden) { if (state.loaded.has("history")) loadHistory(); if (state.loaded.has("forecasts")) loadForecastRuns(); if (state.loaded.has("operations")) loadForecastOperations(); if (state.loaded.has("calibration")) loadCalibration(); if (state.loaded.has("solar")) loadSolarDiagnostics(); if (state.loaded.has("reserve")) { loadReserve(); loadReserveHistory(); } if (state.loaded.has("quality")) loadQuality(); } }, 300000);

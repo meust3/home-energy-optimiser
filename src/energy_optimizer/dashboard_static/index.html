@@ -6,8 +6,8 @@
   <meta name="color-scheme" content="light dark">
   <base href="__INGRESS_BASE_PATH__">
   <title>Energy Optimiser</title>
-  <link rel="stylesheet" href="static/app.css?v=0.5.1">
-  <script type="module" src="static/app.js?v=0.5.1"></script>
+  <link rel="stylesheet" href="static/app.css?v=0.5.2">
+  <script type="module" src="static/app.js?v=0.5.2"></script>
 </head>
 <body>
   <a class="skip-link" href="#main">Skip to dashboard content</a>
@@ -28,6 +28,7 @@
     <a href="#forecasts" data-tab="forecasts">Forecasts</a>
     <a href="#forecast-operations" data-tab="forecast-operations">Forecast Operations</a>
     <a href="#calibration" data-tab="calibration">Calibration</a>
+    <a href="#solar-diagnostics" data-tab="solar-diagnostics">Solar diagnostics</a>
     <a href="#reserve" data-tab="reserve">Reserve</a>
     <a href="#data-quality" data-tab="data-quality">Data Quality</a>
   </nav>
@@ -105,6 +106,13 @@
       <p id="history-state" class="state-message" role="status">Select this tab to load history.</p>
       <div id="history-summary" class="summary-row"></div>
       <div id="history-charts" class="chart-grid" aria-live="polite"></div>
+    </section>
+
+    <section id="solar-diagnostics" class="page" hidden aria-labelledby="solar-title">
+      <div class="section-heading"><div><p class="eyebrow">Read-only evidence context</p><h2 id="solar-title">Solar forecast diagnostics</h2></div></div>
+      <p id="solar-state" class="state-message" role="status">Select this tab to compare start-of-day Solcast ranges with realised PV.</p>
+      <div id="solar-content" class="quality-grid"></div>
+      <p class="muted">These labels are contextual, do not prove curtailment, and never apply automatic Solcast derating.</p>
     </section>
 
     <section id="forecasts" class="page" hidden aria-labelledby="forecasts-title">

@@ -1,5 +1,11 @@
 # Database backup, restore, and rollback
 
+v0.5.2 requires a fresh PostgreSQL dump and disposable restore test before
+migration. Record observation, forecast, score, reserve, and rollup counts before
+and after. If the App fails, prefer keeping revision `20260814_01` and running
+reviewed v0.5.2 Windows code with exactly one collector. App rollback requires the
+tested physical downgrade or restoration of the verified dump.
+
 v0.5.1 requires a fresh verified dump and disposable restore before the App
 update. Production is already expected at revision `20260813_01`, so no database
 migration or schema rollback is required. Record observation/audit counts before

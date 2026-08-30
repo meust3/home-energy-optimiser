@@ -1,5 +1,28 @@
 # Changelog
 
+## 0.5.2
+
+- Calibration readiness now uses the exact forecast identity and independent
+  local-date evidence. Overlapping forecasts are averaged once per target slot
+  and horizon; raw row-weighted metrics remain visible separately.
+- Added WAPE, signed daily energy error, and median/P90/P95 cumulative
+  underforecast diagnostics. Seven 95%-complete dates, weekday/weekend evidence,
+  and all four horizon buckets are required before calibration can be acceptable.
+- `tradable_energy_is_calibrated` now also requires the reserve row's linked
+  forecast identity, complete independent evidence, and no quality blocks.
+- Added additive Alembic revision `20260814_01`, extending the existing accuracy
+  rollup table. Its physical downgrade removes only v0.5.2 aggregate fields.
+- Materially negative household demand (below -1 W) remains stored raw but is
+  telemetry-invalid, baseline-ineligible, and excluded consistently from scores.
+  Added a dry-run-default, backup-gated historical reclassification tool.
+- Added GET-only daily Solcast P10/P50/P90 versus realised-PV diagnostics with
+  cautious battery/export/clipping context. No curtailment claim or automatic
+  solar derating is made.
+- Retention remains disabled and now fails closed unless durable rollup coverage
+  already represents the candidate detail rows.
+- No forecast hierarchy, Tier 2 mean, reserve arithmetic, collector cadence,
+  Home Assistant writes, device commands, or execution paths changed.
+
 ## 0.5.1
 
 - Fixed scheduled 24-hour forecasts to start on the first full five-minute slot,

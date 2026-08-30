@@ -1,5 +1,9 @@
 # Security and safety boundary
 
+v0.5.2 adds analytical database writes and GET-only presentation. It does not add
+Home Assistant POST/service calls, device or Modbus writes, control endpoints,
+credentials, VIN/location output, or automatic trading.
+
 v0.5.1 adds GET dashboard routes and local CLI tools only. Detection, calibration,
 comparison, and dry-run inspection do not call Home Assistant services or devices.
 Retention writes require explicit `--apply` or its disabled-by-default option.

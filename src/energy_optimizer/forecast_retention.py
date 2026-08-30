@@ -53,7 +53,30 @@ def run_forecast_retention(
     point_cutoff = current - timedelta(days=point_retention_days)
     run_cutoff = current - timedelta(days=run_retention_days)
     capacity = batch_size * max_batches_per_table
+    existing = _daily_run(repository, current)
+    if existing is not None:
+        metadata = dict(existing.get("metadata_json") or {})
+        return {
+            "status": "already_completed",
+            "boundary_date": current.date(),
+            "maintenance_status": existing.get("status"),
+            **metadata,
+        }
     before = _detail_counts(repository, point_cutoff)
+    rollup_preflight = _rollup_coverage_preflight(repository, point_cutoff)
+    if before["forecast_points"] and not rollup_preflight["safe_to_prune"]:
+        return {
+            "status": "blocked_missing_rollup_coverage",
+            "boundary_date": current.date(),
+            "detail_rows_eligible": before,
+            "rows_pruned_this_run": {"forecast_points": 0, "forecast_point_scores": 0},
+            "rows_remaining_eligible": before,
+            "rollup_preflight": rollup_preflight,
+            "reason": (
+                "Forecast detail is retained until complete durable rollup "
+                "coverage is proven."
+            ),
+        }
     base_diagnostics = _retention_diagnostics(
         eligible=before,
         pruned={"forecast_points": 0, "forecast_point_scores": 0},
@@ -251,6 +274,7 @@ def inspect_forecast_retention(
         maximum_rows_per_run=capacity,
         estimated_daily_creation_rate=estimated_daily_creation_rate,
     )
+    diagnostics["rollup_preflight"] = _rollup_coverage_preflight(repository, cutoff)
     size = None
     if repository.backend == "postgresql":
         with repository.engine.connect() as connection:
@@ -379,39 +403,6 @@ def _prune_detail_batch(
                 .limit(batch_size)
             ).mappings()
         )
-        groups = _rollup_groups(detail_rows)
-        rollup = ForecastAccuracyRollup.__table__
-        for key, values in groups.items():
-            statement = (
-                postgresql_insert(rollup)
-                if repository.backend == "postgresql"
-                else sqlite_insert(rollup)
-            ).values(
-                rollup_date=key[0],
-                forecast_type=key[1],
-                model_version=key[2],
-                alignment_version=key[3],
-                training_policy=key[4],
-                horizon_bucket=key[5],
-                day_type=key[6],
-                **values,
-            )
-            statement = statement.on_conflict_do_update(
-                index_elements=[
-                    rollup.c.rollup_date,
-                    rollup.c.forecast_type,
-                    rollup.c.model_version,
-                    rollup.c.alignment_version,
-                    rollup.c.training_policy,
-                    rollup.c.horizon_bucket,
-                    rollup.c.day_type,
-                ],
-                set_={
-                    name: rollup.c[name] + getattr(statement.excluded, name)
-                    for name in values
-                },
-            )
-            session.execute(statement)
         point_ids = [int(row["id"]) for row in detail_rows]
         scores_deleted = points_deleted = 0
         if point_ids:
@@ -442,6 +433,54 @@ def _prune_detail_batch(
         "rows_rolled_up": len(detail_rows),
         "scores_deleted": int(scores_deleted or 0),
         "points_deleted": int(points_deleted or 0),
+    }
+
+
+def _rollup_coverage_preflight(repository: Any, cutoff: datetime) -> dict[str, Any]:
+    """Fail closed unless durable rollups cover every candidate detail row."""
+    with repository.transaction() as session:
+        candidate_count = int(
+            session.scalar(
+                select(func.count())
+                .select_from(ForecastPoint)
+                .where(ForecastPoint.period_start_utc < cutoff)
+            )
+            or 0
+        )
+        supported_candidate_count = int(
+            session.scalar(
+                select(func.count())
+                .select_from(ForecastPoint)
+                .join(ForecastRun, ForecastRun.id == ForecastPoint.forecast_run_id)
+                .where(
+                    ForecastPoint.period_start_utc < cutoff,
+                    ForecastRun.forecast_type == "baseline_household_load",
+                    ForecastRun.source == "scheduled_forecast_operations",
+                )
+            )
+            or 0
+        )
+        represented_count = int(
+            session.scalar(
+                select(
+                    func.coalesce(func.sum(ForecastAccuracyRollup.total_points), 0)
+                ).where(
+                    ForecastAccuracyRollup.maximum_target_utc.is_not(None),
+                    ForecastAccuracyRollup.maximum_target_utc < cutoff,
+                    ForecastAccuracyRollup.calculated_at_utc.is_not(None),
+                )
+            )
+            or 0
+        )
+    return {
+        "candidate_detail_rows": candidate_count,
+        "supported_candidate_detail_rows": supported_candidate_count,
+        "unsupported_candidate_detail_rows": (
+            candidate_count - supported_candidate_count
+        ),
+        "represented_prediction_rows": represented_count,
+        "safe_to_prune": candidate_count == 0
+        or candidate_count == supported_candidate_count == represented_count,
     }
 
 

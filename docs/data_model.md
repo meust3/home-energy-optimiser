@@ -1,5 +1,11 @@
 # Read-only operational data model
 
+Revision `20260814_01` additively extends `forecast_accuracy_rollups` with unique
+and eligible target-slot counts both per horizon and per local date, expected
+coverage, slot-weighted error/energy sums, completeness, target bounds, and
+calculation time. Existing raw row sums remain available. The downgrade removes
+only these new aggregate columns.
+
 Revision `20260813_01` adds only `forecast_accuracy_rollups` and
 `forecast_maintenance_runs`. It does not alter/rebuild `observations`. EV candidate
 state is not persisted; reviewed exclusions reuse existing audited annotation

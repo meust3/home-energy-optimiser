@@ -1,5 +1,10 @@
 # Home Assistant App troubleshooting
 
+If v0.5.2 fails after migration, keep PostgreSQL at `20260814_01`, stop the App,
+and use reviewed v0.5.2 Windows code while maintaining exactly one collector.
+Rollback to v0.5.1 requires a tested physical downgrade to `20260813_01` or
+restoration of the verified pre-v0.5.2 dump; never use `alembic stamp` as rollback.
+
 Calibration `poor` or `insufficient_data` is not a watchdog failure. Confirm a new
 run has 288 points, `full_5m_v1`, and a scoreable first slot. If startup fails after
 migration, keep the additive schema and use reviewed v0.5.1 Windows code with

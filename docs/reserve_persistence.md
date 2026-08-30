@@ -1,5 +1,10 @@
 # Reserve persistence
 
+Reserve empirical diagnostics follow `reserve_runs.forecast_run_id` to the exact
+four-field calibration identity. Legacy source-name MAPE is not repurposed;
+unavailable evidence remains null and all persisted `command_issued` values remain
+false.
+
 After a successful scheduled forecast, and only when reserve snapshots are enabled,
 the coordinator calls the existing reserve estimator at the same evaluation
 timestamp with history bounded to that timestamp. The calculation and opportunity

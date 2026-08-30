@@ -44,6 +44,7 @@ from energy_optimizer.forecast_retention import (
     inspect_forecast_retention,
     run_forecast_retention,
 )
+from energy_optimizer.forecast_rollups import refresh_forecast_accuracy_rollups
 from energy_optimizer.historical_ev import (
     HistoricalEVCandidateConfig,
     detect_historical_ev_candidates,
@@ -261,7 +262,7 @@ def test_calibration_metrics_status_horizons_energy_and_legacy_exclusion():
         }
     )
     report = calculate_forecast_calibration(rows)
-    assert report.status == "good"
+    assert report.status == "insufficient_data"
     assert report.metrics.bias_w == 100
     assert report.metrics.mae_w == 100
     assert report.metrics.rmse_w == 100
@@ -404,6 +405,12 @@ def test_retention_rolls_up_before_detail_deletion_and_is_daily_idempotent(
                 metadata_json={},
             )
         )
+    refresh_forecast_accuracy_rollups(
+        repository,
+        local_dates=[(retention_now - timedelta(days=100)).date()],
+        timezone_name="UTC",
+        now=retention_now,
+    )
     result = run_forecast_retention(
         repository,
         now=retention_now,
@@ -487,6 +494,16 @@ def _seed_retention_detail(
             )
         remaining -= count
         run_index += 1
+    refresh_forecast_accuracy_rollups(
+        repository,
+        local_dates=[
+            (retention_now - timedelta(days=101)).date(),
+            (retention_now - timedelta(days=100)).date(),
+            (retention_now - timedelta(days=99)).date(),
+        ],
+        timezone_name="UTC",
+        now=retention_now,
+    )
 
 
 def test_retention_daily_capacity_exceeds_steady_state_and_prunes_both_detail_tables(
@@ -566,7 +583,7 @@ def test_retention_reports_backlog_and_commits_interrupted_batches(tmp_path):
         assert audit.status == "failed"
         assert audit.rows_rolled_up == 10
         assert (
-            session.scalar(select(func.sum(ForecastAccuracyRollup.total_points))) == 10
+            session.scalar(select(func.sum(ForecastAccuracyRollup.total_points))) == 25
         )
     duplicate = run_forecast_retention(
         repository,

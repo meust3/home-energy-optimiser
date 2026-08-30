@@ -245,6 +245,46 @@ class ForecastAccuracyRollup(Base):
     sum_squared_error: Mapped[float] = mapped_column(Float, nullable=False)
     forecast_energy_kwh: Mapped[float] = mapped_column(Float, nullable=False)
     actual_energy_kwh: Mapped[float] = mapped_column(Float, nullable=False)
+    # v0.5.2 keeps the legacy fields above as raw prediction-row metrics.  The
+    # fields below describe independently weighted target slots and may be
+    # rebuilt from detail without double-counting overlapping forecast runs.
+    unique_target_slots: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    eligible_target_slots: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0
+    )
+    date_unique_target_slots: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0
+    )
+    date_eligible_target_slots: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0
+    )
+    expected_target_slots: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=288
+    )
+    target_slot_coverage_percent: Mapped[float] = mapped_column(
+        Float, nullable=False, default=0
+    )
+    slot_sum_actual_w: Mapped[float] = mapped_column(Float, nullable=False, default=0)
+    slot_sum_forecast_w: Mapped[float] = mapped_column(Float, nullable=False, default=0)
+    slot_sum_signed_error_w: Mapped[float] = mapped_column(
+        Float, nullable=False, default=0
+    )
+    slot_sum_absolute_error_w: Mapped[float] = mapped_column(
+        Float, nullable=False, default=0
+    )
+    slot_sum_squared_error_w2: Mapped[float] = mapped_column(
+        Float, nullable=False, default=0
+    )
+    cumulative_signed_energy_error_kwh: Mapped[float] = mapped_column(
+        Float, nullable=False, default=0
+    )
+    cumulative_underforecast_kwh: Mapped[float] = mapped_column(
+        Float, nullable=False, default=0
+    )
+    complete_day: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    minimum_target_utc: Mapped[datetime | None] = mapped_column(AwareDateTime())
+    maximum_target_utc: Mapped[datetime | None] = mapped_column(AwareDateTime())
+    calculated_at_utc: Mapped[datetime | None] = mapped_column(AwareDateTime())
     __table_args__ = (
         UniqueConstraint(
             "rollup_date",

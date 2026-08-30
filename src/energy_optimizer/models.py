@@ -321,6 +321,10 @@ class CollectorConfig(BaseModel):
     forecast_run_retention_days: int = Field(default=365, gt=0)
     retention_enabled: bool = False
     calibration_window_days: int = Field(default=30, gt=0, le=365)
+    calibration_min_complete_days: int = Field(default=7, ge=1, le=365)
+    calibration_complete_day_coverage_percent: float = Field(default=95.0, gt=0, le=100)
+    calibration_min_weekday_days: int = Field(default=5, ge=0, le=365)
+    calibration_min_weekend_days: int = Field(default=1, ge=0, le=365)
     minimum_soc_percent: float = Field(default=20.0, ge=0, le=100)
     emergency_reserve_kwh: float = Field(default=6.0, ge=0)
     reserve_history_days: int = Field(default=28, gt=0)

@@ -1,5 +1,10 @@
 # Home Assistant App installation
 
+Before installing v0.5.2, back up and restore-test PostgreSQL, stop the sole
+v0.5.1 collector, and run `python -m alembic upgrade 20260814_01` from reviewed
+v0.5.2 source. Confirm the exact revision, then update/start the App. New
+calibration options have safe parser defaults for old option files.
+
 v0.5.1 adds `demand_training_policy` (new App default `verified_preferred`),
 90-day point detail, 365-day run metadata, a 30-day calibration window, and
 `retention_enabled=false`. Production is already expected at `20260813_01`, so

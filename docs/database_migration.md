@@ -1,5 +1,20 @@
 # SQLite to PostgreSQL migration
 
+The v0.5.2 head is `20260814_01`. From reviewed v0.5.2 source, after a verified
+backup/restore test and with every collector stopped, run:
+
+```powershell
+python tools/check_database.py --application-readiness
+python -m alembic current
+python -m alembic upgrade 20260814_01
+python -m alembic current
+python tools/check_database.py --application-readiness
+```
+
+Rollback is `python -m alembic downgrade 20260813_01`, followed by `python -m
+alembic current`. It removes only v0.5.2 rollup evidence columns. Do not use
+`alembic stamp` as a physical rollback; re-upgrade is supported.
+
 The v0.5.1 application head is `20260813_01`, and production is expected to
 already be at that revision before this App-only update. Confirm with
 `python -m alembic current` and `python tools/check_database.py

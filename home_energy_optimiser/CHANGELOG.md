@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.5.2
+
+- Uses independent date/horizon calibration rollups and conservative linked-run
+  tradable gating.
+- Rejects materially negative household demand from derived training/scoring
+  while preserving raw telemetry.
+- Adds read-only Solcast-versus-realised-PV diagnostics.
+- Requires Alembic revision `20260814_01`; retention remains disabled.
+
 ## 0.5.1
 
 - Corrected operational forecasts to 288 aligned five-minute slots.

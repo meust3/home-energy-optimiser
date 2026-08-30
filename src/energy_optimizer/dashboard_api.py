@@ -17,7 +17,7 @@ from energy_optimizer.forecast_calibration import (
     CURRENT_FORECAST_TYPE,
     CalibrationIdentity,
     ForecastCalibrationReport,
-    calculate_forecast_calibration,
+    calculate_forecast_calibration_from_rollups,
 )
 from energy_optimizer.forecast_retention import inspect_forecast_retention
 from energy_optimizer.history_analysis import (
@@ -25,6 +25,7 @@ from energy_optimizer.history_analysis import (
     summarize_health_issues,
 )
 from energy_optimizer.persistence import ApplicationRepository, open_repository
+from energy_optimizer.solar_diagnostics import calculate_solar_diagnostics
 from energy_optimizer.training_provenance import (
     classify_training_cohort,
     summarize_training_provenance,
@@ -318,6 +319,16 @@ class ReserveResponse(ApiModel):
     forecast_calibration_status: str = "insufficient_data"
     calibration_warning: str | None = None
     tradable_energy_is_calibrated: bool = False
+    tradable_calibration_reason: str = (
+        "No independent calibration evidence is available."
+    )
+    linked_forecast_identity_matches_calibration: bool = False
+    calibration_identity: dict[str, Any] | None = None
+    calibration_wape_percent: float | None = None
+    calibration_signed_energy_error_kwh: float | None = None
+    cumulative_underforecast_kwh: float | None = None
+    empirical_underforecast_p90_kwh: float | None = None
+    empirical_underforecast_p95_kwh: float | None = None
 
 
 class DataQualityResponse(ApiModel):
@@ -338,6 +349,7 @@ class DataQualityResponse(ApiModel):
     complete_overnight_periods: int
     eligible_baseline_rows: int
     ineligible_baseline_rows_by_reason: dict[str, int]
+    materially_negative_household_demand_rows: int = 0
     forecast_tier_usage: dict[str, int]
     forecast_tier_share: dict[str, float]
     independent_ev_telemetry_available: bool
@@ -386,6 +398,16 @@ class ForecastStorageResponse(ApiModel):
     retention_health: str
     retention_diagnostics: dict[str, Any]
     database_size_bytes: int | None = None
+
+
+class SolarDiagnosticsResponse(ApiModel):
+    range_start_utc: datetime
+    range_end_utc: datetime
+    requested_range: str
+    truncated: bool
+    automatic_derating_applied: Literal[False] = False
+    curtailment_proven: Literal[False] = False
+    days: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class DashboardQueryError(ValueError):
@@ -568,12 +590,32 @@ class DashboardService:
             range_name=range_name, start=None, end=None, now=now
         )
         with self._repository() as repository:
-            rows = repository.forecast_calibration_rows_read_only(
-                after=start, before=end
+            zone = ZoneInfo(str(getattr(self.health, "timezone", "Australia/Brisbane")))
+            rows, truncated = repository.forecast_rollup_rows_read_only(
+                after_date=start.astimezone(zone).date(),
+                before_date=end.astimezone(zone).date() + timedelta(days=1),
             )
-        return calculate_forecast_calibration(
-            rows, current_identity=self._current_calibration_identity()
+        report = calculate_forecast_calibration_from_rollups(
+            rows,
+            current_identity=self._current_calibration_identity(),
+            minimum_complete_dates=int(
+                getattr(self.health, "calibration_min_complete_days", 7)
+            ),
+            complete_day_coverage_percent=float(
+                getattr(self.health, "calibration_complete_day_coverage_percent", 95)
+            ),
+            minimum_weekday_dates=int(
+                getattr(self.health, "calibration_min_weekday_days", 5)
+            ),
+            minimum_weekend_dates=int(
+                getattr(self.health, "calibration_min_weekend_days", 1)
+            ),
+            requested_start=start,
+            requested_end=end,
+            truncated=truncated,
         )
+        self.health.calibration_status = report.status
+        return report
 
     def _current_calibration_identity(self) -> CalibrationIdentity:
         return CalibrationIdentity(
@@ -609,6 +651,28 @@ class DashboardService:
             retention_diagnostics=diagnostics,
             database_size_bytes=report["database_size_bytes"],
         )
+
+    def solar_forecast_diagnostics(
+        self, *, range_name: str = "30d", now: datetime | None = None
+    ) -> SolarDiagnosticsResponse:
+        start, end = resolve_window(
+            range_name=range_name, start=None, end=None, now=now
+        )
+        with self._repository() as repository:
+            rows, truncated = repository.solar_diagnostic_rows_read_only(
+                after=start, before=end
+            )
+        response = SolarDiagnosticsResponse(
+            range_start_utc=start,
+            range_end_utc=end,
+            requested_range=range_name,
+            truncated=truncated,
+            days=calculate_solar_diagnostics(rows),
+        )
+        self.health.solar_diagnostics = (
+            "warning" if truncated else ("available" if response.days else "optional")
+        )
+        return response
 
     def reserve_history(
         self, *, range_name: str = "30d", now: datetime | None = None
@@ -873,27 +937,102 @@ class DashboardService:
             metrics_by_local_hour={},
             current_identity=self._current_calibration_identity(),
         )
+        linked_identity_matches = False
         with self._repository() as repository:
             audit = repository.latest_reserve_audit_read_only()
             run = repository.latest_reserve_run_read_only()
             latest = repository.latest_observation_read_only()
-            if hasattr(repository, "forecast_calibration_rows_read_only"):
+            if hasattr(repository, "forecast_rollup_rows_read_only"):
                 current = datetime.now(UTC)
-                calibration = calculate_forecast_calibration(
-                    repository.forecast_calibration_rows_read_only(
-                        after=current - timedelta(days=30), before=current
-                    ),
-                    current_identity=self._current_calibration_identity(),
+                start = current - timedelta(
+                    days=int(getattr(self.health, "calibration_window_days", 30))
                 )
-        calibration_warning = (
-            None
-            if calibration.status in {"acceptable", "good"}
-            else (
-                "Tradable-energy estimates are advisory and not yet backed by "
-                "acceptable aligned forecast calibration."
-            )
+                zone = ZoneInfo(
+                    str(getattr(self.health, "timezone", "Australia/Brisbane"))
+                )
+                rollups, truncated = repository.forecast_rollup_rows_read_only(
+                    after_date=start.astimezone(zone).date(),
+                    before_date=current.astimezone(zone).date() + timedelta(days=1),
+                )
+                calibration = calculate_forecast_calibration_from_rollups(
+                    rollups,
+                    current_identity=self._current_calibration_identity(),
+                    minimum_complete_dates=int(
+                        getattr(self.health, "calibration_min_complete_days", 7)
+                    ),
+                    complete_day_coverage_percent=float(
+                        getattr(
+                            self.health, "calibration_complete_day_coverage_percent", 95
+                        )
+                    ),
+                    minimum_weekday_dates=int(
+                        getattr(self.health, "calibration_min_weekday_days", 5)
+                    ),
+                    minimum_weekend_dates=int(
+                        getattr(self.health, "calibration_min_weekend_days", 1)
+                    ),
+                    requested_start=start,
+                    requested_end=current,
+                    truncated=truncated,
+                )
+            if audit is not None:
+                linked_run = repository.forecast_run(int(audit["forecast_run_id"]))
+                if linked_run is not None:
+                    metadata = linked_run.get("metadata_json") or {}
+                    linked_identity_matches = (
+                        linked_run.get("forecast_type")
+                        == calibration.current_identity.forecast_type
+                        and linked_run.get("model_version")
+                        == calibration.current_identity.model_version
+                        and metadata.get("alignment_version")
+                        == calibration.current_identity.alignment_version
+                        and metadata.get("training_policy")
+                        == calibration.current_identity.training_policy
+                    )
+        tradable_calibrated = (
+            calibration.status in {"acceptable", "good"}
+            and calibration.independent_evidence_sufficient
+            and calibration.required_horizons_present
+            and not calibration.quality_blocks
+            and linked_identity_matches
         )
-        tradable_calibrated = calibration.status in {"acceptable", "good"}
+        if audit is None:
+            tradable_reason = (
+                "No complete reserve audit is linked to a scheduled forecast run."
+            )
+        elif not linked_identity_matches:
+            tradable_reason = (
+                "The reserve run's linked forecast identity does not match the "
+                "current calibration identity."
+            )
+        elif calibration.quality_blocks:
+            tradable_reason = (
+                "Calibration evidence is blocked: "
+                + ", ".join(calibration.quality_blocks)
+                + "."
+            )
+        elif not calibration.independent_evidence_sufficient:
+            tradable_reason = (
+                "Independent target-slot/date evidence has not reached the "
+                "configured threshold."
+            )
+        elif calibration.status not in {"acceptable", "good"}:
+            tradable_reason = (
+                f"Independent calibration status is {calibration.status}, not "
+                "acceptable or good."
+            )
+        else:
+            tradable_reason = (
+                "The linked forecast identity has sufficient acceptable independent "
+                "calibration evidence."
+            )
+        calibration_warning = None if tradable_calibrated else tradable_reason
+        self.health.calibration_status = calibration.status
+        self.health.reserve_empirical_confidence = (
+            "available"
+            if calibration.p95_cumulative_underforecast_kwh is not None
+            else "unavailable"
+        )
         if audit is not None:
             confidence_json = audit.get("confidence_json") or {}
             return ReserveResponse(
@@ -942,6 +1081,18 @@ class DashboardService:
                 forecast_calibration_status=calibration.status,
                 calibration_warning=calibration_warning,
                 tradable_energy_is_calibrated=tradable_calibrated,
+                tradable_calibration_reason=tradable_reason,
+                linked_forecast_identity_matches_calibration=linked_identity_matches,
+                calibration_identity=calibration.current_identity.model_dump(),
+                calibration_wape_percent=calibration.metrics.wape_percent,
+                calibration_signed_energy_error_kwh=(
+                    calibration.metrics.signed_energy_error_kwh
+                ),
+                cumulative_underforecast_kwh=(calibration.cumulative_underforecast_kwh),
+                empirical_underforecast_p90_kwh=(
+                    calibration.p90_cumulative_underforecast_kwh
+                ),
+                empirical_underforecast_p95_kwh=calibration.p95_cumulative_underforecast_kwh,
             )
         if run is None:
             return ReserveResponse(
@@ -985,6 +1136,18 @@ class DashboardService:
             forecast_calibration_status=calibration.status,
             calibration_warning=calibration_warning,
             tradable_energy_is_calibrated=tradable_calibrated,
+            tradable_calibration_reason=tradable_reason,
+            linked_forecast_identity_matches_calibration=linked_identity_matches,
+            calibration_identity=calibration.current_identity.model_dump(),
+            calibration_wape_percent=calibration.metrics.wape_percent,
+            calibration_signed_energy_error_kwh=(
+                calibration.metrics.signed_energy_error_kwh
+            ),
+            cumulative_underforecast_kwh=calibration.cumulative_underforecast_kwh,
+            empirical_underforecast_p90_kwh=(
+                calibration.p90_cumulative_underforecast_kwh
+            ),
+            empirical_underforecast_p95_kwh=calibration.p95_cumulative_underforecast_kwh,
         )
 
     def data_quality(
@@ -1146,6 +1309,11 @@ class DashboardService:
             complete_overnight_periods=complete_overnights,
             eligible_baseline_rows=len(eligible_rows),
             ineligible_baseline_rows_by_reason=dict(ineligible),
+            materially_negative_household_demand_rows=sum(
+                _number(row.get("house_consumption_w")) is not None
+                and float(row["house_consumption_w"]) < -1.0
+                for row in rows
+            ),
             forecast_tier_usage=tier_counts,
             forecast_tier_share=tier_share,
             independent_ev_telemetry_available=direct_ev,

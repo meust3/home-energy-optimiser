@@ -1,5 +1,19 @@
 # Home Energy Optimiser
 
+## v0.5.2 calibration-integrity options
+
+The existing `calibration_window_days` option is joined by
+`calibration_min_complete_days` (7),
+`calibration_complete_day_coverage_percent` (95),
+`calibration_min_weekday_days` (5), and
+`calibration_min_weekend_days` (1). Old option files remain valid because the App
+parser supplies these defaults. These are project heuristics, not universal
+standards. Retention stays `false`, and all dashboard/API routes are GET-only.
+
+Schema revision `20260814_01` must be applied by an operator before updating the
+App. The App never migrates a database. Downgrade removes only the new rollup
+evidence fields; detail observations, forecasts, scores, and reserve rows remain.
+
 ## v0.5.1 forecast calibration and hygiene options
 
 New installs default `demand_training_policy` to `verified_preferred`. Detailed

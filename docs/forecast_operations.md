@@ -1,5 +1,9 @@
 # Forecast operations
 
+v0.5.2 refreshes bounded, deterministic calibration rollups after scoring within
+the existing coordinator. It creates no thread, process, service, or collector;
+rollup failure is a warning and does not fail a forecast or collection.
+
 ## v0.5.1 operational alignment
 
 Creation time and forecast start are distinct. A run created at `10:00:20` starts

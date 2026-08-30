@@ -1,5 +1,9 @@
 # Home Assistant App design
 
+The v0.5.2 App remains UID/GID 10001 after its existing root bootstrap, uses one
+process/collector, and expects schema `20260814_01`. Rollup health is diagnostic
+and independent of the core collector watchdog.
+
 Version 0.5.0 retains one container, one Python process, one collector and
 one dashboard server. The optional forecast coordinator is a single in-process
 thread, disabled by default. Supervisor health reports scheduler and reserve status

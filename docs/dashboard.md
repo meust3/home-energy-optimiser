@@ -1,5 +1,9 @@
 # Read-only Ingress dashboard
 
+v0.5.2 shows raw versus independent calibration evidence, complete-date/horizon
+gates, WAPE/underforecast diagnostics, and a read-only solar diagnostics tab. It
+adds no action button or mutating route.
+
 The v0.5.1 Calibration tab compares the documented benchmark with aligned runs and
 explains heuristic thresholds. Data Quality adds residual percentiles/anomalies,
 weather limitations, and forecast-storage health. Analytical quality never changes

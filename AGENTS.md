@@ -28,13 +28,17 @@ migration and an end-to-end live observation write have been manually validated.
 SQLite remains supported for local/offline development and as the retained final
 pre-migration backup; it is not a production fallback.
 
-Home Assistant App v0.5.0 is the current production release on the amd64 Home
+Home Assistant App v0.5.1 is the current production release on the amd64 Home
 Assistant OS 18.1 NUC. It provides strictly advisory forecast operations and
 reserve audit against PostgreSQL revision `20260813_01`. Its opt-in coordinator
 must remain one lightweight thread in the existing process, preserve collector
 priority, create no second collector or cron service, and expose no action
 endpoint. Forecast scoring and reserve persistence are analytical database writes
 only; hardware remains read-only.
+
+The v0.5.2 release expects additive revision `20260814_01`. Development
+must not connect to or migrate production. Calibration must use independent
+target-slot/local-date evidence; retention remains disabled by default.
 
 ## Architecture
 

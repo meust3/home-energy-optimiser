@@ -1,6 +1,11 @@
 # Home Energy Optimiser
 
-> v0.5.1 calibrates Forecast Operations and improves data hygiene. It fixes the
+> v0.5.2 is a calibration-integrity and data-validation release. It
+> separates overlapping prediction-row statistics from independent target-slot
+> and local-date evidence, validates negative household demand, and adds cautious
+> read-only solar diagnostics. It does not change forecast or reserve arithmetic.
+>
+> v0.5.1 calibrated Forecast Operations and improved data hygiene. It fixed the
 > operational five-minute interval alignment, adds sample-level EV provenance,
 > coherent-cohort calibration reporting, and opt-in bounded forecast retention.
 
@@ -14,8 +19,8 @@ results remain comparison-only.
 > v0.5.0 added Forecast Operations and complete
 > Reserve Audit are strictly advisory, opt-in, and disabled by default.
 
-Version 0.5.1 keeps the existing one-container, one-process, one-collector design
-and adds one lightweight coordinator thread. At aligned local boundaries it can
+Version 0.5.2 keeps the existing one-container, one-process, one-collector design
+and its one lightweight coordinator thread. At aligned local boundaries it can
 create genuine out-of-sample baseline forecasts, score only completed intervals
 after a delay, and persist the existing reserve estimator's complete result. It
 does not change forecast, reserve or opportunity algorithms and adds no device or
@@ -34,9 +39,10 @@ forecast_max_runtime_seconds: 120
 reserve_snapshot_enabled: true
 ```
 
-The v0.5.1 schema head remains `20260813_01`, which is already the expected v0.5.0
-production revision. No production Alembic command is required for this App
-update, and the App never migrates PostgreSQL during startup. Validate the
+The v0.5.2 schema head is additive revision `20260814_01`. Production remains on
+`20260813_01` until a separately authorized, backup-verified deployment. The v0.5.1
+schema head was `20260813_01`. The v0.5.2 migration must be applied manually only
+after the production gates pass; the App never migrates PostgreSQL during startup. Validate the
 immutable image and Home Assistant discovery, then create and restore-test a fresh
 backup before stopping the sole collector and updating the App. Retention remains
 disabled during deployment.
@@ -56,9 +62,9 @@ collects and analyses data but does not control Home Assistant or energy hardwar
 ## Current status
 
 - **PostgreSQL production:** working and manually validated end to end
-- **Continuous collector:** App v0.5.0 is installed and collecting successfully on
+- **Continuous collector:** App v0.5.1 is installed and collecting successfully on
   the Home Assistant OS 18.1 NUC
-- **Ingress dashboard:** deployed through App v0.5.0
+- **Ingress dashboard:** deployed through App v0.5.1
 - **Reserve forecasting:** working and advisory
 - **Solar and price forecasts:** Solcast and Amber Electric integrated
 - **EV telemetry:** optional read-only vehicle-cloud integration was introduced in
@@ -77,7 +83,7 @@ Version 0.3.0 added a strictly read-only Ingress presentation layer, and version
 sparse forecast, reserve, and normalized-flow data look intentional rather than
 broken. Version 0.4.0 adds optional vehicle status, SOC, freshness,
 home/away, and confirmed-charging detection without pretending raw vehicle battery
-power is charger AC demand. Version 0.5.0 is the working production collector.
+power is charger AC demand. Version 0.5.1 is the working production collector.
 
 Forecast confidence can remain medium or low while household history is limited,
 and EV charging may still be embedded in historical household demand.
@@ -96,7 +102,7 @@ GoodWe / Amber / Solcast / weather
        |                            |
        v                            v
 Windows development          Home Assistant App
-and offline analysis         v0.5.0 production collector
+and offline analysis         v0.5.1 production collector
        |                            |
        +-------------+--------------+
                      v

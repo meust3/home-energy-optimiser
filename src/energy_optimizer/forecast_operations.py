@@ -7,7 +7,7 @@ import threading
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
 
@@ -16,8 +16,12 @@ from energy_optimizer.forecast_alignment import (
     FULL_FIVE_MINUTE_ALIGNMENT,
     operational_forecast_window,
 )
-from energy_optimizer.forecast_calibration import CURRENT_FORECAST_MODEL_VERSION
+from energy_optimizer.forecast_calibration import (
+    CURRENT_FORECAST_MODEL_VERSION,
+    HORIZON_NAMES,
+)
 from energy_optimizer.forecast_retention import run_forecast_retention
+from energy_optimizer.forecast_rollups import refresh_forecast_accuracy_rollups
 from energy_optimizer.models import CollectorConfig, ForecastPoint, ForecastRun
 from energy_optimizer.reserve import estimate_battery_reserve
 
@@ -188,6 +192,70 @@ class ForecastCoordinator:
                 runtime_guard=lambda: self._check_deadline(started_monotonic),
             )
             self._check_deadline(started_monotonic)
+            rollup_result: dict[str, Any] | None = None
+            try:
+                local_today = started_at.astimezone(
+                    ZoneInfo(self.config.timezone)
+                ).date()
+                window_start = local_today - timedelta(
+                    days=self.collector_config.calibration_window_days
+                )
+                existing_rollups, rollups_truncated = (
+                    repository.forecast_rollup_rows_read_only(
+                        after_date=window_start,
+                        before_date=local_today + timedelta(days=1),
+                    )
+                )
+                if rollups_truncated:
+                    raise RuntimeError("calibration rollup inventory truncated")
+                represented_dates = _represented_calibration_rollup_dates(
+                    existing_rollups,
+                    training_policy=self.collector_config.demand_training_policy,
+                )
+                first_target, _ = repository.forecast_detail_target_bounds_read_only()
+                first_detail_date = (
+                    first_target.astimezone(ZoneInfo(self.config.timezone)).date()
+                    if first_target is not None
+                    else local_today
+                )
+                backfill_start = max(window_start, first_detail_date)
+                missing_dates = [
+                    backfill_start + timedelta(days=index)
+                    for index in range((local_today - backfill_start).days)
+                    if backfill_start + timedelta(days=index) not in represented_dates
+                ][:2]
+                rollup_result = refresh_forecast_accuracy_rollups(
+                    repository,
+                    local_dates=[
+                        *missing_dates,
+                        local_today - timedelta(days=1),
+                        local_today,
+                    ],
+                    timezone_name=self.config.timezone,
+                    complete_day_coverage_percent=(
+                        self.collector_config.calibration_complete_day_coverage_percent
+                    ),
+                    now=started_at,
+                )
+                LOGGER.info(
+                    "Calibration rollup refresh succeeded dates=%s rollups=%s "
+                    "identity=%s/%s/%s/%s",
+                    rollup_result["dates_rebuilt"],
+                    rollup_result["rollups_rebuilt"],
+                    "baseline_household_load",
+                    FORECAST_MODEL_VERSION,
+                    FULL_FIVE_MINUTE_ALIGNMENT,
+                    self.collector_config.demand_training_policy,
+                )
+                if hasattr(self.health, "record_calibration_rollup"):
+                    self.health.record_calibration_rollup(successful=True)
+            except Exception as exc:
+                # Analytical maintenance must never stop collection/forecasting.
+                LOGGER.warning(
+                    "Calibration rollup refresh failed: %s", _safe_failure(exc)
+                )
+                if hasattr(self.health, "record_calibration_rollup"):
+                    self.health.record_calibration_rollup(successful=False)
             reserve_run_id = None
             if self.config.reserve_snapshot_enabled:
                 estimate = estimate_battery_reserve(
@@ -217,7 +285,10 @@ class ForecastCoordinator:
                 forecast_run_id=forecast_run_id,
                 reserve_run_id=reserve_run_id,
                 forecast_point_count=len(forecast_run.points),
-                metadata={"scored_point_count": scored},
+                metadata={
+                    "scored_point_count": scored,
+                    "calibration_rollup": rollup_result,
+                },
             )
             repository.release_forecast_operation_lock(durable_lock)
             durable_lock = None
@@ -369,6 +440,29 @@ class ForecastCoordinator:
     def _check_deadline(self, started: float) -> None:
         if self.monotonic() - started > self.config.max_runtime_seconds:
             raise TimeoutError("Forecast operation exceeded configured runtime")
+
+
+def _represented_calibration_rollup_dates(
+    rows: list[dict[str, Any]], *, training_policy: str
+) -> set[date]:
+    """Return dates with all current-identity v0.5.2 horizon rollups."""
+    represented_horizons: dict[date, set[str]] = {}
+    for row in rows:
+        if (
+            row.get("forecast_type") == "baseline_household_load"
+            and row.get("model_version") == FORECAST_MODEL_VERSION
+            and row.get("alignment_version") == FULL_FIVE_MINUTE_ALIGNMENT
+            and row.get("training_policy") == training_policy
+            and row.get("calculated_at_utc") is not None
+        ):
+            represented_horizons.setdefault(row["rollup_date"], set()).add(
+                str(row.get("horizon_bucket"))
+            )
+    return {
+        rollup_date
+        for rollup_date, horizons in represented_horizons.items()
+        if horizons == set(HORIZON_NAMES)
+    }
 
 
 def _safe_failure(exc: Exception) -> str:

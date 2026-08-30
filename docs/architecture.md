@@ -1,5 +1,10 @@
 # Phase 1 architecture
 
+v0.5.2 keeps the existing one-process, one-collector architecture. Its rollup
+refresh runs inside the existing Forecast Operations coordinator and failures are
+isolated from collection/forecasting. All Home Assistant and hardware access
+remains read-only.
+
 v0.5.1 keeps one process, collector, and Forecast Operations coordinator.
 Calibration/candidate comparison are bounded read-only services/tools; retention
 is a daily coordinator phase. No executor or control layer is added.

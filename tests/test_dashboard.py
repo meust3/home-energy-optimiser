@@ -352,6 +352,10 @@ def test_latest_persisted_reserve_returns_supported_subset(dashboard_database):
     assert reserve.gross_reserve_requirement_kwh == pytest.approx(12.5)
     assert reserve.potentially_tradable_energy_kwh is None
     assert reserve.command_issued is False
+    assert not reserve.tradable_energy_is_calibrated
+    assert reserve.tradable_calibration_reason == (
+        "No complete reserve audit is linked to a scheduled forecast run."
+    )
     quality = service.data_quality(
         start=first.slot_utc - timedelta(minutes=5),
         end=first.slot_utc + timedelta(minutes=15),
@@ -458,14 +462,14 @@ def test_web_shell_static_nested_ingress_api_and_security_headers():
         assert status == 200
         html = body.decode()
         assert f'<base href="{prefix}">' in html
-        assert 'href="static/app.css?v=0.5.1"' in html
+        assert 'href="static/app.css?v=0.5.2"' in html
         assert "Advisory only. No command was issued." in html
         assert "Content-Security-Policy" in headers
         assert "X-Frame-Options" not in headers
         status, _, css = _request(
             server,
             "GET",
-            prefix + "static/app.css?v=0.5.1",
+            prefix + "static/app.css?v=0.5.2",
             {"X-Ingress-Path": prefix},
         )
         assert status == 200

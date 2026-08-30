@@ -1,6 +1,11 @@
 # Home Energy Optimiser
 
-Version 0.5.1 retains the UID/GID 10001,
+Version 0.5.2 retains the UID/GID 10001, read-only Home Assistant access, one
+process and one collector. It requires schema revision `20260814_01` and adds
+independent calibration rollups, negative-demand validation, and GET-only solar
+diagnostics. Retention remains disabled by default.
+
+Version 0.5.1 retained the UID/GID 10001,
 one-process, one-collector, PostgreSQL-only App and adds one opt-in in-process
 forecast coordinator. Forecast operations default to disabled; all new dashboard
 routes are GET-only and no device command path exists. Explicit Alembic revision

@@ -87,7 +87,15 @@ def _run(options) -> int:
     health.forecast_point_retention_days = options.forecast_point_retention_days
     health.forecast_run_retention_days = options.forecast_run_retention_days
     health.retention_enabled = options.retention_enabled
+    health.timezone = options.timezone
     health.demand_training_policy = options.demand_training_policy
+    health.calibration_window_days = options.calibration_window_days
+    health.calibration_min_complete_days = options.calibration_min_complete_days
+    health.calibration_complete_day_coverage_percent = (
+        options.calibration_complete_day_coverage_percent
+    )
+    health.calibration_min_weekday_days = options.calibration_min_weekday_days
+    health.calibration_min_weekend_days = options.calibration_min_weekend_days
     server, thread = start_dashboard_server(
         health, database_url=environment["DATABASE_URL"], port=HEALTH_PORT
     )

@@ -1,5 +1,5 @@
 name: Home Energy Optimiser
-version: "0.5.1"
+version: "0.5.2"
 slug: home_energy_optimiser
 description: Read-only energy dashboard and five-minute PostgreSQL collector
 url: https://github.com/meust3/home-energy-optimiser
@@ -49,6 +49,10 @@ options:
   forecast_run_retention_days: 365
   retention_enabled: false
   calibration_window_days: 30
+  calibration_min_complete_days: 7
+  calibration_complete_day_coverage_percent: 95
+  calibration_min_weekday_days: 5
+  calibration_min_weekend_days: 1
 schema:
   db_host: str
   db_port: port
@@ -84,3 +88,7 @@ schema:
   forecast_run_retention_days: int(90,3650)
   retention_enabled: bool
   calibration_window_days: int(1,365)
+  calibration_min_complete_days: int(1,365)
+  calibration_complete_day_coverage_percent: float(1,100)
+  calibration_min_weekday_days: int(0,365)
+  calibration_min_weekend_days: int(0,365)

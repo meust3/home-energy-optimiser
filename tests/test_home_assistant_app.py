@@ -268,6 +268,10 @@ def test_app_environment_uses_supervisor_proxy_and_never_sqlite():
     assert environment["FORECAST_RUN_RETENTION_DAYS"] == "365"
     assert environment["RETENTION_ENABLED"] == "false"
     assert environment["CALIBRATION_WINDOW_DAYS"] == "30"
+    assert environment["CALIBRATION_MIN_COMPLETE_DAYS"] == "7"
+    assert environment["CALIBRATION_COMPLETE_DAY_COVERAGE_PERCENT"] == "95.0"
+    assert environment["CALIBRATION_MIN_WEEKDAY_DAYS"] == "5"
+    assert environment["CALIBRATION_MIN_WEEKEND_DAYS"] == "1"
     assert environment["RESERVE_SNAPSHOT_ENABLED"] == "true"
 
 
@@ -357,6 +361,8 @@ def test_startup_home_assistant_check_is_get_only(monkeypatch):
                 forecast_operation_attempts=0,
                 reserve_runs=0,
                 reserve_opportunity_evaluations=0,
+                forecast_accuracy_rollups=0,
+                forecast_maintenance_runs=0,
             )
 
         def close(self):
@@ -549,11 +555,11 @@ def test_app_patch_versions_are_consistent():
     manifest = Path("home_energy_optimiser/config.yaml").read_text(encoding="utf-8")
     dockerfile = Path("home_energy_optimiser/Dockerfile").read_text(encoding="utf-8")
     project = Path("pyproject.toml").read_text(encoding="utf-8")
-    assert APP_VERSION == "0.5.1"
-    assert 'version: "0.5.1"' in manifest
-    assert "ARG BUILD_VERSION=0.5.1" in dockerfile
-    assert "ARG APP_SOURCE_REF=v0.5.1" in dockerfile
-    assert 'version = "0.5.1"' in project
+    assert APP_VERSION == "0.5.2"
+    assert 'version: "0.5.2"' in manifest
+    assert "ARG BUILD_VERSION=0.5.2" in dockerfile
+    assert "ARG APP_SOURCE_REF=v0.5.2" in dockerfile
+    assert 'version = "0.5.2"' in project
 
 
 def test_app_launcher_execs_existing_collector_without_restart_loop():
@@ -647,7 +653,7 @@ def test_app_page_documentation_and_changelog_are_packaged():
     assert changelog.is_file()
     assert documentation.is_file()
     changelog_text = changelog.read_text(encoding="utf-8")
-    assert "## 0.5.1" in changelog_text
+    assert "## 0.5.2" in changelog_text
     assert "## 0.4.1" in changelog_text
     assert "## 0.4.0" in changelog_text
     assert "## 0.3.1" in changelog_text

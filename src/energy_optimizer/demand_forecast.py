@@ -7,6 +7,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
+from energy_optimizer.data_validation import materially_negative_household_demand
 from energy_optimizer.timestamps import aware_datetime
 from energy_optimizer.training_provenance import (
     TrainingCohort,
@@ -473,6 +474,9 @@ def _eligible_samples(
         local_value = row.get("observed_at_local")
         if value is None or local_value is None:
             ineligible["missing_baseline_or_timestamp"] += 1
+            continue
+        if materially_negative_household_demand(float(value)):
+            ineligible["invalid_negative_household_demand"] += 1
             continue
         try:
             local = aware_datetime(local_value)
