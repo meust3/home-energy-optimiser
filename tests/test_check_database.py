@@ -46,7 +46,7 @@ def test_v041_schema_reports_clean_migration_required_failure(revision_database_
 
     assert report["connectivity"] is True
     assert report["current_revision"] == "20260811_01"
-    assert report["expected_revision"] == "20260814_01"
+    assert report["expected_revision"] == "20260905_01"
     assert report["schema_status"] == "schema_outdated"
     assert report["migration_required"] is True
     assert report["summary"] == "FAIL"
@@ -69,12 +69,15 @@ def test_v050_schema_reports_healthy(revision_database_url):
 
     report = check_database(revision_database_url, application_readiness=True)
 
-    assert report["current_revision"] == "20260814_01"
+    assert report["current_revision"] == "20260905_01"
     assert report["schema_status"] == "schema_current"
     assert report["migration_required"] is False
     assert report["summary"] == "PASS"
     assert "reason" not in report
     assert report["table_counts"]["forecast_point_scores"] == 0
+    assert report["table_counts"]["shadow_decision_runs"] == 0
+    assert report["table_counts"]["shadow_decision_candidates"] == 0
+    assert report["table_counts"]["shadow_decision_outcomes"] == 0
     assert all(
         capability["status"] == "PASS"
         for capability in report["application_readiness"].values()
@@ -90,7 +93,7 @@ def test_missing_v050_table_is_reported_without_querying_it(revision_database_ur
 
     report = check_database(revision_database_url, application_readiness=True)
 
-    assert report["current_revision"] == "20260814_01"
+    assert report["current_revision"] == "20260905_01"
     assert report["schema_status"] == "table_missing_unexpectedly"
     assert report["migration_required"] is False
     assert report["missing_tables"] == ["forecast_point_scores"]

@@ -19,11 +19,23 @@ from energy_optimizer.forecast_alignment import (
 from energy_optimizer.forecast_calibration import (
     CURRENT_FORECAST_MODEL_VERSION,
     HORIZON_NAMES,
+    CalibrationIdentity,
+    calculate_forecast_calibration_from_rollups,
 )
 from energy_optimizer.forecast_retention import run_forecast_retention
-from energy_optimizer.forecast_rollups import refresh_forecast_accuracy_rollups
+from energy_optimizer.forecast_rollups import (
+    forecast_rollup_backfill_status,
+    refresh_forecast_accuracy_rollups,
+)
 from energy_optimizer.models import CollectorConfig, ForecastPoint, ForecastRun
 from energy_optimizer.reserve import estimate_battery_reserve
+from energy_optimizer.shadow_decisioning import (
+    OUTCOME_SCORING_VERSION,
+    CalibrationGate,
+    ShadowDecisionConfig,
+    evaluate_shadow_decision,
+    score_shadow_outcome,
+)
 
 LOGGER = logging.getLogger(__name__)
 FORECAST_MODEL_VERSION = CURRENT_FORECAST_MODEL_VERSION
@@ -85,6 +97,7 @@ class ForecastCoordinator:
         collector_config: CollectorConfig,
         operations_config: ForecastOperationsConfig,
         health: Any,
+        shadow_config: ShadowDecisionConfig | None = None,
         clock: Callable[[], datetime] = lambda: datetime.now(UTC),
         monotonic: Callable[[], float] = time.monotonic,
     ) -> None:
@@ -92,6 +105,7 @@ class ForecastCoordinator:
         self.collector_config = collector_config
         self.config = operations_config
         self.health = health
+        self.shadow_config = shadow_config or ShadowDecisionConfig()
         self.clock = clock
         self.monotonic = monotonic
         self._active = threading.Lock()
@@ -101,7 +115,11 @@ class ForecastCoordinator:
         self._stop_requested = stop_event.is_set
         if not self.config.enabled:
             self.health.configure_forecast_scheduler(enabled=False, next_run=None)
+            if hasattr(self.health, "configure_shadow_decisioning"):
+                self.health.configure_shadow_decisioning(enabled=False)
             return
+        if hasattr(self.health, "configure_shadow_decisioning"):
+            self.health.configure_shadow_decisioning(enabled=self.shadow_config.enabled)
         recovered_at = self.clock().astimezone(UTC)
         try:
             repository = self.repository_factory()
@@ -193,6 +211,7 @@ class ForecastCoordinator:
             )
             self._check_deadline(started_monotonic)
             rollup_result: dict[str, Any] | None = None
+            rollup_status: dict[str, Any] | None = None
             try:
                 local_today = started_at.astimezone(
                     ZoneInfo(self.config.timezone)
@@ -200,43 +219,50 @@ class ForecastCoordinator:
                 window_start = local_today - timedelta(
                     days=self.collector_config.calibration_window_days
                 )
-                existing_rollups, rollups_truncated = (
-                    repository.forecast_rollup_rows_read_only(
-                        after_date=window_start,
-                        before_date=local_today + timedelta(days=1),
-                    )
-                )
-                if rollups_truncated:
-                    raise RuntimeError("calibration rollup inventory truncated")
-                represented_dates = _represented_calibration_rollup_dates(
-                    existing_rollups,
+                rollup_status = forecast_rollup_backfill_status(
+                    repository,
+                    forecast_type="baseline_household_load",
+                    model_version=FORECAST_MODEL_VERSION,
+                    alignment_version_name=FULL_FIVE_MINUTE_ALIGNMENT,
                     training_policy=self.collector_config.demand_training_policy,
+                    window_start=window_start,
+                    window_end=local_today,
+                    timezone_name=self.config.timezone,
                 )
-                first_target, _ = repository.forecast_detail_target_bounds_read_only()
-                first_detail_date = (
-                    first_target.astimezone(ZoneInfo(self.config.timezone)).date()
-                    if first_target is not None
-                    else local_today
-                )
-                backfill_start = max(window_start, first_detail_date)
-                missing_dates = [
-                    backfill_start + timedelta(days=index)
-                    for index in range((local_today - backfill_start).days)
-                    if backfill_start + timedelta(days=index) not in represented_dates
-                ][:2]
+                if (
+                    rollup_status["detail_query_truncated"]
+                    or rollup_status["rollup_query_truncated"]
+                ):
+                    raise RuntimeError("calibration rollup inventory truncated")
+                missing_dates = rollup_status["remaining_local_dates"][:2]
+                refresh_dates = list(missing_dates)
+                yesterday = local_today - timedelta(days=1)
+                if yesterday >= window_start and yesterday not in refresh_dates:
+                    refresh_dates.append(yesterday)
                 rollup_result = refresh_forecast_accuracy_rollups(
                     repository,
-                    local_dates=[
-                        *missing_dates,
-                        local_today - timedelta(days=1),
-                        local_today,
-                    ],
+                    local_dates=refresh_dates,
                     timezone_name=self.config.timezone,
                     complete_day_coverage_percent=(
                         self.collector_config.calibration_complete_day_coverage_percent
                     ),
                     now=started_at,
                 )
+                rollup_status = forecast_rollup_backfill_status(
+                    repository,
+                    forecast_type="baseline_household_load",
+                    model_version=FORECAST_MODEL_VERSION,
+                    alignment_version_name=FULL_FIVE_MINUTE_ALIGNMENT,
+                    training_policy=self.collector_config.demand_training_policy,
+                    window_start=window_start,
+                    window_end=local_today,
+                    timezone_name=self.config.timezone,
+                )
+                rollup_result["backfill"] = {
+                    key: value
+                    for key, value in rollup_status.items()
+                    if key != "remaining_local_dates"
+                }
                 LOGGER.info(
                     "Calibration rollup refresh succeeded dates=%s rollups=%s "
                     "identity=%s/%s/%s/%s",
@@ -248,14 +274,22 @@ class ForecastCoordinator:
                     self.collector_config.demand_training_policy,
                 )
                 if hasattr(self.health, "record_calibration_rollup"):
-                    self.health.record_calibration_rollup(successful=True)
+                    self.health.record_calibration_rollup(
+                        successful=True, progress=rollup_status
+                    )
             except Exception as exc:
                 # Analytical maintenance must never stop collection/forecasting.
                 LOGGER.warning(
                     "Calibration rollup refresh failed: %s", _safe_failure(exc)
                 )
                 if hasattr(self.health, "record_calibration_rollup"):
-                    self.health.record_calibration_rollup(successful=False)
+                    self.health.record_calibration_rollup(
+                        successful=False,
+                        progress={
+                            "rollup_backfill_status": "warning",
+                            "last_failure": _safe_failure(exc),
+                        },
+                    )
             reserve_run_id = None
             if self.config.reserve_snapshot_enabled:
                 estimate = estimate_battery_reserve(
@@ -275,6 +309,104 @@ class ForecastCoordinator:
                 )
                 self.health.record_reserve_success(started_at)
             self._check_deadline(started_monotonic)
+            decision_run_id = None
+            outcome_count = 0
+            if self.shadow_config.enabled and reserve_run_id is not None:
+                decision_started = self.monotonic()
+                try:
+                    forecast_snapshot = repository.forecast_run(forecast_run_id)
+                    reserve_snapshot = repository.reserve_audit_read_only(
+                        reserve_run_id
+                    )
+                    observation_snapshot = repository.observation_as_of_read_only(
+                        started_at
+                    )
+                    calibration_gate = _decision_calibration_gate(
+                        repository,
+                        forecast_snapshot=forecast_snapshot,
+                        rollup_status=rollup_status,
+                        collector_config=self.collector_config,
+                        timezone_name=self.config.timezone,
+                        now=started_at,
+                    )
+                    result = evaluate_shadow_decision(
+                        decision_boundary_utc=scheduled_for,
+                        created_at_utc=started_at,
+                        observation=observation_snapshot,
+                        forecast_run=forecast_snapshot,
+                        reserve_run=reserve_snapshot,
+                        calibration=calibration_gate,
+                        collector_config=self.collector_config,
+                        config=self.shadow_config,
+                    )
+                    if (
+                        self.monotonic() - decision_started
+                        > self.shadow_config.max_runtime_seconds
+                    ):
+                        raise TimeoutError("Shadow decision runtime exceeded")
+                    decision_run_id = repository.save_shadow_decision(
+                        result,
+                        forecast_run_id=forecast_run_id,
+                        reserve_run_id=reserve_run_id,
+                        shadow_enabled=True,
+                        non_hold_enabled=(
+                            self.shadow_config.allow_non_hold_recommendations
+                        ),
+                    )
+                    if hasattr(self.health, "record_shadow_decision"):
+                        self.health.record_shadow_decision(
+                            timestamp=started_at,
+                            status=result.status,
+                            successful=decision_run_id is not None,
+                        )
+                    LOGGER.info(
+                        "Shadow decision boundary=%s action=%s candidates=%s "
+                        "no_command_issued=true expected_gross_value_aud=%s",
+                        scheduled_for.isoformat(),
+                        result.selected_action,
+                        len(result.candidates),
+                        (
+                            result.selected_candidate.gross_incremental_value_aud
+                            if result.selected_candidate
+                            else None
+                        ),
+                    )
+                except Exception as exc:
+                    if hasattr(self.health, "record_shadow_decision"):
+                        self.health.record_shadow_decision(
+                            timestamp=started_at,
+                            status="exception",
+                            successful=False,
+                        )
+                    LOGGER.warning(
+                        "Shadow decision failed; forecast and collection remain "
+                        "active: %s",
+                        _safe_failure(exc),
+                    )
+                try:
+                    outcome_count = self._score_shadow_outcomes(
+                        repository, now=started_at, started=started_monotonic
+                    )
+                    if outcome_count and hasattr(
+                        self.health, "record_shadow_outcome_success"
+                    ):
+                        self.health.record_shadow_outcome_success(started_at)
+                except Exception as exc:
+                    if hasattr(self.health, "record_shadow_outcome_failure"):
+                        self.health.record_shadow_outcome_failure()
+                    LOGGER.warning(
+                        "Shadow outcome scoring failed; collection remains active: %s",
+                        _safe_failure(exc),
+                    )
+            elif self.shadow_config.enabled and hasattr(
+                self.health, "record_shadow_decision"
+            ):
+                self.health.record_shadow_decision(
+                    timestamp=started_at,
+                    status="reserve_missing",
+                    successful=False,
+                )
+            self._check_deadline(started_monotonic)
             finished = self.clock().astimezone(UTC)
             duration = self.monotonic() - started_monotonic
             repository.finish_forecast_operation(
@@ -288,6 +420,8 @@ class ForecastCoordinator:
                 metadata={
                     "scored_point_count": scored,
                     "calibration_rollup": rollup_result,
+                    "shadow_decision_run_id": decision_run_id,
+                    "shadow_outcomes_scored": outcome_count,
                 },
             )
             repository.release_forecast_operation_lock(durable_lock)
@@ -441,11 +575,43 @@ class ForecastCoordinator:
         if self.monotonic() - started > self.config.max_runtime_seconds:
             raise TimeoutError("Forecast operation exceeded configured runtime")
 
+    def _score_shadow_outcomes(
+        self, repository: Any, *, now: datetime, started: float
+    ) -> int:
+        pending = repository.pending_shadow_decisions_for_scoring(
+            now=now,
+            delay_minutes=self.shadow_config.outcome_scoring_delay_minutes,
+            scoring_version=OUTCOME_SCORING_VERSION,
+        )
+        stored = 0
+        for decision in pending:
+            self._check_deadline(started)
+            detail = repository.shadow_decision_detail_read_only(int(decision["id"]))
+            if detail is None:
+                continue
+            rows = repository.shadow_outcome_observations_read_only(
+                start=decision["selected_start_utc"],
+                end=decision["selected_end_utc"],
+            )
+            outcome = score_shadow_outcome(
+                decision_run=decision,
+                candidates=detail["candidates"],
+                observations=rows,
+                scored_at_utc=now,
+            )
+            if repository.save_shadow_outcome(outcome) is not None:
+                stored += 1
+        if pending:
+            LOGGER.info(
+                "Shadow outcome scoring matured=%s stored=%s", len(pending), stored
+            )
+        return stored
+
 
 def _represented_calibration_rollup_dates(
     rows: list[dict[str, Any]], *, training_policy: str
 ) -> set[date]:
-    """Return dates with all current-identity v0.5.2 horizon rollups."""
+    """Return dates with all current-identity horizon rollups."""
     represented_horizons: dict[date, set[str]] = {}
     for row in rows:
         if (
@@ -463,6 +629,71 @@ def _represented_calibration_rollup_dates(
         for rollup_date, horizons in represented_horizons.items()
         if horizons == set(HORIZON_NAMES)
     }
+
+
+def _decision_calibration_gate(
+    repository: Any,
+    *,
+    forecast_snapshot: dict[str, Any] | None,
+    rollup_status: dict[str, Any] | None,
+    collector_config: CollectorConfig,
+    timezone_name: str,
+    now: datetime,
+) -> CalibrationGate:
+    """Bind the gate to the exact linked run and completed local-date evidence."""
+    zone = ZoneInfo(timezone_name)
+    local_today = now.astimezone(zone).date()
+    start_date = local_today - timedelta(days=collector_config.calibration_window_days)
+    rows, truncated = repository.forecast_rollup_rows_read_only(
+        after_date=start_date,
+        before_date=local_today,
+    )
+    identity = CalibrationIdentity(
+        forecast_type="baseline_household_load",
+        model_version=FORECAST_MODEL_VERSION,
+        alignment_version=FULL_FIVE_MINUTE_ALIGNMENT,
+        training_policy=collector_config.demand_training_policy,
+    )
+    report = calculate_forecast_calibration_from_rollups(
+        rows,
+        current_identity=identity,
+        minimum_complete_dates=collector_config.calibration_min_complete_days,
+        complete_day_coverage_percent=(
+            collector_config.calibration_complete_day_coverage_percent
+        ),
+        minimum_weekday_dates=collector_config.calibration_min_weekday_days,
+        minimum_weekend_dates=collector_config.calibration_min_weekend_days,
+        requested_start=datetime.combine(
+            start_date, datetime.min.time(), zone
+        ).astimezone(UTC),
+        requested_end=datetime.combine(
+            local_today, datetime.min.time(), zone
+        ).astimezone(UTC),
+        truncated=truncated,
+    )
+    metadata = (forecast_snapshot or {}).get("metadata_json") or {}
+    matches = bool(
+        forecast_snapshot
+        and forecast_snapshot.get("forecast_type") == identity.forecast_type
+        and forecast_snapshot.get("model_version") == identity.model_version
+        and metadata.get("alignment_version") == identity.alignment_version
+        and metadata.get("training_policy") == identity.training_policy
+    )
+    backfill_complete = bool(
+        rollup_status and rollup_status.get("current_identity_complete")
+    )
+    blocks = list(report.quality_blocks)
+    if not backfill_complete and "rollup_backfill_incomplete" not in blocks:
+        blocks.append("rollup_backfill_incomplete")
+    return CalibrationGate(
+        identity=identity.model_dump(),
+        identity_matches=matches,
+        status=report.status,
+        independent_evidence_sufficient=report.independent_evidence_sufficient,
+        required_horizons_present=report.required_horizons_present,
+        quality_blocks=tuple(blocks),
+        rollup_backfill_complete=backfill_complete,
+    )
 
 
 def _safe_failure(exc: Exception) -> str:

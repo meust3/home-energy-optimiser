@@ -1,5 +1,17 @@
 # Dashboard API
 
+## v0.6.0 GET-only routes
+
+- `GET /api/v1/forecast-comparison-card?mode=live|latest_complete`
+- `GET /api/v1/decisions/latest`
+- `GET /api/v1/decisions?limit=...`
+- `GET /api/v1/decisions/{id}`
+- `GET /api/v1/decision-outcomes?limit=...`
+
+The forecast response is bounded to one run/288 points; decision/outcome limits
+are validated. No decide, run, repair, execute, or other mutation route exists.
+POST, PUT, PATCH and DELETE continue to return 405.
+
 GET `/api/v1/forecast-calibration` now reads durable rollups and exposes requested
 and actual ranges plus explicit truncation. GET
 `/api/v1/solar-forecast-diagnostics` returns privacy-minimized daily context.

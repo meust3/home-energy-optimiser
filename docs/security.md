@@ -1,5 +1,13 @@
 # Security and safety boundary
 
+## v0.6.0 no-command invariant
+
+The shadow engine imports no Home Assistant/device/Modbus client and returns data
+only. The persistence API always writes `no_command_issued=true`, while PostgreSQL
+and SQLite enforce that value with a CHECK constraint. The App retains GET-only HA
+access and GET-only administrator Ingress APIs. There is no command table, worker,
+action endpoint, HCA/SEMS connection, EV control, or hardware execution path.
+
 v0.5.2 adds analytical database writes and GET-only presentation. It does not add
 Home Assistant POST/service calls, device or Modbus writes, control endpoints,
 credentials, VIN/location output, or automatic trading.

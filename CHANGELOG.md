@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.6.0 - 2026-09-05
+
+- Added an opt-in deterministic battery-only shadow engine inside the existing
+  Forecast Operations coordinator. It persists candidate evidence only after the
+  linked forecast and reserve, defaults to HOLD-only, and cannot issue commands.
+- Added assumption/policy versioning, fail-closed calibration, freshness, price,
+  reserve and constraint gates, duration-overlap Amber economics, and explicitly
+  blocked EV capabilities.
+- Added additive revision `20260905_01` for immutable decision runs/candidates and
+  append-only outcome versions. The database enforces `no_command_issued = true`.
+- Added delayed simulated outcome comparison against HOLD and hindsight, with
+  coverage, reserve-breach, counterfactual and probable-intervention disclosures.
+- Fixed exact-identity calibration-rollup backfill planning and normalized Solcast
+  P10/P50/P90 diagnostic keys without changing forecast or reserve arithmetic.
+- Added GET-only Decisions APIs/dashboard, an accessible Overview Forecast vs
+  Actual card, and a read-only synthetic replay tool.
+- No Home Assistant service, device, Modbus, EV, SEMS, trading, retention, forecast
+  hierarchy, reserve arithmetic, or automatic solar-derating path was added.
+
 ## 0.5.2
 
 - Calibration readiness now uses the exact forecast identity and independent

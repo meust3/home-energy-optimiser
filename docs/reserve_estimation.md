@@ -1,5 +1,10 @@
 # Battery reserve estimation
 
+Version 0.6.0 does not change this estimator or its technical/emergency reserve
+formula. Shadow decisioning consumes the linked persisted
+`recommended_reserve_kwh`; it does not recalculate reserve. Discharge/export
+candidates are infeasible if projected energy would cross it.
+
 v0.5.2 changes diagnostics and conservative readiness gating only. Tier hierarchy,
 Tier 2 arithmetic mean, technical/emergency/20% reserve policy, uncertainty
 arithmetic, opportunity selection, and reserve-energy calculations are unchanged.

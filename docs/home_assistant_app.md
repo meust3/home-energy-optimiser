@@ -1,5 +1,12 @@
 # Home Assistant App design
 
+## v0.6.0 release
+
+The release retains one container/process/collector/coordinator/dashboard. New
+shadow options default disabled and HOLD-only. Unknown import/export/discharge
+limits default to zero-as-unknown and block dependent candidates. Startup requires
+manual schema revision `20260905_01`; it never runs Alembic automatically.
+
 The v0.5.2 App remains UID/GID 10001 after its existing root bootstrap, uses one
 process/collector, and expects schema `20260814_01`. Rollup health is diagnostic
 and independent of the core collector watchdog.

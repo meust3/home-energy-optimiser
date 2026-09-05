@@ -127,14 +127,35 @@ def calculate_solar_diagnostics(
 def _forecast_values(value: Any) -> tuple[float | None, float, float | None] | None:
     if not isinstance(value, dict):
         return None
+    # Current persistence is explicitly normalized to kWh.  Older rows written
+    # during the transition may retain the legacy key names in this normalized
+    # column, so those are accepted only after the unit provenance is considered.
+    p50 = value.get("estimate_kwh")
+    normalized_p50 = _number(p50)
+    if normalized_p50 is not None:
+        return (
+            _number(value.get("estimate10_kwh")),
+            normalized_p50,
+            _number(value.get("estimate90_kwh")),
+        )
     p50 = value.get("estimate")
-    if p50 is None:
+    legacy_p50 = _number(p50)
+    if legacy_p50 is None:
         return None
+    source_unit = str(
+        value.get("source_unit") or value.get("unit_of_measurement") or ""
+    ).casefold()
+    factor = 0.001 if source_unit == "wh" else 1.0
     return (
-        _number(value.get("estimate10")),
-        float(p50),
-        _number(value.get("estimate90")),
+        _scaled(value.get("estimate10"), factor),
+        legacy_p50 * factor,
+        _scaled(value.get("estimate90"), factor),
     )
+
+
+def _scaled(value: Any, factor: float) -> float | None:
+    number = _number(value)
+    return number * factor if number is not None else None
 
 
 def _number(value: Any) -> float | None:

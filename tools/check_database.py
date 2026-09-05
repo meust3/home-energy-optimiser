@@ -34,6 +34,9 @@ COUNTED_TABLES = (
     "reserve_opportunity_evaluations",
     "forecast_accuracy_rollups",
     "forecast_maintenance_runs",
+    "shadow_decision_runs",
+    "shadow_decision_candidates",
+    "shadow_decision_outcomes",
 )
 
 
@@ -236,6 +239,14 @@ def _application_readiness(engine) -> dict[str, dict[str, object]]:
         "forecast_storage": ({"forecast_runs", "forecast_points"}, set()),
         "forecast_retention": (
             {"forecast_accuracy_rollups", "forecast_maintenance_runs"},
+            set(),
+        ),
+        "shadow_decisioning": (
+            {
+                "shadow_decision_runs",
+                "shadow_decision_candidates",
+                "shadow_decision_outcomes",
+            },
             set(),
         ),
         "ev_annotation": (

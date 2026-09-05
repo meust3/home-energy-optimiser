@@ -24,6 +24,7 @@ from energy_optimizer.home_assistant_app import (
 )
 from energy_optimizer.logging_config import configure_logging
 from energy_optimizer.persistence import open_bounded_forecast_repository
+from energy_optimizer.shadow_decisioning import ShadowDecisionConfig
 
 LOGGER = logging.getLogger(__name__)
 
@@ -119,6 +120,23 @@ def _run(options) -> int:
             max_runtime_seconds=options.forecast_max_runtime_seconds,
             reserve_snapshot_enabled=options.reserve_snapshot_enabled,
             timezone=options.timezone,
+        ),
+        shadow_config=ShadowDecisionConfig(
+            enabled=options.shadow_decisioning_enabled,
+            allow_non_hold_recommendations=(
+                options.shadow_allow_non_hold_recommendations
+            ),
+            decision_interval_minutes=options.shadow_decision_interval_minutes,
+            max_runtime_seconds=options.shadow_decision_max_runtime_seconds,
+            minimum_expected_value_aud=options.shadow_min_expected_value_aud,
+            outcome_scoring_delay_minutes=(
+                options.shadow_outcome_scoring_delay_minutes
+            ),
+            maximum_analysis_horizon_hours=(options.shadow_max_analysis_horizon_hours),
+            maximum_export_power_w=options.shadow_max_export_power_w,
+            maximum_discharge_power_w=options.shadow_max_discharge_power_w,
+            import_limit_w=options.shadow_import_limit_w,
+            discharge_efficiency=options.shadow_discharge_efficiency,
         ),
         health=health,
     )

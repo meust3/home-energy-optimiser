@@ -1,5 +1,12 @@
 # Database backup, restore, and rollback
 
+Before any v0.6.0 production migration, create a new PostgreSQL backup and prove a
+full restore in a disposable PostgreSQL 17 target. Record revision, row counts and
+constraints before/after the migration and downgrade rehearsal. Stop the sole
+collector only in the separately authorised release window; this development
+work does not access production.
+
+
 v0.5.2 requires a fresh PostgreSQL dump and disposable restore test before
 migration. Record observation, forecast, score, reserve, and rollup counts before
 and after. If the App fails, prefer keeping revision `20260814_01` and running

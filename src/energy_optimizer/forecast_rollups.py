@@ -75,6 +75,79 @@ def refresh_forecast_accuracy_rollups(
     }
 
 
+def forecast_rollup_backfill_status(
+    repository: Any,
+    *,
+    forecast_type: str,
+    model_version: str,
+    alignment_version_name: str,
+    training_policy: str,
+    window_start: date,
+    window_end: date,
+    timezone_name: str,
+    last_failure: str | None = None,
+) -> dict[str, Any]:
+    """Plan exact-identity work so legacy-only dates cannot starve backfill."""
+    zone = ZoneInfo(timezone_name)
+    start_utc = datetime.combine(window_start, time.min, zone).astimezone(UTC)
+    end_utc = datetime.combine(window_end, time.min, zone).astimezone(UTC)
+    targets, detail_truncated = repository.forecast_rollup_candidate_targets_read_only(
+        forecast_type=forecast_type,
+        model_version=model_version,
+        alignment_version=alignment_version_name,
+        training_policy=training_policy,
+        after=start_utc,
+        before=end_utc,
+    )
+    eligible = sorted(
+        {aware_datetime(value).astimezone(zone).date() for value in targets}
+    )
+    rows, rollups_truncated = repository.forecast_rollup_rows_read_only(
+        after_date=window_start,
+        before_date=window_end,
+    )
+    represented: dict[date, set[str]] = defaultdict(set)
+    successes = []
+    for row in rows:
+        if (
+            row.get("forecast_type") == forecast_type
+            and row.get("model_version") == model_version
+            and row.get("alignment_version") == alignment_version_name
+            and row.get("training_policy") == training_policy
+            and row.get("calculated_at_utc") is not None
+        ):
+            represented[row["rollup_date"]].add(str(row.get("horizon_bucket")))
+            successes.append(aware_datetime(row["calculated_at_utc"]).astimezone(UTC))
+    completed = sorted(
+        day for day in eligible if represented.get(day) == set(HORIZON_NAMES)
+    )
+    remaining = [day for day in eligible if day not in set(completed)]
+    truncated = detail_truncated or rollups_truncated
+    status = (
+        "blocked_truncated"
+        if truncated
+        else "complete" if not remaining else "in_progress"
+    )
+    return {
+        "rollup_backfill_status": status,
+        "eligible_dates": len(eligible),
+        "completed_dates": len(completed),
+        "remaining_dates": len(remaining),
+        "remaining_local_dates": remaining,
+        "last_success_utc": max(successes).isoformat() if successes else None,
+        "last_failure": last_failure,
+        "current_identity_complete": bool(eligible) and not remaining and not truncated,
+        "detail_query_truncated": detail_truncated,
+        "rollup_query_truncated": rollups_truncated,
+        "identity": {
+            "forecast_type": forecast_type,
+            "model_version": model_version,
+            "alignment_version": alignment_version_name,
+            "training_policy": training_policy,
+        },
+    }
+
+
 def build_rollup_groups(
     detail_rows: list[dict[str, Any]],
     *,

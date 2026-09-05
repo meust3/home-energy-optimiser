@@ -74,6 +74,7 @@ main { min-height: 70vh; }
 .metric-unavailable { color: var(--muted); font-size: 1rem; font-weight: 650; letter-spacing: 0; }
 .kpi .detail { color: var(--muted); font-size: .73rem; margin: auto 0 0; padding-top: .55rem; }
 .overview-grid { display: grid; grid-template-columns: minmax(0, 1.45fr) repeat(2, minmax(260px, .75fr)); gap: var(--layout-gap); align-items: stretch; }
+.overview-wide { grid-column: span 3; }
 .panel { padding: var(--panel-padding); min-width: 0; }
 .energy-flow { display: grid; grid-template-columns: repeat(3, 1fr); grid-template-areas: ". solar ." "battery home grid"; gap: 1rem; align-items: center; min-height: 270px; padding: 1.2rem; }
 .flow-node { position: relative; text-align: center; border: 1px solid var(--line); border-radius: 50%; aspect-ratio: 1; display: grid; place-content: center; max-width: 130px; width: 100%; margin: auto; background: var(--surface-soft); }
@@ -118,6 +119,9 @@ select { display: block; width: 100%; min-width: 0; margin-top: .3rem; min-heigh
 .chart .series-3 { stroke: var(--warning); }
 .chart polyline { fill: none; stroke-width: 2; vector-effect: non-scaling-stroke; }
 .chart circle { fill: var(--surface); stroke: currentColor; stroke-width: 1.5; }
+.chart .uncertainty-band { fill: color-mix(in srgb, var(--accent) 16%, transparent); stroke: none; }
+.chart .now-marker { stroke: var(--danger); stroke-width: 1.5; stroke-dasharray: 5 4; }
+.chart .chart-axis-label { fill: currentColor; font-size: 10px; }
 .chart-wrap { position: relative; min-height: 220px; }
 .chart-tooltip { position: absolute; display: none; pointer-events: none; z-index: 2; max-width: 15rem; border: 1px solid var(--line); border-radius: .45rem; background: var(--surface); box-shadow: var(--shadow); padding: .45rem .55rem; color: var(--text); font-size: .72rem; }
 .table-fallback { margin-top: auto; padding-top: .75rem; font-size: .75rem; }
@@ -133,6 +137,11 @@ th { position: sticky; top: 0; background: var(--surface); color: var(--muted); 
 .forecast-meta { min-width: 0; }
 .forecast-meta .definition-grid { grid-template-columns: minmax(5.5rem, max-content) minmax(0, 1fr); }
 .reserve-grid, .quality-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--layout-gap); align-items: stretch; }
+.decision-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--layout-gap); align-items: stretch; }
+.decision-action { font-size: clamp(1.2rem, 3vw, 1.8rem); overflow-wrap: break-word; }
+.no-command-banner { border: 2px solid var(--accent); background: var(--accent-soft); border-radius: .65rem; padding: .7rem; font-weight: 800; margin-top: .8rem; }
+.candidate-feasible { color: var(--battery); font-weight: 700; }
+.candidate-blocked { color: var(--muted); }
 .reserve-card { height: 100%; }
 .reserve-card .section-help { min-height: 2.5rem; margin: .4rem 0 0; overflow-wrap: break-word; word-break: normal; color: var(--muted); font-size: .78rem; }
 .schema-notice { grid-column: 1 / -1; border-color: color-mix(in srgb, var(--accent) 30%, var(--line)); background: color-mix(in srgb, var(--accent-soft) 55%, var(--surface)); }
@@ -157,15 +166,16 @@ footer { color: var(--muted); border-top: 1px solid var(--line); padding: 1rem 0
 @media (max-width: 900px) {
   .kpi-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .overview-grid, .forecast-layout { grid-template-columns: 1fr; }
+  .overview-wide { grid-column: auto; }
   .chart-grid { grid-template-columns: minmax(0, 1fr); }
-  .reserve-grid, .quality-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .reserve-grid, .quality-grid, .decision-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 
 @media (max-width: 560px) {
   .app-header { align-items: start; }
   .header-meta { display: none; }
   .status-strip { grid-template-columns: 1fr 1fr; }
-  .kpi-grid, .reserve-grid, .quality-grid { grid-template-columns: minmax(0, 1fr); }
+  .kpi-grid, .reserve-grid, .quality-grid, .decision-grid { grid-template-columns: minmax(0, 1fr); }
   .energy-flow { padding-inline: 0; gap: .45rem; }
   .flow-node strong { font-size: .9rem; }
   .section-heading { align-items: start; }

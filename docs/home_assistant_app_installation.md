@@ -1,5 +1,14 @@
 # Home Assistant App installation
 
+## v0.6.0 controlled deployment gate
+
+Do not install this release over production until the immutable amd64 image,
+Home Assistant discovery, PostgreSQL 17 migration round trip, fresh backup restore,
+collector stop/start discipline, disabled shadow default, HOLD-only soak, health,
+Ingress and rollback are manually verified. Production v0.5.2 remains the rollback
+application and revision `20260814_01` the downgrade target; downgrade discards
+only v0.6.0 shadow history.
+
 Before installing v0.5.2, back up and restore-test PostgreSQL, stop the sole
 v0.5.1 collector, and run `python -m alembic upgrade 20260814_01` from reviewed
 v0.5.2 source. Confirm the exact revision, then update/start the App. New

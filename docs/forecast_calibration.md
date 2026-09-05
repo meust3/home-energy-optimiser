@@ -1,5 +1,13 @@
 # Forecast calibration
 
+## Shadow selection gate
+
+Non-HOLD shadow selection uses the linked forecast's exact forecast type, model,
+alignment and training policy. It also requires complete current-identity rollup
+backfill, independent complete-date and weekday/weekend thresholds, all required
+horizon buckets, and no truncation/quality block. Otherwise candidate analysis is
+retained but HOLD is selected and `tradable_calibrated` is false.
+
 v0.5.2 replaces overlap-based readiness with independent target-slot/local-date
 evidence while retaining raw row-weighted metrics. See
 [calibration_independence.md](calibration_independence.md). Seven 95%-complete

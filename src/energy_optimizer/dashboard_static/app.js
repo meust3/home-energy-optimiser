@@ -29,6 +29,7 @@ function number(value, digits = 1) { return value == null ? "Unavailable" : Numb
 function power(value) { return value == null ? "Unavailable" : `${number(value / 1000, 2)} kW`; }
 function energy(value) { return value == null ? "Unavailable" : `${number(value, 2)} kWh`; }
 function price(value) { return value == null ? "Unavailable" : `${number(value, 3)} AUD/kWh`; }
+function money(value) { return value == null ? "Unavailable" : `${number(value, 3)} AUD`; }
 function percent(value) { return value == null ? "Unavailable" : `${number(value, 1)}%`; }
 function age(seconds) { if (seconds == null) return "Unavailable"; if (seconds < 60) return `${Math.round(seconds)} sec`; return `${Math.round(seconds / 60)} min`; }
 function yesNoUnknown(value, yes, no) { return value == null ? "Unknown" : value ? yes : no; }
@@ -38,6 +39,7 @@ function safeText(value) {
 }
 
 function isNumeric(value) { return typeof value === "number" && Number.isFinite(value); }
+function absolute(value) { return isNumeric(value) ? Math.abs(value) : null; }
 
 function availabilityLabel(state) {
   const labels = {
@@ -197,6 +199,112 @@ async function loadReserve() {
   } catch (error) { setState("#reserve-state", error.message, "error-state"); }
 }
 
+async function loadShadowOverview() {
+  const target = $("#overview-shadow");
+  try {
+    const data = await request("shadow-overview", "decisions/latest");
+    target.querySelector(".loading-block")?.remove(); target.querySelector(".shadow-body")?.remove();
+    const body = document.createElement("div"); body.className = "shadow-body";
+    if (!data.available) {
+      body.innerHTML = `<div class="empty-state">${safeText(data.message)}</div><div class="no-command-banner">Shadow only &mdash; no command issued</div>`;
+    } else {
+      const decision = data.decision; const selected = (decision.candidates || []).find(item => item.action === decision.selected_action);
+      body.innerHTML = `<div class="decision-action">${safeText(decision.selected_action || "No recommendation")}</div>${definition([
+        ["Decision time", localTime(decision.created_at_utc)],
+        ["Action window", decision.selected_start_utc ? `${localTime(decision.selected_start_utc)} - ${localTime(decision.selected_end_utc)}` : "Unavailable"],
+        ["Expected energy", energy(absolute(decision.selected_battery_energy_kwh))],
+        ["Expected gross value", money(decision.expected_gross_value_aud)],
+        ["Reserve margin after", energy(selected?.reserve_margin_after_kwh)],
+        ["Confidence", decision.confidence_rating],
+        ["Reason", (decision.reason_codes_json || []).join(", ")],
+      ])}<div class="no-command-banner">Shadow only &mdash; no command issued</div>${decision.non_hold_selection_enabled ? "" : '<p class="muted">Candidate analysis is active. Selected recommendation is forced to HOLD.</p>'}`;
+    }
+    target.append(body);
+  } catch (error) {
+    target.querySelector(".loading-block")?.remove();
+    target.insertAdjacentHTML("beforeend", `<div class="error-state">${safeText(error.message)}</div>`);
+  }
+}
+
+async function loadForecastActualCard() {
+  const modeSelect = $("#forecast-card-mode");
+  const target = $("#forecast-card-content");
+  const mode = modeSelect.value || "live";
+  target.className = "loading-block"; target.textContent = "Loading forecast comparison...";
+  try {
+    const data = await request("forecast-card", "forecast-comparison-card", { mode });
+    target.className = "forecast-card-body"; target.innerHTML = "";
+    if (data.empty_state) {
+      target.innerHTML = `<div class="empty-state chart-empty"><strong>${safeText(data.empty_state.message)}</strong><span>The dashboard does not generate or select a different run.</span></div>`;
+      return;
+    }
+    const metric = data.metrics; const coverage = data.coverage; const identity = data.identity;
+    target.insertAdjacentHTML("beforeend", `${definition([
+      ["Forecast run created", localTime(data.created_at_utc)],
+      ["Forecast horizon", `${localTime(data.period_start_utc)} - ${localTime(data.period_end_utc)}`],
+      ["Model version", identity.model_version], ["Alignment version", identity.alignment_version], ["Training policy", identity.training_policy],
+      ["Elapsed actual coverage", percent(coverage.matured_actual_coverage_percent)],
+      ["Forecast energy", energy(metric.forecast_energy_kwh)], ["Actual energy", energy(metric.actual_energy_kwh)],
+      ["Signed energy error", energy(metric.signed_energy_error_kwh)], ["Error sign", "Actual minus forecast"],
+      ["MAE", power(metric.mae_w)], ["Bias", power(metric.bias_w)], ["WAPE", percent(metric.wape_percent)], ["Calibration", data.calibration_status],
+    ])}<p class="muted">${safeText(metric.period_label)}. Future actuals remain missing.</p>`);
+    const points = data.points.map(point => ({
+      timestamp_utc: point.period_start_utc, has_observation: true,
+      expected: point.forecast_w, actual: point.actual_w, lower: point.lower_w, upper: point.upper_w,
+      actual_missing_reason: point.actual_missing_reason,
+      series_available: { expected: true, actual: point.actual_eligible, lower: point.lower_w != null, upper: point.upper_w != null },
+    }));
+    const start = new Date(data.period_start_utc).getTime(); const end = new Date(data.period_end_utc).getTime(); const now = new Date(data.now_utc).getTime();
+    const nowPercent = end > start ? (now - start) / (end - start) * 100 : null;
+    const chart = makeChart("Forecast expected and actual household demand", "kW", [["Forecast expected", "expected"], ["Actual household demand", "actual"], ["Forecast lower", "lower"], ["Forecast upper", "upper"]], points, value => value / 1000, "No comparable forecast and actual intervals are available.", { band: ["lower", "upper"], nowPercent: mode === "live" ? nowPercent : null });
+    target.append(chart);
+  } catch (error) {
+    target.className = "error-state"; target.textContent = error.message;
+  }
+}
+
+async function loadDecisions() {
+  setState("#decisions-state", "Loading immutable shadow decisions and outcomes...");
+  try {
+    const [latest, history, outcomes] = await Promise.all([
+      request("decision-latest", "decisions/latest"),
+      request("decision-history", "decisions", { limit: 50 }),
+      request("decision-outcomes", "decision-outcomes", { limit: 100 }),
+    ]);
+    if (!latest.available) {
+      setState("#decisions-state", latest.message);
+      $("#decision-current").innerHTML = `<article class="panel empty-state">${safeText(latest.message)}</article>`;
+      $("#decision-candidates").innerHTML = '<div class="empty-state">No candidate analysis is stored.</div>';
+      $("#decision-provenance").innerHTML = "";
+    } else {
+      const decision = latest.decision; const selected = (decision.candidates || []).find(item => item.action === decision.selected_action);
+      setState("#decisions-state", `${safeText(decision.status)} decision at ${localTime(decision.decision_boundary_utc)}. No command was issued.`);
+      $("#decision-current").innerHTML = [
+        ["Current recommendation", decision.selected_action || "No recommendation", (decision.reason_codes_json || []).join(", ") || "No reason available"],
+        ["Expected gross value", money(decision.expected_gross_value_aud), `Energy ${energy(absolute(decision.selected_battery_energy_kwh))}`],
+        ["Reserve margin", energy(selected?.reserve_margin_after_kwh), `Confidence ${decision.confidence_rating || "Unavailable"}`],
+        ["Action window", decision.selected_start_utc ? `${localTime(decision.selected_start_utc)} - ${localTime(decision.selected_end_utc)}` : "Unavailable", "Advisory interval only"],
+        ["Data and price", localTime(decision.input_snapshot_json?.observation_collected_at_utc), `Price horizon ${localTime(decision.price_horizon_end_utc)}`],
+        ["Policy", decision.policy_version, `Assumptions ${decision.assumption_set_version}`],
+      ].map(([label, value, detail]) => `<article class="panel"><p class="eyebrow">${safeText(label)}</p><div class="quality-metric decision-action">${safeText(value)}</div><p class="muted">${safeText(detail)}</p>${label === "Current recommendation" ? '<div class="no-command-banner">Shadow only &mdash; no command issued</div>' : ""}</article>`).join("");
+      $("#decision-candidates").innerHTML = `<div class="table-wrap"><table><thead><tr><th>Action</th><th>Feasible</th><th>Rank</th><th>Expected gross value</th><th>Battery energy</th><th>Reserve margin</th><th>Blocking reason</th><th>Warnings</th></tr></thead><tbody>${decision.candidates.map(item => `<tr><td>${safeText(item.action)}</td><td class="${item.feasible ? "candidate-feasible" : "candidate-blocked"}">${item.feasible ? "Yes" : "No"}</td><td>${item.candidate_rank ?? "&mdash;"}</td><td>${money(item.gross_incremental_value_aud)}</td><td>${energy(item.battery_energy_delta_kwh)}</td><td>${energy(item.reserve_margin_after_kwh)}</td><td>${safeText((item.blocking_constraints_json || []).join(", ") || item.feasibility_reason)}</td><td>${safeText((item.warning_constraints_json || []).join(", ") || "None")}</td></tr>`).join("")}</tbody></table></div>`;
+      const input = decision.input_snapshot_json || {}; const solar = input.solar || {}; const calibration = input.calibration || {};
+      $("#decision-provenance").innerHTML = [
+        ["Linked records", `Observation ${safeText(input.observation_slot_utc)}`, `Forecast ${decision.forecast_run_id}; reserve ${decision.reserve_run_id}`],
+        ["Calibration identity", `${safeText(decision.model_version)} / ${safeText(decision.alignment_version)}`, `Policy ${decision.training_policy}; tradable ${decision.tradable_calibrated ? "yes" : "no"}`],
+        ["Calibration gate", calibration.status || "Unavailable", (calibration.quality_blocks || []).join(", ") || "No quality block"],
+        ["Price horizon", localTime(decision.price_horizon_end_utc), `Input hash ${String(decision.input_hash).slice(0, 12)}...`],
+        ["Solcast context", `${energy(solar.p10_kwh)} / ${energy(solar.p50_kwh)} / ${energy(solar.p90_kwh)}`, `${solar.constraint_context || "Unavailable"}; confidence capped ${solar.confidence_limit || "low"}`],
+        ["Assumptions", decision.assumption_set_version, `${decision.assumption_snapshot_json?.items?.length || 0} unit-explicit items`],
+      ].map(([label, value, detail]) => `<article class="panel"><p class="eyebrow">${safeText(label)}</p><div class="quality-metric">${safeText(value)}</div><p class="muted">${safeText(detail)}</p></article>`).join("");
+    }
+    $("#decision-history").innerHTML = history.empty ? '<div class="empty-state">No shadow decision history is available.</div>' : `<div class="table-wrap"><table><thead><tr><th>Boundary</th><th>Selected</th><th>Expected gross value</th><th>Confidence</th><th>Status</th><th>Outcome</th></tr></thead><tbody>${history.decisions.map(item => `<tr><td>${localTime(item.decision_boundary_utc)}</td><td>${safeText(item.selected_action || "None")}</td><td>${money(item.expected_gross_value_aud)}</td><td>${safeText(item.confidence_rating)}</td><td>${safeText(item.status)}</td><td>${item.latest_outcome_scored_at_utc ? `Scored ${localTime(item.latest_outcome_scored_at_utc)}` : "Unscored"}</td></tr>`).join("")}</tbody></table></div>`;
+    $("#decision-outcomes").innerHTML = outcomes.empty ? '<div class="empty-state">No decision interval has matured for outcome scoring yet.</div>' : `<div class="table-wrap"><table><thead><tr><th>Scored</th><th>Selected vs HOLD</th><th>Hindsight</th><th>Regret</th><th>Reserve breach</th><th>Coverage</th><th>Confidence</th><th>Intervention</th></tr></thead><tbody>${outcomes.outcomes.map(item => `<tr><td>${localTime(item.scored_at_utc)}</td><td>${money(item.selected_vs_hold_value_aud)}</td><td>${safeText(item.hindsight_best_action)} &middot; ${money(item.hindsight_best_value_aud)}</td><td>${money(item.regret_aud)}</td><td>${item.simulated_reserve_breach == null ? "Unavailable" : item.simulated_reserve_breach ? "Possible" : "No"}</td><td>${percent(item.actual_coverage_percent)}</td><td>${safeText(item.counterfactual_confidence)}</td><td>${item.operator_intervention_possible ? `Possible (${safeText(item.operator_intervention_confidence)})` : "Not detected"}</td></tr>`).join("")}</tbody></table></div><p class="muted">All counterfactual values are simulated and are not definitive physical outcomes.</p>`;
+  } catch (error) {
+    setState("#decisions-state", error.message, "error-state");
+  }
+}
+
 const chartDefinitions = [
   ["House and baseline", "Power (kW)", [["House", "house_consumption_w"], ["Baseline", "baseline_house_consumption_w"]], v => v / 1000],
   ["Solar generation", "Power (kW)", [["PV", "pv_power_w"]], v => v / 1000],
@@ -207,9 +315,16 @@ const chartDefinitions = [
   ["Amber prices", "AUD/kWh", [["Buy", "amber_buy_price_aud_per_kwh"], ["Sell", "amber_sell_price_aud_per_kwh"]], v => v],
 ];
 
-function makeChart(title, unit, series, points, transform = value => value, emptyMessage = "No chartable data is available for this period.") {
+function chartAxisTime(value) {
+  return value ? new Intl.DateTimeFormat(undefined, { hour: "2-digit", minute: "2-digit", timeZone: "Australia/Brisbane" }).format(new Date(value)) : "";
+}
+
+function makeChart(title, unit, series, points, transform = value => value, emptyMessage = "No chartable data is available for this period.", options = {}) {
   const article = document.createElement("article"); article.className = "panel chart-panel";
-  const plottedValue = (point, field) => point.has_observation && isNumeric(point[field]) ? transform(point[field]) : null;
+  const plottedValue = (point, field) => {
+    const available = point.series_available ? point.series_available[field] !== false : point.has_observation;
+    return available && isNumeric(point[field]) ? transform(point[field]) : null;
+  };
   const chartableSeries = series.map(([name, field], index) => ({ name, field, index })).filter(item => points.some(point => isNumeric(plottedValue(point, item.field))));
   article.innerHTML = `<h3>${safeText(title)}</h3><p class="muted">${safeText(unit)} · gaps are not interpolated</p>`;
   const details = document.createElement("details"); details.className = "table-fallback"; details.innerHTML = `<summary>Accessible data table</summary><div class="table-wrap"><table><thead><tr><th>Time</th>${series.map(([name]) => `<th>${safeText(name)}</th>`).join("")}</tr></thead><tbody>${points.length ? points.map(point => `<tr><td>${localTime(point.timestamp_utc)}</td>${series.map(([, field]) => `<td>${plottedValue(point, field) == null ? "Missing" : number(transform(point[field]), 3)}</td>`).join("")}</tr>`).join("") : `<tr><td colspan="${series.length + 1}">No stored rows for this period</td></tr>`}</tbody></table></div>`;
@@ -221,10 +336,29 @@ function makeChart(title, unit, series, points, transform = value => value, empt
   }
   article.insertAdjacentHTML("beforeend", `<div class="legend">${chartableSeries.map(item => `<span class="series-${item.index}">${safeText(item.name)}</span>`).join("")}</div>`);
   const svg = document.createElementNS(svgNS, "svg"); svg.setAttribute("class", "chart"); svg.setAttribute("viewBox", "0 0 760 250"); svg.setAttribute("role", "img"); svg.setAttribute("aria-label", `${title} chart with missing observations shown as gaps`);
+  svg.setAttribute("tabindex", "0");
   const all = chartableSeries.flatMap(item => points.map(point => plottedValue(point, item.field)).filter(isNumeric));
   let min = Math.min(...all), max = Math.max(...all); if (min === max) { min -= 1; max += 1; }
   const x = index => 35 + (index / Math.max(points.length - 1, 1)) * 700; const y = value => 220 - ((value - min) / (max - min)) * 190;
   [[35, 20, 35, 220], [35, 220, 735, 220]].forEach(coords => { const line = document.createElementNS(svgNS, "line"); ["x1", "y1", "x2", "y2"].forEach((name, index) => line.setAttribute(name, coords[index])); line.setAttribute("class", "axis"); svg.append(line); });
+  if (options.band && points.some(point => isNumeric(plottedValue(point, options.band[0])) && isNumeric(plottedValue(point, options.band[1])))) {
+    let bandSegment = [];
+    const drawBand = () => {
+      if (bandSegment.length > 1) {
+        const polygon = document.createElementNS(svgNS, "polygon");
+        const upper = bandSegment.map(item => `${item.x},${y(item.upper)}`);
+        const lower = [...bandSegment].reverse().map(item => `${item.x},${y(item.lower)}`);
+        polygon.setAttribute("points", [...upper, ...lower].join(" "));
+        polygon.setAttribute("class", "uncertainty-band"); svg.append(polygon);
+      }
+      bandSegment = [];
+    };
+    points.forEach((point, pointIndex) => {
+      const lower = plottedValue(point, options.band[0]); const upper = plottedValue(point, options.band[1]);
+      if (!isNumeric(lower) || !isNumeric(upper)) { drawBand(); return; }
+      bandSegment.push({ x: x(pointIndex), lower, upper });
+    }); drawBand();
+  }
   chartableSeries.forEach(({ field, index }) => {
     let segment = [];
     const draw = () => {
@@ -237,15 +371,33 @@ function makeChart(title, unit, series, points, transform = value => value, empt
     };
     points.forEach((point, pointIndex) => { const value = plottedValue(point, field); if (!isNumeric(value)) { draw(); return; } segment.push(`${x(pointIndex)},${y(value)}`); }); draw();
   });
+  if (isNumeric(options.nowPercent)) {
+    const marker = document.createElementNS(svgNS, "line"); const markerX = 35 + Math.max(0, Math.min(100, options.nowPercent)) / 100 * 700;
+    marker.setAttribute("x1", markerX); marker.setAttribute("x2", markerX); marker.setAttribute("y1", "20"); marker.setAttribute("y2", "220"); marker.setAttribute("class", "now-marker"); svg.append(marker);
+  }
+  [0, Math.floor((points.length - 1) / 2), points.length - 1].filter((value, index, values) => value >= 0 && values.indexOf(value) === index).forEach(pointIndex => {
+    const label = document.createElementNS(svgNS, "text"); label.setAttribute("x", x(pointIndex)); label.setAttribute("y", "240"); label.setAttribute("text-anchor", pointIndex === 0 ? "start" : pointIndex === points.length - 1 ? "end" : "middle"); label.setAttribute("class", "chart-axis-label"); label.textContent = chartAxisTime(points[pointIndex]?.timestamp_utc); svg.append(label);
+  });
   const chartWrap = document.createElement("div"); chartWrap.className = "chart-wrap";
   const tooltip = document.createElement("div"); tooltip.className = "chart-tooltip"; tooltip.setAttribute("role", "status");
   chartWrap.append(svg, tooltip); article.append(chartWrap);
+  let keyboardIndex = 0;
+  const showTooltip = (index, left, top) => {
+    keyboardIndex = index;
+    const point = points[index];
+    tooltip.innerHTML = `<strong>${localTime(point.timestamp_utc)}</strong><br>${chartableSeries.map(({ name, field }) => `${safeText(name)}: ${plottedValue(point, field) == null ? "Missing" : `${number(plottedValue(point, field), 3)} ${safeText(unit)}`}`).join("<br>")}${point.actual_missing_reason ? `<br>Actual eligibility: ${safeText(point.actual_missing_reason)}` : ""}`;
+    tooltip.style.display = "block"; tooltip.style.left = `${left}px`; tooltip.style.top = `${top}px`;
+  };
   svg.addEventListener("pointermove", event => {
     const rect = svg.getBoundingClientRect();
     const index = Math.max(0, Math.min(points.length - 1, Math.round(((event.clientX - rect.left) / rect.width) * (points.length - 1))));
-    const point = points[index];
-    tooltip.innerHTML = `<strong>${localTime(point.timestamp_utc)}</strong><br>${chartableSeries.map(({ name, field }) => `${safeText(name)}: ${plottedValue(point, field) == null ? "Missing" : `${number(transform(point[field]), 3)} ${safeText(unit)}`}`).join("<br>")}`;
-    tooltip.style.display = "block"; tooltip.style.left = `${Math.min(event.clientX - rect.left + 12, rect.width - 180)}px`; tooltip.style.top = `${Math.max(event.clientY - rect.top - 20, 0)}px`;
+    showTooltip(index, Math.min(event.clientX - rect.left + 12, rect.width - 180), Math.max(event.clientY - rect.top - 20, 0));
+  });
+  svg.addEventListener("keydown", event => {
+    if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
+    event.preventDefault();
+    keyboardIndex = event.key === "Home" ? 0 : event.key === "End" ? points.length - 1 : Math.max(0, Math.min(points.length - 1, keyboardIndex + (event.key === "ArrowLeft" ? -1 : 1)));
+    showTooltip(keyboardIndex, Math.min(x(keyboardIndex) + 8, 560), 20);
   });
   svg.addEventListener("pointerleave", () => { tooltip.style.display = "none"; });
   article.append(details);
@@ -327,7 +479,7 @@ async function loadForecastOperations() {
     const last = operations.last_attempt;
     $("#operations-status").innerHTML = [
       ["Coordinator", operations.enabled ? operations.scheduler_status : "Disabled", operations.enabled ? "One in-process coordinator" : "Opt-in option is off"],
-      ["Last attempt", last ? localTime(last.started_at_utc) : "No attempts", last ? `${last.status} Â· ${number(last.duration_seconds, 1)} sec` : "Waiting for first aligned boundary"],
+      ["Last attempt", last ? localTime(last.started_at_utc) : "No attempts", last ? `${last.status} - ${number(last.duration_seconds, 1)} sec` : "Waiting for first aligned boundary"],
       ["Last success", operations.last_successful_run ? localTime(operations.last_successful_run.finished_at_utc) : "None", operations.last_successful_run ? `${operations.last_successful_run.forecast_point_count} points` : "No successful scheduled run"],
       ["Next run", operations.next_scheduled_run_utc ? localTime(operations.next_scheduled_run_utc) : "Not scheduled", "Collector receives a 20-second boundary grace period"],
       ["Reserve", operations.reserve_scheduler_status, "Advisory snapshot only"],
@@ -430,6 +582,7 @@ function activateTab() {
   if (valid === "calibration" && !state.loaded.has("calibration")) { state.loaded.add("calibration"); loadCalibration(); }
   if (valid === "solar-diagnostics" && !state.loaded.has("solar")) { state.loaded.add("solar"); loadSolarDiagnostics(); }
   if (valid === "reserve" && !state.loaded.has("reserve")) { state.loaded.add("reserve"); loadReserve(); loadReserveHistory(); }
+  if (valid === "decisions" && !state.loaded.has("decisions")) { state.loaded.add("decisions"); loadDecisions(); }
   if (valid === "data-quality" && !state.loaded.has("quality")) { state.loaded.add("quality"); loadQuality(); }
 }
 
@@ -440,7 +593,13 @@ $("#history-range").addEventListener("change", loadHistory);
 $("#forecast-run").addEventListener("change", loadForecastComparison);
 $("#accuracy-range").addEventListener("change", loadForecastOperations);
 $("#accuracy-run").addEventListener("change", loadForecastOperations);
+const storedForecastCardMode = localStorage.getItem("forecast-card-mode");
+if (["live", "latest_complete"].includes(storedForecastCardMode)) $("#forecast-card-mode").value = storedForecastCardMode;
+$("#forecast-card-mode").addEventListener("change", () => {
+  localStorage.setItem("forecast-card-mode", $("#forecast-card-mode").value);
+  loadForecastActualCard();
+});
 
-loadStatus(); loadLive(); loadReserve(); loadReserveHistory(); state.loaded.add("reserve"); activateTab();
+loadStatus(); loadLive(); loadShadowOverview(); loadForecastActualCard(); loadReserve(); loadReserveHistory(); state.loaded.add("reserve"); activateTab();
 schedule("status", loadStatus, 30000); schedule("live", loadLive, 30000);
-schedule("slow", () => { if (!document.hidden) { if (state.loaded.has("history")) loadHistory(); if (state.loaded.has("forecasts")) loadForecastRuns(); if (state.loaded.has("operations")) loadForecastOperations(); if (state.loaded.has("calibration")) loadCalibration(); if (state.loaded.has("solar")) loadSolarDiagnostics(); if (state.loaded.has("reserve")) { loadReserve(); loadReserveHistory(); } if (state.loaded.has("quality")) loadQuality(); } }, 300000);
+schedule("slow", () => { if (!document.hidden) { loadShadowOverview(); loadForecastActualCard(); if (state.loaded.has("history")) loadHistory(); if (state.loaded.has("forecasts")) loadForecastRuns(); if (state.loaded.has("operations")) loadForecastOperations(); if (state.loaded.has("calibration")) loadCalibration(); if (state.loaded.has("solar")) loadSolarDiagnostics(); if (state.loaded.has("reserve")) { loadReserve(); loadReserveHistory(); } if (state.loaded.has("decisions")) loadDecisions(); if (state.loaded.has("quality")) loadQuality(); } }, 300000);

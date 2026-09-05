@@ -7,7 +7,7 @@ from datetime import UTC, datetime, timedelta
 from enum import StrEnum
 from typing import Any
 
-from sqlalchemy import Engine, String, cast, func, insert, select, text, update
+from sqlalchemy import Engine, String, case, cast, func, insert, select, text, update
 from sqlalchemy.dialects.postgresql import insert as postgresql_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.exc import DBAPIError
@@ -33,6 +33,9 @@ from energy_optimizer.db.models import (
     ObservationDerivation,
     ReserveOpportunityEvaluation,
     ReserveRun,
+    ShadowDecisionCandidate,
+    ShadowDecisionOutcome,
+    ShadowDecisionRun,
 )
 from energy_optimizer.forecast_alignment import (
     FULL_FIVE_MINUTE_ALIGNMENT,
@@ -68,6 +71,9 @@ class DatabaseCounts:
     reserve_opportunity_evaluations: int = 0
     forecast_accuracy_rollups: int = 0
     forecast_maintenance_runs: int = 0
+    shadow_decision_runs: int = 0
+    shadow_decision_candidates: int = 0
+    shadow_decision_outcomes: int = 0
 
 
 class DatabaseRepository:
@@ -681,6 +687,17 @@ class DatabaseRepository:
             row = session.execute(statement).mappings().first()
             return dict(row) if row else None
 
+    def reserve_audit_read_only(self, reserve_run_id: int) -> dict[str, Any] | None:
+        with Session(self.engine) as session:
+            row = (
+                session.execute(
+                    select(ReserveRun.__table__).where(ReserveRun.id == reserve_run_id)
+                )
+                .mappings()
+                .first()
+            )
+            return dict(row) if row else None
+
     def score_completed_forecast_points(
         self,
         *,
@@ -878,6 +895,448 @@ class DatabaseRepository:
                     ],
                 )
         return reserve_id
+
+    def save_shadow_decision(
+        self,
+        result: Any,
+        *,
+        forecast_run_id: int,
+        reserve_run_id: int,
+        shadow_enabled: bool,
+        non_hold_enabled: bool,
+    ) -> int | None:
+        """Atomically persist one immutable run and all candidate evidence."""
+        selected = result.selected_candidate
+        identity = result.input_snapshot.get("forecast_identity") or {}
+        observation_slot = result.input_snapshot.get("observation_slot_utc")
+        table = ShadowDecisionRun.__table__
+        statement = (
+            postgresql_insert(table)
+            if self.backend == "postgresql"
+            else sqlite_insert(table)
+        ).values(
+            decision_boundary_utc=result.decision_boundary_utc,
+            created_at_utc=result.created_at_utc,
+            status=result.status,
+            observation_slot_utc=(
+                _as_datetime(observation_slot) if observation_slot else None
+            ),
+            forecast_run_id=forecast_run_id,
+            reserve_run_id=reserve_run_id,
+            forecast_type=str(identity.get("forecast_type") or "unknown"),
+            model_version=str(identity.get("model_version") or "unknown"),
+            alignment_version=str(identity.get("alignment_version") or "unknown"),
+            training_policy=str(identity.get("training_policy") or "unknown"),
+            policy_version=result.policy_version,
+            assumption_set_version=result.assumption_set_version,
+            shadow_decisioning_enabled=shadow_enabled,
+            non_hold_selection_enabled=non_hold_enabled,
+            tradable_calibrated=result.tradable_calibrated,
+            selected_action=result.selected_action,
+            selected_start_utc=selected.start_utc if selected else None,
+            selected_end_utc=selected.end_utc if selected else None,
+            selected_power_w=selected.power_w if selected else None,
+            selected_battery_energy_kwh=(
+                selected.battery_energy_delta_kwh if selected else None
+            ),
+            selected_grid_energy_kwh=(
+                selected.grid_energy_delta_kwh if selected else None
+            ),
+            expected_gross_value_aud=(
+                selected.gross_incremental_value_aud if selected else None
+            ),
+            confidence_rating=selected.confidence_rating if selected else None,
+            confidence_score=(
+                {"high": 90, "medium": 65, "low": 35}.get(
+                    selected.confidence_rating, 25
+                )
+                if selected
+                else None
+            ),
+            reason_codes_json=list(result.reason_codes),
+            explanation_json=result.explanation,
+            input_snapshot_json=result.input_snapshot,
+            constraint_snapshot_json=result.constraint_snapshot,
+            assumption_snapshot_json=result.assumption_snapshot,
+            input_hash=result.input_hash,
+            price_horizon_end_utc=result.price_horizon_end_utc,
+            solar_horizon_end_utc=result.solar_horizon_end_utc,
+            no_command_issued=True,
+        )
+        statement = statement.on_conflict_do_nothing(
+            index_elements=[table.c.decision_boundary_utc, table.c.policy_version]
+        ).returning(table.c.id)
+        with self.transaction() as session:
+            run_id = session.execute(statement).scalar_one_or_none()
+            if run_id is None:
+                return None
+            candidate_values = []
+            for candidate in result.candidates:
+                candidate_values.append(
+                    {
+                        "decision_run_id": int(run_id),
+                        "action": str(candidate.action),
+                        "candidate_rank": candidate.candidate_rank,
+                        "feasible": candidate.feasible,
+                        "feasibility_reason": candidate.feasibility_reason,
+                        "blocking_constraints_json": candidate.blocking_constraints,
+                        "warning_constraints_json": candidate.warning_constraints,
+                        "start_utc": candidate.start_utc,
+                        "end_utc": candidate.end_utc,
+                        "power_w": candidate.power_w,
+                        "battery_energy_delta_kwh": (
+                            candidate.battery_energy_delta_kwh
+                        ),
+                        "grid_energy_delta_kwh": candidate.grid_energy_delta_kwh,
+                        "gross_import_cost_aud": candidate.gross_import_cost_aud,
+                        "gross_export_revenue_aud": (
+                            candidate.gross_export_revenue_aud
+                        ),
+                        "gross_avoided_import_value_aud": (
+                            candidate.gross_avoided_import_value_aud
+                        ),
+                        "opportunity_cost_aud": candidate.opportunity_cost_aud,
+                        "gross_incremental_value_aud": (
+                            candidate.gross_incremental_value_aud
+                        ),
+                        "reserve_before_kwh": candidate.reserve_before_kwh,
+                        "reserve_margin_after_kwh": (
+                            candidate.reserve_margin_after_kwh
+                        ),
+                        "battery_energy_after_kwh": (
+                            candidate.battery_energy_after_kwh
+                        ),
+                        "price_coverage_percent": candidate.price_coverage_percent,
+                        "price_horizon_end_utc": candidate.price_horizon_end_utc,
+                        "average_import_price_aud_per_kwh": (
+                            candidate.average_import_price_aud_per_kwh
+                        ),
+                        "average_export_price_aud_per_kwh": (
+                            candidate.average_export_price_aud_per_kwh
+                        ),
+                        "confidence_rating": candidate.confidence_rating,
+                        "confidence_components_json": (candidate.confidence_components),
+                        "assumptions_json": candidate.assumptions,
+                        "ranking_score": candidate.ranking_score,
+                        "ranking_components_json": candidate.ranking_components,
+                        "tie_break_reason": candidate.tie_break_reason,
+                    }
+                )
+            session.execute(insert(ShadowDecisionCandidate.__table__), candidate_values)
+        return int(run_id)
+
+    def shadow_decision_rows_read_only(
+        self, *, limit: int = 50
+    ) -> list[dict[str, Any]]:
+        if not 1 <= limit <= 200:
+            raise ValueError("shadow decision limit must be 1-200")
+        latest_outcome = (
+            select(
+                ShadowDecisionOutcome.decision_run_id,
+                func.max(ShadowDecisionOutcome.scored_at_utc).label("scored_at_utc"),
+            )
+            .group_by(ShadowDecisionOutcome.decision_run_id)
+            .subquery()
+        )
+        statement = (
+            select(
+                ShadowDecisionRun.__table__,
+                latest_outcome.c.scored_at_utc.label("latest_outcome_scored_at_utc"),
+            )
+            .outerjoin(
+                latest_outcome,
+                latest_outcome.c.decision_run_id == ShadowDecisionRun.id,
+            )
+            .order_by(ShadowDecisionRun.decision_boundary_utc.desc())
+            .limit(limit)
+        )
+        with Session(self.engine) as session:
+            return [dict(row) for row in session.execute(statement).mappings()]
+
+    def shadow_decision_detail_read_only(
+        self, decision_run_id: int
+    ) -> dict[str, Any] | None:
+        with Session(self.engine) as session:
+            run = (
+                session.execute(
+                    select(ShadowDecisionRun.__table__).where(
+                        ShadowDecisionRun.id == decision_run_id
+                    )
+                )
+                .mappings()
+                .first()
+            )
+            if run is None:
+                return None
+            candidates = list(
+                session.execute(
+                    select(ShadowDecisionCandidate.__table__)
+                    .where(ShadowDecisionCandidate.decision_run_id == decision_run_id)
+                    .order_by(
+                        ShadowDecisionCandidate.candidate_rank.asc().nulls_last(),
+                        ShadowDecisionCandidate.id,
+                    )
+                ).mappings()
+            )
+            outcomes = list(
+                session.execute(
+                    select(ShadowDecisionOutcome.__table__)
+                    .where(ShadowDecisionOutcome.decision_run_id == decision_run_id)
+                    .order_by(ShadowDecisionOutcome.scored_at_utc.desc())
+                    .limit(20)
+                ).mappings()
+            )
+        return {
+            **dict(run),
+            "candidates": [dict(row) for row in candidates],
+            "outcomes": [dict(row) for row in outcomes],
+        }
+
+    def shadow_outcome_rows_read_only(
+        self, *, limit: int = 100
+    ) -> list[dict[str, Any]]:
+        if not 1 <= limit <= 200:
+            raise ValueError("shadow outcome limit must be 1-200")
+        with Session(self.engine) as session:
+            return [
+                dict(row)
+                for row in session.execute(
+                    select(ShadowDecisionOutcome.__table__)
+                    .order_by(ShadowDecisionOutcome.scored_at_utc.desc())
+                    .limit(limit)
+                ).mappings()
+            ]
+
+    def pending_shadow_decisions_for_scoring(
+        self,
+        *,
+        now: datetime,
+        delay_minutes: int,
+        scoring_version: str,
+        limit: int = 24,
+    ) -> list[dict[str, Any]]:
+        _require_aware(now)
+        if not 1 <= limit <= 100:
+            raise ValueError("shadow outcome scoring limit must be 1-100")
+        cutoff = now.astimezone(UTC) - timedelta(minutes=delay_minutes)
+        scored = select(ShadowDecisionOutcome.decision_run_id).where(
+            ShadowDecisionOutcome.scoring_version == scoring_version
+        )
+        statement = (
+            select(ShadowDecisionRun.__table__)
+            .where(
+                ShadowDecisionRun.status == "completed",
+                ShadowDecisionRun.selected_end_utc.is_not(None),
+                ShadowDecisionRun.selected_end_utc <= cutoff,
+                ~ShadowDecisionRun.id.in_(scored),
+            )
+            .order_by(ShadowDecisionRun.selected_end_utc)
+            .limit(limit)
+        )
+        with Session(self.engine) as session:
+            return [dict(row) for row in session.execute(statement).mappings()]
+
+    def shadow_outcome_observations_read_only(
+        self, *, start: datetime, end: datetime, limit: int = 400
+    ) -> list[dict[str, Any]]:
+        _require_aware(start)
+        _require_aware(end)
+        if start >= end or not 1 <= limit <= 1000:
+            raise ValueError("invalid bounded shadow outcome observation query")
+        columns = (
+            Observation.slot_utc,
+            Observation.battery_energy_estimate_kwh,
+            Observation.grid_import_power_w,
+            Observation.grid_export_power_w,
+            Observation.battery_charge_power_w,
+            Observation.battery_discharge_power_w,
+            Observation.house_consumption_w,
+            Observation.pv_power_w,
+            Observation.amber_import_price_per_kwh,
+            Observation.amber_export_price_per_kwh,
+        )
+        with Session(self.engine) as session:
+            return [
+                dict(row)
+                for row in session.execute(
+                    select(*columns)
+                    .where(
+                        Observation.slot_utc >= start.astimezone(UTC),
+                        Observation.slot_utc < end.astimezone(UTC),
+                    )
+                    .order_by(Observation.slot_utc)
+                    .limit(limit)
+                ).mappings()
+            ]
+
+    def save_shadow_outcome(self, values: Mapping[str, Any]) -> int | None:
+        """Append one scoring version; repeated scheduling is idempotent."""
+        table = ShadowDecisionOutcome.__table__
+        statement = (
+            postgresql_insert(table)
+            if self.backend == "postgresql"
+            else sqlite_insert(table)
+        ).values(**values)
+        statement = statement.on_conflict_do_nothing(
+            index_elements=[table.c.decision_run_id, table.c.scoring_version]
+        ).returning(table.c.id)
+        with self.transaction() as session:
+            value = session.execute(statement).scalar_one_or_none()
+            return int(value) if value is not None else None
+
+    def forecast_rollup_candidate_targets_read_only(
+        self,
+        *,
+        forecast_type: str,
+        model_version: str,
+        alignment_version: str,
+        training_policy: str,
+        after: datetime,
+        before: datetime,
+        limit: int = 20_000,
+    ) -> tuple[list[datetime], bool]:
+        """Enumerate scored targets for one exact identity, never legacy dates."""
+        _require_aware(after)
+        _require_aware(before)
+        if after >= before or not 1 <= limit <= 50_000:
+            raise ValueError("invalid bounded rollup candidate query")
+        metadata = ForecastRun.metadata_json
+        statement = (
+            select(ForecastPoint.period_start_utc)
+            .join(ForecastRun, ForecastRun.id == ForecastPoint.forecast_run_id)
+            .join(
+                ForecastPointScore,
+                ForecastPointScore.forecast_point_id == ForecastPoint.id,
+            )
+            .where(
+                ForecastRun.forecast_type == forecast_type,
+                ForecastRun.source == "scheduled_forecast_operations",
+                ForecastRun.model_version == model_version,
+                metadata["alignment_version"].as_string() == alignment_version,
+                metadata["training_policy"].as_string() == training_policy,
+                ForecastPoint.period_start_utc >= after.astimezone(UTC),
+                ForecastPoint.period_start_utc < before.astimezone(UTC),
+            )
+            .distinct()
+            .order_by(ForecastPoint.period_start_utc)
+            .limit(limit + 1)
+        )
+        with Session(self.engine) as session:
+            values = list(session.scalars(statement))
+        return values[:limit], len(values) > limit
+
+    def forecast_comparison_card_read_only(
+        self,
+        *,
+        mode: str,
+        now: datetime,
+        forecast_type: str,
+        model_version: str,
+        alignment_version: str,
+        training_policy: str,
+        complete_coverage_percent: float = 95,
+    ) -> dict[str, Any] | None:
+        """Select one deterministic current-identity run and at most 288 points."""
+        _require_aware(now)
+        if mode not in {"live", "latest_complete"}:
+            raise ValueError("invalid forecast comparison card mode")
+        metadata = ForecastRun.metadata_json
+        identity_filters = (
+            ForecastRun.forecast_type == forecast_type,
+            ForecastRun.source == "scheduled_forecast_operations",
+            ForecastRun.model_version == model_version,
+            metadata["alignment_version"].as_string() == alignment_version,
+            metadata["training_policy"].as_string() == training_policy,
+        )
+        with Session(self.engine) as session:
+            if mode == "live":
+                run = (
+                    session.execute(
+                        select(ForecastRun.__table__)
+                        .where(*identity_filters)
+                        .order_by(ForecastRun.created_at_utc.desc())
+                        .limit(1)
+                    )
+                    .mappings()
+                    .first()
+                )
+            else:
+                eligible_count = func.sum(
+                    case(
+                        (
+                            ForecastPointScore.health_eligible.is_(True),
+                            1,
+                        ),
+                        else_=0,
+                    )
+                )
+                summary = (
+                    session.execute(
+                        select(
+                            ForecastRun.id,
+                            func.count(ForecastPoint.id).label("point_count"),
+                            eligible_count.label("eligible_count"),
+                        )
+                        .join(
+                            ForecastPoint,
+                            ForecastPoint.forecast_run_id == ForecastRun.id,
+                        )
+                        .outerjoin(
+                            ForecastPointScore,
+                            ForecastPointScore.forecast_point_id == ForecastPoint.id,
+                        )
+                        .where(
+                            *identity_filters,
+                            ForecastRun.horizon_end_utc <= now.astimezone(UTC),
+                        )
+                        .group_by(ForecastRun.id, ForecastRun.created_at_utc)
+                        .having(
+                            func.count(ForecastPoint.id) == 288,
+                            eligible_count >= 288 * complete_coverage_percent / 100,
+                        )
+                        .order_by(ForecastRun.created_at_utc.desc())
+                        .limit(1)
+                    )
+                    .mappings()
+                    .first()
+                )
+                run = (
+                    session.execute(
+                        select(ForecastRun.__table__).where(
+                            ForecastRun.id == summary["id"]
+                        )
+                    )
+                    .mappings()
+                    .first()
+                    if summary is not None
+                    else None
+                )
+            if run is None:
+                return None
+            points = list(
+                session.execute(
+                    select(
+                        ForecastPoint.period_start_utc,
+                        ForecastPoint.period_end_utc,
+                        ForecastPoint.expected_value,
+                        ForecastPoint.lower_value,
+                        ForecastPoint.upper_value,
+                        ForecastPoint.unit,
+                        ForecastPointScore.actual_value,
+                        ForecastPointScore.actual_available,
+                        ForecastPointScore.health_eligible,
+                        ForecastPointScore.missing_reason,
+                    )
+                    .outerjoin(
+                        ForecastPointScore,
+                        ForecastPointScore.forecast_point_id == ForecastPoint.id,
+                    )
+                    .where(ForecastPoint.forecast_run_id == run["id"])
+                    .order_by(ForecastPoint.period_start_utc)
+                    .limit(288)
+                ).mappings()
+            )
+        return {**dict(run), "points": [dict(point) for point in points]}
 
     def forecast_run(self, run_id: int) -> dict[str, Any] | None:
         with Session(self.engine) as session:
@@ -1557,6 +2016,9 @@ class DatabaseRepository:
             ReserveOpportunityEvaluation,
             ForecastAccuracyRollup,
             ForecastMaintenanceRun,
+            ShadowDecisionRun,
+            ShadowDecisionCandidate,
+            ShadowDecisionOutcome,
         )
         with Session(self.engine) as session:
             values = [
@@ -1592,6 +2054,30 @@ class DatabaseRepository:
                     )
                 )
                 | (~EVSessionAnnotationRow.slot_utc.in_(select(Observation.slot_utc)))
+            ),
+            "orphan_shadow_decisions": select(func.count())
+            .select_from(ShadowDecisionRun)
+            .where(
+                (~ShadowDecisionRun.forecast_run_id.in_(select(ForecastRun.id)))
+                | (~ShadowDecisionRun.reserve_run_id.in_(select(ReserveRun.id)))
+                | (
+                    ShadowDecisionRun.observation_slot_utc.is_not(None)
+                    & ~ShadowDecisionRun.observation_slot_utc.in_(
+                        select(Observation.slot_utc)
+                    )
+                )
+            ),
+            "orphan_shadow_candidates": select(func.count())
+            .select_from(ShadowDecisionCandidate)
+            .where(
+                ~ShadowDecisionCandidate.decision_run_id.in_(
+                    select(ShadowDecisionRun.id)
+                )
+            ),
+            "orphan_shadow_outcomes": select(func.count())
+            .select_from(ShadowDecisionOutcome)
+            .where(
+                ~ShadowDecisionOutcome.decision_run_id.in_(select(ShadowDecisionRun.id))
             ),
         }
         with Session(self.engine) as session:

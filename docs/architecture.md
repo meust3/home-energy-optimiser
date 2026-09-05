@@ -1,5 +1,13 @@
 # Phase 1 architecture
 
+## v0.6.0 shadow-decisioning extension
+
+The existing Forecast Operations coordinator now optionally evaluates one
+battery-only shadow decision after its forecast and reserve persist. This adds no
+process, scheduler, collector, command worker, or executor. Outcome scoring is a
+later analytical step in the same coordinator. See
+[shadow decisioning](shadow_decisioning.md).
+
 v0.5.2 keeps the existing one-process, one-collector architecture. Its rollup
 refresh runs inside the existing Forecast Operations coordinator and failures are
 isolated from collection/forecasting. All Home Assistant and hardware access

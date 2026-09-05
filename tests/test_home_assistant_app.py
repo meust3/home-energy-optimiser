@@ -208,6 +208,40 @@ def test_forecast_options_default_disabled_and_validate_bounds():
         _options(forecast_interval_minutes=30, forecast_alignment_minutes=20)
 
 
+def test_shadow_options_default_to_disabled_hold_only_and_conservative_limits():
+    options = _options()
+    assert options.shadow_decisioning_enabled is False
+    assert options.shadow_allow_non_hold_recommendations is False
+    assert options.shadow_decision_interval_minutes == 30
+    assert options.shadow_decision_max_runtime_seconds == 60
+    assert options.shadow_min_expected_value_aud == pytest.approx(0.25)
+    assert options.shadow_outcome_scoring_delay_minutes == 10
+    assert options.shadow_max_export_power_w == 0
+    assert options.shadow_max_discharge_power_w == 0
+    assert options.shadow_import_limit_w == 0
+
+
+def test_enabled_shadow_interval_must_share_forecast_coordinator_boundary():
+    with pytest.raises(ValueError, match="must match the forecast interval"):
+        _options(
+            forecast_operations_enabled=True,
+            forecast_interval_minutes=30,
+            shadow_decisioning_enabled=True,
+            shadow_decision_interval_minutes=15,
+        )
+
+
+def test_enabled_shadow_requires_forecast_and_reserve_sequence():
+    with pytest.raises(ValueError, match="requires forecast operations"):
+        _options(shadow_decisioning_enabled=True)
+    with pytest.raises(ValueError, match="requires reserve snapshots"):
+        _options(
+            forecast_operations_enabled=True,
+            reserve_snapshot_enabled=False,
+            shadow_decisioning_enabled=True,
+        )
+
+
 def test_existing_v050_options_receive_safe_v051_runtime_defaults(tmp_path):
     """Supervisor may preserve old JSON; missing fields still fail safe in App code."""
     path = tmp_path / "v050-options.json"
@@ -363,6 +397,9 @@ def test_startup_home_assistant_check_is_get_only(monkeypatch):
                 reserve_opportunity_evaluations=0,
                 forecast_accuracy_rollups=0,
                 forecast_maintenance_runs=0,
+                shadow_decision_runs=0,
+                shadow_decision_candidates=0,
+                shadow_decision_outcomes=0,
             )
 
         def close(self):
@@ -555,11 +592,11 @@ def test_app_patch_versions_are_consistent():
     manifest = Path("home_energy_optimiser/config.yaml").read_text(encoding="utf-8")
     dockerfile = Path("home_energy_optimiser/Dockerfile").read_text(encoding="utf-8")
     project = Path("pyproject.toml").read_text(encoding="utf-8")
-    assert APP_VERSION == "0.5.2"
-    assert 'version: "0.5.2"' in manifest
-    assert "ARG BUILD_VERSION=0.5.2" in dockerfile
-    assert "ARG APP_SOURCE_REF=v0.5.2" in dockerfile
-    assert 'version = "0.5.2"' in project
+    assert APP_VERSION == "0.6.0"
+    assert 'version: "0.6.0"' in manifest
+    assert "ARG BUILD_VERSION=0.6.0" in dockerfile
+    assert "ARG APP_SOURCE_REF=v0.6.0" in dockerfile
+    assert 'version = "0.6.0"' in project
 
 
 def test_app_launcher_execs_existing_collector_without_restart_loop():

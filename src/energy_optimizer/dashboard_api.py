@@ -116,6 +116,13 @@ class StatusResponse(ApiModel):
     forecast_age_seconds: float | None = None
     reserve_scheduler: str = "disabled"
     last_reserve_success_utc: datetime | None = None
+    shadow_decisioning: str = "disabled"
+    last_shadow_decision_utc: datetime | None = None
+    shadow_decision_age_seconds: float | None = None
+    last_shadow_decision_status: str | None = None
+    shadow_outcome_scoring: str = "disabled"
+    last_outcome_score_utc: datetime | None = None
+    rollup_backfill_status: dict[str, Any] = Field(default_factory=dict)
 
 
 class ForecastOperationStatusResponse(ApiModel):
@@ -410,6 +417,49 @@ class SolarDiagnosticsResponse(ApiModel):
     days: list[dict[str, Any]] = Field(default_factory=list)
 
 
+class ForecastComparisonCardPoint(ApiModel):
+    period_start_utc: datetime
+    period_end_utc: datetime
+    forecast_w: float
+    lower_w: float | None = None
+    upper_w: float | None = None
+    actual_w: float | None = None
+    actual_eligible: bool
+    actual_missing_reason: str | None = None
+    future: bool
+
+
+class ForecastComparisonCardResponse(ApiModel):
+    mode: Literal["live", "latest_complete"]
+    run_id: int | None = None
+    created_at_utc: datetime | None = None
+    period_start_utc: datetime | None = None
+    period_end_utc: datetime | None = None
+    identity: dict[str, Any] = Field(default_factory=dict)
+    points: list[ForecastComparisonCardPoint] = Field(default_factory=list)
+    metrics: dict[str, Any] = Field(default_factory=dict)
+    coverage: dict[str, Any] = Field(default_factory=dict)
+    calibration_status: str = "insufficient_data"
+    now_utc: datetime
+    empty_state: dict[str, str] | None = None
+
+
+class ShadowDecisionResponse(ApiModel):
+    available: bool
+    message: str | None = None
+    decision: dict[str, Any] | None = None
+
+
+class ShadowDecisionListResponse(ApiModel):
+    decisions: list[dict[str, Any]] = Field(default_factory=list)
+    empty: bool = True
+
+
+class ShadowOutcomeListResponse(ApiModel):
+    outcomes: list[dict[str, Any]] = Field(default_factory=list)
+    empty: bool = True
+
+
 class DashboardQueryError(ValueError):
     """Stable client-safe query validation failure."""
 
@@ -480,6 +530,17 @@ class DashboardService:
             forecast_age_seconds=_number(health.get("forecast_age_seconds")),
             reserve_scheduler=str(health.get("reserve_scheduler", "disabled")),
             last_reserve_success_utc=health.get("last_reserve_success_utc"),
+            shadow_decisioning=str(health.get("shadow_decisioning", "disabled")),
+            last_shadow_decision_utc=health.get("last_shadow_decision_utc"),
+            shadow_decision_age_seconds=_number(
+                health.get("shadow_decision_age_seconds")
+            ),
+            last_shadow_decision_status=health.get("last_shadow_decision_status"),
+            shadow_outcome_scoring=str(
+                health.get("shadow_outcome_scoring", "disabled")
+            ),
+            last_outcome_score_utc=health.get("last_outcome_score_utc"),
+            rollup_backfill_status=dict(health.get("rollup_backfill_status") or {}),
         )
 
     def forecast_operations_status(self) -> ForecastOperationStatusResponse:
@@ -927,6 +988,199 @@ class DashboardService:
             bias=sum(errors) / len(errors) if errors else None,
             points=points,
         )
+
+    def forecast_comparison_card(
+        self, *, mode: str = "live", now: datetime | None = None
+    ) -> ForecastComparisonCardResponse:
+        if mode not in {"live", "latest_complete"}:
+            raise DashboardQueryError(
+                "invalid_mode", "Mode must be live or latest_complete."
+            )
+        current = (now or datetime.now(UTC)).astimezone(UTC)
+        identity = self._current_calibration_identity()
+        with self._repository() as repository:
+            run = repository.forecast_comparison_card_read_only(
+                mode=mode,
+                now=current,
+                forecast_type=identity.forecast_type,
+                model_version=identity.model_version,
+                alignment_version=identity.alignment_version,
+                training_policy=identity.training_policy,
+                complete_coverage_percent=float(
+                    getattr(
+                        self.health,
+                        "calibration_complete_day_coverage_percent",
+                        95,
+                    )
+                ),
+            )
+        if run is None:
+            code = "no_current_forecast" if mode == "live" else "no_complete_forecast"
+            message = (
+                "No current-model live forecast is available."
+                if mode == "live"
+                else (
+                    "No complete current-model forecast has matured yet. "
+                    "The live forecast may still be available."
+                )
+            )
+            return ForecastComparisonCardResponse(
+                mode=mode,
+                identity=identity.model_dump(),
+                now_utc=current,
+                calibration_status=str(
+                    getattr(self.health, "calibration_status", "insufficient_data")
+                ),
+                empty_state={"code": code, "message": message},
+            )
+        points: list[ForecastComparisonCardPoint] = []
+        compared: list[tuple[float, float, float]] = []
+        matured_count = 0
+        for row in run["points"][:288]:
+            start = _utc(row["period_start_utc"])
+            end = _utc(row["period_end_utc"])
+            future = end > current
+            if not future:
+                matured_count += 1
+            actual = _number(row.get("actual_value"))
+            eligible = bool(
+                not future and row.get("health_eligible") is True and actual is not None
+            )
+            reason = None
+            if future:
+                actual = None
+                reason = "future_interval"
+            elif not eligible:
+                actual = None
+                reason = str(row.get("missing_reason") or "not_scored_or_ineligible")
+            expected = float(row["expected_value"])
+            if eligible and actual is not None:
+                compared.append(
+                    (expected, actual, max((end - start).total_seconds() / 3600, 0))
+                )
+            points.append(
+                ForecastComparisonCardPoint(
+                    period_start_utc=start,
+                    period_end_utc=end,
+                    forecast_w=expected,
+                    lower_w=_number(row.get("lower_value")),
+                    upper_w=_number(row.get("upper_value")),
+                    actual_w=actual,
+                    actual_eligible=eligible,
+                    actual_missing_reason=reason,
+                    future=future,
+                )
+            )
+        errors = [actual - expected for expected, actual, _ in compared]
+        forecast_energy = sum(
+            expected * hours / 1000 for expected, _, hours in compared
+        )
+        actual_energy = sum(actual * hours / 1000 for _, actual, hours in compared)
+        absolute_error_sum = sum(abs(value) for value in errors)
+        total_points = len(points)
+        eligible_count = len(compared)
+        return ForecastComparisonCardResponse(
+            mode=mode,
+            run_id=int(run["id"]),
+            created_at_utc=_utc(run["created_at_utc"]),
+            period_start_utc=_utc(run["horizon_start_utc"]),
+            period_end_utc=_utc(run["horizon_end_utc"]),
+            identity={
+                "forecast_type": run["forecast_type"],
+                "model_version": run["model_version"],
+                "alignment_version": (run.get("metadata_json") or {}).get(
+                    "alignment_version"
+                ),
+                "training_policy": (run.get("metadata_json") or {}).get(
+                    "training_policy"
+                ),
+            },
+            points=points,
+            metrics={
+                "period_label": (
+                    "Compared elapsed period"
+                    if mode == "live"
+                    else "Compared full forecast"
+                ),
+                "forecast_energy_kwh": forecast_energy if compared else None,
+                "actual_energy_kwh": actual_energy if compared else None,
+                "signed_energy_error_kwh": (
+                    actual_energy - forecast_energy if compared else None
+                ),
+                "signed_error_convention": "actual_minus_forecast",
+                "mae_w": (
+                    absolute_error_sum / eligible_count if eligible_count else None
+                ),
+                "bias_w": sum(errors) / eligible_count if eligible_count else None,
+                "wape_percent": (
+                    absolute_error_sum
+                    / sum(abs(actual) for _, actual, _ in compared)
+                    * 100
+                    if compared and sum(abs(actual) for _, actual, _ in compared) > 0
+                    else None
+                ),
+            },
+            coverage={
+                "total_intervals": total_points,
+                "matured_intervals": matured_count,
+                "eligible_actual_intervals": eligible_count,
+                "elapsed_proportion_percent": (
+                    matured_count / total_points * 100 if total_points else 0
+                ),
+                "matured_actual_coverage_percent": (
+                    eligible_count / matured_count * 100 if matured_count else 0
+                ),
+            },
+            calibration_status=str(
+                getattr(self.health, "calibration_status", "insufficient_data")
+            ),
+            now_utc=current,
+        )
+
+    def latest_shadow_decision(self) -> ShadowDecisionResponse:
+        with self._repository() as repository:
+            rows = repository.shadow_decision_rows_read_only(limit=1)
+            detail = (
+                repository.shadow_decision_detail_read_only(int(rows[0]["id"]))
+                if rows
+                else None
+            )
+        if detail is None:
+            disabled = (
+                getattr(self.health, "shadow_decisioning", "disabled") == "disabled"
+            )
+            return ShadowDecisionResponse(
+                available=False,
+                message=(
+                    "Shadow decisioning is disabled. Collection, forecasting "
+                    "and reserve calculations remain active."
+                    if disabled
+                    else (
+                        "Shadow decisioning is enabled but no auditable decision "
+                        "is available yet."
+                    )
+                ),
+            )
+        return ShadowDecisionResponse(available=True, decision=detail)
+
+    def shadow_decisions(self, *, limit: int = 50) -> ShadowDecisionListResponse:
+        with self._repository() as repository:
+            rows = repository.shadow_decision_rows_read_only(limit=limit)
+        return ShadowDecisionListResponse(decisions=rows, empty=not rows)
+
+    def shadow_decision(self, decision_run_id: int) -> ShadowDecisionResponse:
+        with self._repository() as repository:
+            row = repository.shadow_decision_detail_read_only(decision_run_id)
+        return ShadowDecisionResponse(
+            available=row is not None,
+            message=None if row is not None else "Shadow decision was not found.",
+            decision=row,
+        )
+
+    def shadow_outcomes(self, *, limit: int = 100) -> ShadowOutcomeListResponse:
+        with self._repository() as repository:
+            rows = repository.shadow_outcome_rows_read_only(limit=limit)
+        return ShadowOutcomeListResponse(outcomes=rows, empty=not rows)
 
     def reserve_latest(self) -> ReserveResponse:
         calibration = ForecastCalibrationReport(

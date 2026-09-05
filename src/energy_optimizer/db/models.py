@@ -439,6 +439,169 @@ class ReserveOpportunityEvaluation(Base):
     )
 
 
+class ShadowDecisionRun(Base):
+    """Immutable advisory result for one aligned shadow boundary."""
+
+    __tablename__ = "shadow_decision_runs"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    decision_boundary_utc: Mapped[datetime] = mapped_column(
+        AwareDateTime(), nullable=False
+    )
+    created_at_utc: Mapped[datetime] = mapped_column(AwareDateTime(), nullable=False)
+    status: Mapped[str] = mapped_column(String(16), nullable=False)
+    observation_slot_utc: Mapped[datetime | None] = mapped_column(
+        ForeignKey("observations.slot_utc")
+    )
+    forecast_run_id: Mapped[int] = mapped_column(
+        ForeignKey("forecast_runs.id"), nullable=False
+    )
+    reserve_run_id: Mapped[int] = mapped_column(
+        ForeignKey("reserve_runs.id"), nullable=False
+    )
+    forecast_type: Mapped[str] = mapped_column(String(64), nullable=False)
+    model_version: Mapped[str] = mapped_column(String(128), nullable=False)
+    alignment_version: Mapped[str] = mapped_column(String(32), nullable=False)
+    training_policy: Mapped[str] = mapped_column(String(32), nullable=False)
+    policy_version: Mapped[str] = mapped_column(String(64), nullable=False)
+    assumption_set_version: Mapped[str] = mapped_column(String(64), nullable=False)
+    shadow_decisioning_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    non_hold_selection_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    tradable_calibrated: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    selected_action: Mapped[str | None] = mapped_column(String(64))
+    selected_start_utc: Mapped[datetime | None] = mapped_column(AwareDateTime())
+    selected_end_utc: Mapped[datetime | None] = mapped_column(AwareDateTime())
+    selected_power_w: Mapped[float | None] = mapped_column(Float)
+    selected_battery_energy_kwh: Mapped[float | None] = mapped_column(Float)
+    selected_grid_energy_kwh: Mapped[float | None] = mapped_column(Float)
+    expected_gross_value_aud: Mapped[float | None] = mapped_column(Float)
+    confidence_rating: Mapped[str | None] = mapped_column(String(16))
+    confidence_score: Mapped[int | None] = mapped_column(Integer)
+    reason_codes_json: Mapped[Any] = mapped_column(JSON_TYPE, nullable=False)
+    explanation_json: Mapped[Any] = mapped_column(JSON_TYPE, nullable=False)
+    input_snapshot_json: Mapped[Any] = mapped_column(JSON_TYPE, nullable=False)
+    constraint_snapshot_json: Mapped[Any] = mapped_column(JSON_TYPE, nullable=False)
+    assumption_snapshot_json: Mapped[Any] = mapped_column(JSON_TYPE, nullable=False)
+    input_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    price_horizon_end_utc: Mapped[datetime | None] = mapped_column(AwareDateTime())
+    solar_horizon_end_utc: Mapped[datetime | None] = mapped_column(AwareDateTime())
+    no_command_issued: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=True
+    )
+    __table_args__ = (
+        UniqueConstraint(
+            "decision_boundary_utc",
+            "policy_version",
+            name="uq_shadow_decision_boundary_policy",
+        ),
+        CheckConstraint(
+            "no_command_issued = true", name="shadow_decision_no_command_true"
+        ),
+        CheckConstraint(
+            "status IN ('completed', 'blocked')", name="shadow_decision_status"
+        ),
+        Index("idx_shadow_decision_created", "created_at_utc"),
+        Index("idx_shadow_decision_status_boundary", "status", "decision_boundary_utc"),
+    )
+
+
+class ShadowDecisionCandidate(Base):
+    """Immutable feasible/infeasible candidate evidence for one shadow run."""
+
+    __tablename__ = "shadow_decision_candidates"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    decision_run_id: Mapped[int] = mapped_column(
+        ForeignKey("shadow_decision_runs.id", ondelete="CASCADE"), nullable=False
+    )
+    action: Mapped[str] = mapped_column(String(64), nullable=False)
+    candidate_rank: Mapped[int | None] = mapped_column(Integer)
+    feasible: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    feasibility_reason: Mapped[str] = mapped_column(String(128), nullable=False)
+    blocking_constraints_json: Mapped[Any] = mapped_column(JSON_TYPE, nullable=False)
+    warning_constraints_json: Mapped[Any] = mapped_column(JSON_TYPE, nullable=False)
+    start_utc: Mapped[datetime | None] = mapped_column(AwareDateTime())
+    end_utc: Mapped[datetime | None] = mapped_column(AwareDateTime())
+    power_w: Mapped[float | None] = mapped_column(Float)
+    battery_energy_delta_kwh: Mapped[float | None] = mapped_column(Float)
+    grid_energy_delta_kwh: Mapped[float | None] = mapped_column(Float)
+    gross_import_cost_aud: Mapped[float | None] = mapped_column(Float)
+    gross_export_revenue_aud: Mapped[float | None] = mapped_column(Float)
+    gross_avoided_import_value_aud: Mapped[float | None] = mapped_column(Float)
+    opportunity_cost_aud: Mapped[float | None] = mapped_column(Float)
+    gross_incremental_value_aud: Mapped[float | None] = mapped_column(Float)
+    reserve_before_kwh: Mapped[float | None] = mapped_column(Float)
+    reserve_margin_after_kwh: Mapped[float | None] = mapped_column(Float)
+    battery_energy_after_kwh: Mapped[float | None] = mapped_column(Float)
+    price_coverage_percent: Mapped[float | None] = mapped_column(Float)
+    price_horizon_end_utc: Mapped[datetime | None] = mapped_column(AwareDateTime())
+    average_import_price_aud_per_kwh: Mapped[float | None] = mapped_column(Float)
+    average_export_price_aud_per_kwh: Mapped[float | None] = mapped_column(Float)
+    confidence_rating: Mapped[str] = mapped_column(String(16), nullable=False)
+    confidence_components_json: Mapped[Any] = mapped_column(JSON_TYPE, nullable=False)
+    assumptions_json: Mapped[Any] = mapped_column(JSON_TYPE, nullable=False)
+    ranking_score: Mapped[float | None] = mapped_column(Float)
+    ranking_components_json: Mapped[Any] = mapped_column(JSON_TYPE, nullable=False)
+    tie_break_reason: Mapped[str | None] = mapped_column(String(128))
+    __table_args__ = (
+        UniqueConstraint(
+            "decision_run_id", "action", name="uq_shadow_candidate_run_action"
+        ),
+        Index("idx_shadow_candidate_run_rank", "decision_run_id", "candidate_rank"),
+    )
+
+
+class ShadowDecisionOutcome(Base):
+    """Append-only matured scoring; a new version creates a new row."""
+
+    __tablename__ = "shadow_decision_outcomes"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    decision_run_id: Mapped[int] = mapped_column(
+        ForeignKey("shadow_decision_runs.id", ondelete="CASCADE"), nullable=False
+    )
+    scoring_version: Mapped[str] = mapped_column(String(64), nullable=False)
+    scored_at_utc: Mapped[datetime] = mapped_column(AwareDateTime(), nullable=False)
+    window_start_utc: Mapped[datetime] = mapped_column(AwareDateTime(), nullable=False)
+    window_end_utc: Mapped[datetime] = mapped_column(AwareDateTime(), nullable=False)
+    actual_coverage_percent: Mapped[float] = mapped_column(Float, nullable=False)
+    actual_price_coverage_percent: Mapped[float] = mapped_column(Float, nullable=False)
+    actual_energy_coverage_percent: Mapped[float] = mapped_column(Float, nullable=False)
+    observed_import_kwh: Mapped[float | None] = mapped_column(Float)
+    observed_export_kwh: Mapped[float | None] = mapped_column(Float)
+    observed_battery_charge_kwh: Mapped[float | None] = mapped_column(Float)
+    observed_battery_discharge_kwh: Mapped[float | None] = mapped_column(Float)
+    observed_household_kwh: Mapped[float | None] = mapped_column(Float)
+    observed_pv_kwh: Mapped[float | None] = mapped_column(Float)
+    observed_variable_energy_value_aud: Mapped[float | None] = mapped_column(Float)
+    simulated_selected_value_aud: Mapped[float | None] = mapped_column(Float)
+    simulated_hold_value_aud: Mapped[float | None] = mapped_column(Float)
+    selected_vs_hold_value_aud: Mapped[float | None] = mapped_column(Float)
+    hindsight_best_action: Mapped[str | None] = mapped_column(String(64))
+    hindsight_best_value_aud: Mapped[float | None] = mapped_column(Float)
+    regret_aud: Mapped[float | None] = mapped_column(Float)
+    simulated_min_battery_energy_kwh: Mapped[float | None] = mapped_column(Float)
+    simulated_reserve_breach: Mapped[bool | None] = mapped_column(Boolean)
+    operator_intervention_possible: Mapped[bool] = mapped_column(
+        Boolean, nullable=False
+    )
+    operator_intervention_confidence: Mapped[str] = mapped_column(
+        String(16), nullable=False
+    )
+    operator_intervention_evidence_json: Mapped[Any] = mapped_column(
+        JSON_TYPE, nullable=False
+    )
+    counterfactual_confidence: Mapped[str] = mapped_column(String(16), nullable=False)
+    counterfactual_limitations_json: Mapped[Any] = mapped_column(
+        JSON_TYPE, nullable=False
+    )
+    __table_args__ = (
+        UniqueConstraint(
+            "decision_run_id",
+            "scoring_version",
+            name="uq_shadow_outcome_run_version",
+        ),
+        Index("idx_shadow_outcome_scored", "scored_at_utc"),
+    )
+
+
 class ObservationDerivation(Base):
     __tablename__ = "observation_derivations"
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)

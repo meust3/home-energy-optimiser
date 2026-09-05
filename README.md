@@ -1,5 +1,13 @@
 # Home Energy Optimiser
 
+> v0.6.0 is a strictly advisory battery shadow-decisioning release. It adds
+> deterministic candidate analysis, immutable evidence,
+> delayed counterfactual scoring, a Decisions view, and a Forecast vs Actual
+> card. Shadow decisioning and non-HOLD selection both default to disabled. There
+> is no executor or hardware-write path. See
+> [shadow decisioning](docs/shadow_decisioning.md) and
+> [the forecast card](docs/forecast_actual_card.md).
+>
 > v0.5.2 is a calibration-integrity and data-validation release. It
 > separates overlapping prediction-row statistics from independent target-slot
 > and local-date evidence, validates negative household demand, and adds cautious
@@ -19,7 +27,7 @@ results remain comparison-only.
 > v0.5.0 added Forecast Operations and complete
 > Reserve Audit are strictly advisory, opt-in, and disabled by default.
 
-Version 0.5.2 keeps the existing one-container, one-process, one-collector design
+Version 0.6.0 keeps the existing one-container, one-process, one-collector design
 and its one lightweight coordinator thread. At aligned local boundaries it can
 create genuine out-of-sample baseline forecasts, score only completed intervals
 after a delay, and persist the existing reserve estimator's complete result. It
@@ -39,10 +47,10 @@ forecast_max_runtime_seconds: 120
 reserve_snapshot_enabled: true
 ```
 
-The v0.5.2 schema head is additive revision `20260814_01`. Production remains on
-`20260813_01` until a separately authorized, backup-verified deployment. The v0.5.1
-schema head was `20260813_01`. The v0.5.2 migration must be applied manually only
-after the production gates pass; the App never migrates PostgreSQL during startup. Validate the
+The v0.6.0 schema head is additive revision `20260905_01`. Production
+remains on released v0.5.2 and revision `20260814_01`. The v0.6.0 migration must
+be applied manually only after the production gates pass; the App never migrates
+PostgreSQL during startup. Validate the
 immutable image and Home Assistant discovery, then create and restore-test a fresh
 backup before stopping the sole collector and updating the App. Retention remains
 disabled during deployment.
@@ -62,16 +70,18 @@ collects and analyses data but does not control Home Assistant or energy hardwar
 ## Current status
 
 - **PostgreSQL production:** working and manually validated end to end
-- **Continuous collector:** App v0.5.1 is installed and collecting successfully on
+- **Continuous collector:** App v0.5.2 is installed and collecting successfully on
   the Home Assistant OS 18.1 NUC
-- **Ingress dashboard:** deployed through App v0.5.1
+- **Ingress dashboard:** deployed through App v0.5.2
 - **Reserve forecasting:** working and advisory
 - **Solar and price forecasts:** Solcast and Amber Electric integrated
 - **EV telemetry:** optional read-only vehicle-cloud integration was introduced in
   v0.4.0
 - **Power-flow repair:** included in the v0.4.1 hotfix
-- **Forecast operations:** v0.5.0 provides opt-in read-only scheduling, scoring, and
-  reserve audit views; operations remain disabled by default
+- **Forecast operations:** enabled in production at 30-minute cadence with a
+  24-hour/288-point horizon and persisted advisory reserve snapshots
+- **Shadow decisioning:** v0.6.0 release, battery-only, opt-in, disabled by
+  default, and structurally non-executing
 - **Automated control or trading:** not enabled
 
 PostgreSQL 17 on the Synology NAS is the canonical production source of truth. The
@@ -83,7 +93,7 @@ Version 0.3.0 added a strictly read-only Ingress presentation layer, and version
 sparse forecast, reserve, and normalized-flow data look intentional rather than
 broken. Version 0.4.0 adds optional vehicle status, SOC, freshness,
 home/away, and confirmed-charging detection without pretending raw vehicle battery
-power is charger AC demand. Version 0.5.1 is the working production collector.
+power is charger AC demand. Version 0.5.2 is the working production collector.
 
 Forecast confidence can remain medium or low while household history is limited,
 and EV charging may still be embedded in historical household demand.
@@ -102,7 +112,7 @@ GoodWe / Amber / Solcast / weather
        |                            |
        v                            v
 Windows development          Home Assistant App
-and offline analysis         v0.5.1 production collector
+and offline analysis         v0.5.2 production collector
        |                            |
        +-------------+--------------+
                      v
@@ -202,8 +212,8 @@ The amd64 Home Assistant App deployment wrapper:
 - presents existing stored data through administrator-only Ingress and a bounded
   GET-only API introduced in v0.3.0.
 
-Version 0.4.0 is the confirmed production collector. Version 0.4.1 is the
-schema-neutral power-sign hotfix. See:
+Version 0.5.2 is the confirmed production collector. Version 0.6.0 is the
+released successor pending controlled production deployment. See:
 
 - [App design](docs/home_assistant_app.md)
 - [Installation](docs/home_assistant_app_installation.md)

@@ -1,5 +1,14 @@
 # Read-only operational data model
 
+## v0.6.0 shadow records
+
+Revision `20260905_01` adds `shadow_decision_runs`,
+`shadow_decision_candidates`, and `shadow_decision_outcomes`. Runs reference the
+immutable observation slot, forecast, and reserve rather than copying forecast
+points. Candidates are written atomically with a run; outcomes append by scoring
+version. The database constrains `no_command_issued` to true. Downgrade removes
+only these shadow tables and their history.
+
 Revision `20260814_01` additively extends `forecast_accuracy_rollups` with unique
 and eligible target-slot counts both per horizon and per local date, expected
 coverage, slot-weighted error/energy sums, completeness, target bounds, and

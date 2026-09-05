@@ -411,7 +411,7 @@ def test_migration_upgrade_downgrade_reupgrade_preserves_observations(tmp_path):
         column["name"] for column in inspect(engine).get_columns("observations")
     }
     command.upgrade(config, "head")
-    assert current_revision(engine) == "20260814_01"
+    assert current_revision(engine) == "20260905_01"
     assert set(inspect(engine).get_table_names()) >= {
         "forecast_point_scores",
         "forecast_operation_attempts",
@@ -419,6 +419,9 @@ def test_migration_upgrade_downgrade_reupgrade_preserves_observations(tmp_path):
         "reserve_opportunity_evaluations",
         "forecast_accuracy_rollups",
         "forecast_maintenance_runs",
+        "shadow_decision_runs",
+        "shadow_decision_candidates",
+        "shadow_decision_outcomes",
     }
     command.downgrade(config, "20260811_01")
     assert current_revision(engine) == "20260811_01"
@@ -427,7 +430,7 @@ def test_migration_upgrade_downgrade_reupgrade_preserves_observations(tmp_path):
     } == legacy_columns
     assert "reserve_runs" not in inspect(engine).get_table_names()
     command.upgrade(config, "head")
-    assert current_revision(engine) == "20260814_01"
+    assert current_revision(engine) == "20260905_01"
 
 
 def test_migration_compiles_reversible_postgresql_ddl():

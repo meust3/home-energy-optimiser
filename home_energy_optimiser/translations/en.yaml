@@ -86,3 +86,36 @@ configuration:
   reserve_snapshot_enabled:
     name: Persist reserve snapshots
     description: Store complete advisory reserve results after successful forecasts.
+  shadow_decisioning_enabled:
+    name: Enable shadow decisioning
+    description: Evaluate battery candidates after linked forecast and reserve persistence; never execute them.
+  shadow_allow_non_hold_recommendations:
+    name: Allow non-HOLD shadow recommendations
+    description: Permit a calibrated candidate to be selected while remaining strictly non-executing.
+  shadow_decision_interval_minutes:
+    name: Shadow decision interval
+    description: Advisory action-window minutes; must match the forecast interval when enabled.
+  shadow_decision_max_runtime_seconds:
+    name: Maximum shadow runtime
+    description: Cooperative deadline for one shadow evaluation before persistence.
+  shadow_min_expected_value_aud:
+    name: Minimum expected gross value
+    description: Minimum expected gross variable-energy value for non-HOLD selection.
+  shadow_outcome_scoring_delay_minutes:
+    name: Shadow outcome delay
+    description: Delay after the advisory interval elapses before simulated outcome scoring.
+  shadow_max_analysis_horizon_hours:
+    name: Maximum shadow analysis horizon
+    description: Upper bound that is further limited by available demand, price and solar forecasts.
+  shadow_max_export_power_w:
+    name: Modelled export power limit
+    description: Explicit watts used only for analysis; zero means unknown and blocks export candidates.
+  shadow_max_discharge_power_w:
+    name: Modelled discharge power limit
+    description: Explicit watts used only for analysis; zero means unknown and blocks discharge candidates.
+  shadow_import_limit_w:
+    name: Modelled import power limit
+    description: Explicit watts used only for analysis; zero means unknown and blocks grid-charge candidates.
+  shadow_discharge_efficiency:
+    name: Modelled discharge efficiency
+    description: Explicit battery-to-grid/load efficiency assumption used only for shadow calculations.

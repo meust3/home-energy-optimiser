@@ -1,5 +1,19 @@
 # SQLite to PostgreSQL migration
 
+The v0.6.0 head is `20260905_01`, based on released v0.5.2 revision
+`20260814_01`. After a fresh restore-tested backup and only from reviewed release
+source, the explicit operator command is:
+
+```powershell
+python -m alembic upgrade 20260905_01
+```
+
+The App never migrates on startup. Physical downgrade to `20260814_01` removes
+only the three v0.6.0 shadow tables and therefore discards decision/candidate/
+outcome history; observations, forecast/scoring/rollup data, reserve audits, and
+BYD fields remain. Never use `alembic stamp` as migration or rollback.
+
+
 The v0.5.2 head is `20260814_01`. From reviewed v0.5.2 source, after a verified
 backup/restore test and with every collector stopped, run:
 

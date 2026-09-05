@@ -428,6 +428,42 @@ class _FakeService:
 
         return ReserveHistoryResponse(available=False, message="No reserve audits")
 
+    def forecast_comparison_card(self, **kwargs):
+        from energy_optimizer.dashboard_api import ForecastComparisonCardResponse
+
+        return ForecastComparisonCardResponse(
+            mode=kwargs.get("mode", "live"),
+            identity={
+                "forecast_type": "baseline_household_load",
+                "model_version": "current",
+                "alignment_version": "full_5m_v1",
+                "training_policy": "verified_preferred",
+            },
+            calibration_status="insufficient_data",
+            now_utc=datetime.now().astimezone(),
+            empty_state={"code": "no_current_forecast", "message": "No forecast"},
+        )
+
+    def latest_shadow_decision(self):
+        from energy_optimizer.dashboard_api import ShadowDecisionResponse
+
+        return ShadowDecisionResponse(available=False, message="Shadow disabled")
+
+    def shadow_decisions(self, **_kwargs):
+        from energy_optimizer.dashboard_api import ShadowDecisionListResponse
+
+        return ShadowDecisionListResponse(empty=True)
+
+    def shadow_decision(self, _decision_id):
+        from energy_optimizer.dashboard_api import ShadowDecisionResponse
+
+        return ShadowDecisionResponse(available=False, message="Not found")
+
+    def shadow_outcomes(self, **_kwargs):
+        from energy_optimizer.dashboard_api import ShadowOutcomeListResponse
+
+        return ShadowOutcomeListResponse(empty=True)
+
 
 def _serve(policy):
     health = AppHealth(900)
@@ -462,14 +498,16 @@ def test_web_shell_static_nested_ingress_api_and_security_headers():
         assert status == 200
         html = body.decode()
         assert f'<base href="{prefix}">' in html
-        assert 'href="static/app.css?v=0.5.2"' in html
+        assert 'href="static/app.css?v=0.6.0"' in html
         assert "Advisory only. No command was issued." in html
+        assert 'id="decisions"' in html
+        assert "Shadow only &mdash; no command issued" in html
         assert "Content-Security-Policy" in headers
         assert "X-Frame-Options" not in headers
         status, _, css = _request(
             server,
             "GET",
-            prefix + "static/app.css?v=0.5.2",
+            prefix + "static/app.css?v=0.6.0",
             {"X-Ingress-Path": prefix},
         )
         assert status == 200
@@ -483,6 +521,11 @@ def test_web_shell_static_nested_ingress_api_and_security_headers():
             "forecast-operations/status",
             "forecast-accuracy?range=7d",
             "reserve-history?range=30d",
+            "forecast-comparison-card?mode=live",
+            "decisions/latest",
+            "decisions?limit=10",
+            "decisions/1",
+            "decision-outcomes?limit=10",
         ):
             status, _, body = _request(
                 server,
@@ -492,7 +535,9 @@ def test_web_shell_static_nested_ingress_api_and_security_headers():
             )
             assert status == 200
             payload = json.loads(body)
-            if "status" not in route:
+            if route.startswith("forecast-accuracy") or route.startswith(
+                "reserve-history"
+            ):
                 assert payload["available"] is False
         status, _, _ = _request(
             server, "GET", prefix + "history", {"X-Ingress-Path": prefix}

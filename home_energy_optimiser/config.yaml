@@ -1,5 +1,5 @@
 name: Home Energy Optimiser
-version: "0.5.2"
+version: "0.6.0"
 slug: home_energy_optimiser
 description: Read-only energy dashboard and five-minute PostgreSQL collector
 url: https://github.com/meust3/home-energy-optimiser
@@ -53,6 +53,17 @@ options:
   calibration_complete_day_coverage_percent: 95
   calibration_min_weekday_days: 5
   calibration_min_weekend_days: 1
+  shadow_decisioning_enabled: false
+  shadow_allow_non_hold_recommendations: false
+  shadow_decision_interval_minutes: 30
+  shadow_decision_max_runtime_seconds: 60
+  shadow_min_expected_value_aud: 0.25
+  shadow_outcome_scoring_delay_minutes: 10
+  shadow_max_analysis_horizon_hours: 24
+  shadow_max_export_power_w: 0
+  shadow_max_discharge_power_w: 0
+  shadow_import_limit_w: 0
+  shadow_discharge_efficiency: 0.95
 schema:
   db_host: str
   db_port: port
@@ -92,3 +103,14 @@ schema:
   calibration_complete_day_coverage_percent: float(1,100)
   calibration_min_weekday_days: int(0,365)
   calibration_min_weekend_days: int(0,365)
+  shadow_decisioning_enabled: bool
+  shadow_allow_non_hold_recommendations: bool
+  shadow_decision_interval_minutes: int(5,1440)
+  shadow_decision_max_runtime_seconds: int(5,900)
+  shadow_min_expected_value_aud: float(0,)
+  shadow_outcome_scoring_delay_minutes: int(0,1440)
+  shadow_max_analysis_horizon_hours: int(1,168)
+  shadow_max_export_power_w: float(0,)
+  shadow_max_discharge_power_w: float(0,)
+  shadow_import_limit_w: float(0,)
+  shadow_discharge_efficiency: float(0.01,1)

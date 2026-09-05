@@ -74,41 +74,51 @@ def container_command(
     return arguments
 
 
-def write_root_only_options(volume: str) -> None:
+def write_root_only_options(
+    volume: str, *, include_v060_release_options: bool = False
+) -> None:
     """Create the Supervisor fixture as root:root 0600 inside a Docker volume."""
-    payload = json.dumps(
-        {
-            "db_host": "db.example.invalid",
-            "db_port": 55432,
-            "db_name": "home_energy",
-            "db_user": "energy_app",
-            "db_password": TEST_PASSWORD,
-            "timezone": "Australia/Brisbane",
-            "health_max_observation_age_seconds": 900,
-            "grid_power_sign": "positive_export",
-            "battery_power_sign": "positive_discharge",
-            "sign_convention_confidence": "high",
-            "sign_convention_supporting_samples": 175,
-            "balance_tolerance_w": 250,
-            "ev_vehicle_enabled": True,
-            "ev_charging_entity": "binary_sensor.test_vehicle_charging",
-            "ev_plugged_entity": "binary_sensor.test_vehicle_plugged",
-            "ev_online_entity": "binary_sensor.test_vehicle_online",
-            "ev_soc_entity": "sensor.test_vehicle_soc",
-            "ev_battery_power_entity": "sensor.test_vehicle_battery_power",
-            "ev_telemetry_updated_entity": "sensor.test_vehicle_updated",
-            "ev_location_entity": "device_tracker.test_vehicle_location",
-            "ev_home_state": "home",
-            "ev_telemetry_stale_seconds": 900,
-            "forecast_operations_enabled": False,
-            "forecast_interval_minutes": 30,
-            "forecast_horizon_hours": 24,
-            "forecast_alignment_minutes": 30,
-            "forecast_scoring_delay_minutes": 10,
-            "forecast_max_runtime_seconds": 120,
-            "reserve_snapshot_enabled": True,
-        }
-    )
+    options = {
+        "db_host": "db.example.invalid",
+        "db_port": 55432,
+        "db_name": "home_energy",
+        "db_user": "energy_app",
+        "db_password": TEST_PASSWORD,
+        "timezone": "Australia/Brisbane",
+        "health_max_observation_age_seconds": 900,
+        "grid_power_sign": "positive_export",
+        "battery_power_sign": "positive_discharge",
+        "sign_convention_confidence": "high",
+        "sign_convention_supporting_samples": 175,
+        "balance_tolerance_w": 250,
+        "ev_vehicle_enabled": True,
+        "ev_charging_entity": "binary_sensor.test_vehicle_charging",
+        "ev_plugged_entity": "binary_sensor.test_vehicle_plugged",
+        "ev_online_entity": "binary_sensor.test_vehicle_online",
+        "ev_soc_entity": "sensor.test_vehicle_soc",
+        "ev_battery_power_entity": "sensor.test_vehicle_battery_power",
+        "ev_telemetry_updated_entity": "sensor.test_vehicle_updated",
+        "ev_location_entity": "device_tracker.test_vehicle_location",
+        "ev_home_state": "home",
+        "ev_telemetry_stale_seconds": 900,
+        "forecast_operations_enabled": False,
+        "forecast_interval_minutes": 30,
+        "forecast_horizon_hours": 24,
+        "forecast_alignment_minutes": 30,
+        "forecast_scoring_delay_minutes": 10,
+        "forecast_max_runtime_seconds": 120,
+        "reserve_snapshot_enabled": True,
+    }
+    if include_v060_release_options:
+        options.update(
+            {
+                "demand_training_policy": "verified_preferred",
+                "retention_enabled": False,
+                "shadow_decisioning_enabled": False,
+                "shadow_allow_non_hold_recommendations": False,
+            }
+        )
+    payload = json.dumps(options)
     docker(
         "run",
         "--rm",
@@ -172,6 +182,7 @@ def test_options_and_identity(
         "runtime_copy_uid": 10001,
         "forecast_environment": "propagated",
         "sign_environment": "propagated",
+        "shadow_defaults": "safe",
         "status": "ok",
         "token_present": True,
         "uid": 10001,
@@ -185,6 +196,7 @@ def test_options_and_identity(
         "PASS all forecast, training, retention, and calibration options "
         "propagated to the application environment"
     )
+    print("PASS shadow decisioning defaults disabled and HOLD-only")
     print("PASS application process uid=10001 gid=10001")
     print("PASS ephemeral options copy removed")
     print("PASS no secret printed")
@@ -317,14 +329,29 @@ def main() -> int:
                 f"before={before!r} after={after!r}"
             )
         print("PASS original options unchanged owner=root:root mode=0600")
-        write_root_only_options(volume)
+        write_root_only_options(volume, include_v060_release_options=True)
+        release_before = options_metadata(volume)
+        test_options_and_identity(
+            args.image,
+            volume,
+            environment,
+            use_image_files=args.use_image_files,
+        )
+        release_after = options_metadata(volume)
+        if release_after != release_before:
+            raise RuntimeError(
+                "Production-shaped options metadata changed: "
+                f"before={release_before!r} after={release_after!r}"
+            )
+        print("PASS explicit v0.6.0 production-shaped safe options")
+        write_root_only_options(volume, include_v060_release_options=True)
         test_dashboard(
             args.image,
             volume,
             environment,
             use_image_files=args.use_image_files,
         )
-        write_root_only_options(volume)
+        write_root_only_options(volume, include_v060_release_options=True)
         test_sigterm(
             args.image,
             volume,

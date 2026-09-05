@@ -1,5 +1,13 @@
 # Read-only Ingress dashboard
 
+## v0.6.0 views
+
+Overview adds compact Shadow Recommendation and Forecast vs Actual cards. A new
+Decisions page shows recommendation, candidates, provenance, history, and simulated
+outcomes with a prominent no-command label and no controls. The forecast card is
+documented in [Forecast vs Actual](forecast_actual_card.md). All calculations are
+served by bounded GET-only APIs; JavaScript does not persist analytics.
+
 v0.5.2 shows raw versus independent calibration evidence, complete-date/horizon
 gates, WAPE/underforecast diagnostics, and a read-only solar diagnostics tab. It
 adds no action button or mutating route.

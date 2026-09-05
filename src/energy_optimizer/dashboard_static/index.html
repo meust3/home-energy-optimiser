@@ -6,8 +6,8 @@
   <meta name="color-scheme" content="light dark">
   <base href="__INGRESS_BASE_PATH__">
   <title>Energy Optimiser</title>
-  <link rel="stylesheet" href="static/app.css?v=0.5.2">
-  <script type="module" src="static/app.js?v=0.5.2"></script>
+  <link rel="stylesheet" href="static/app.css?v=0.6.0">
+  <script type="module" src="static/app.js?v=0.6.0"></script>
 </head>
 <body>
   <a class="skip-link" href="#main">Skip to dashboard content</a>
@@ -30,6 +30,7 @@
     <a href="#calibration" data-tab="calibration">Calibration</a>
     <a href="#solar-diagnostics" data-tab="solar-diagnostics">Solar diagnostics</a>
     <a href="#reserve" data-tab="reserve">Reserve</a>
+    <a href="#decisions" data-tab="decisions">Decisions</a>
     <a href="#data-quality" data-tab="data-quality">Data Quality</a>
   </nav>
 
@@ -61,6 +62,17 @@
         <article class="panel" id="overview-ev">
           <div class="panel-heading"><div><p class="eyebrow">Optional read-only telemetry</p><h3>Electric vehicle</h3></div><span id="ev-freshness" class="badge badge-muted">Loading</span></div>
           <div class="loading-block">Loading vehicle status…</div>
+        </article>
+        <article class="panel overview-wide" id="overview-shadow">
+          <div class="panel-heading"><div><p class="eyebrow">Battery advisory</p><h3>Shadow Recommendation</h3></div><span class="badge badge-safe">No command</span></div>
+          <div class="loading-block">Loading latest shadow recommendation&hellip;</div>
+        </article>
+        <article class="panel overview-wide" id="overview-forecast-actual">
+          <div class="panel-heading">
+            <div><p class="eyebrow">Current model evidence</p><h3>Forecast vs Actual</h3></div>
+            <label>Mode<select id="forecast-card-mode"><option value="live">Live forecast</option><option value="latest_complete">Latest complete forecast</option></select></label>
+          </div>
+          <div id="forecast-card-content" class="loading-block">Loading forecast comparison&hellip;</div>
         </article>
       </div>
     </section>
@@ -134,6 +146,21 @@
       <div id="reserve-content" class="reserve-grid"></div>
       <h3 class="history-heading">Reserve history</h3>
       <div id="reserve-history" class="panel"></div>
+    </section>
+
+    <section id="decisions" class="page" hidden aria-labelledby="decisions-title">
+      <div class="section-heading"><div><p class="eyebrow">Advisory battery evidence</p><h2 id="decisions-title">Decisions</h2></div></div>
+      <p class="advisory prominent">Shadow only &mdash; no command issued.</p>
+      <p id="decisions-state" class="state-message" role="status">Select this tab to load immutable recommendations and outcomes.</p>
+      <div id="decision-current" class="decision-grid"></div>
+      <h3 class="history-heading">Candidate comparison</h3>
+      <div id="decision-candidates" class="panel"></div>
+      <h3 class="history-heading">Input provenance</h3>
+      <div id="decision-provenance" class="quality-grid"></div>
+      <h3 class="history-heading">Decision history</h3>
+      <div id="decision-history" class="panel"></div>
+      <h3 class="history-heading">Outcomes</h3>
+      <div id="decision-outcomes" class="panel"></div>
     </section>
 
     <section id="data-quality" class="page" hidden aria-labelledby="quality-title">

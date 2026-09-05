@@ -1,5 +1,13 @@
 # Home Assistant App troubleshooting
 
+## Shadow and rollup status
+
+`/health` distinguishes shadow disabled/healthy/warning/degraded from core collector
+health and reports last decision/outcome timestamps plus rollup-backfill progress.
+Blocked stale input is an advisory warning, not a collector failure. Keep non-HOLD
+selection disabled while identity rollups are incomplete. Never repair by enabling
+retention, running a second coordinator, or issuing a device command.
+
 If v0.5.2 fails after migration, keep PostgreSQL at `20260814_01`, stop the App,
 and use reviewed v0.5.2 Windows code while maintaining exactly one collector.
 Rollback to v0.5.1 requires a tested physical downgrade to `20260813_01` or

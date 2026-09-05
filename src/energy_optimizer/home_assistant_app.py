@@ -26,7 +26,7 @@ from energy_optimizer.models import (
 from energy_optimizer.persistence import ApplicationRepository, open_repository
 
 SUPERVISOR_CORE_API_URL = "http://supervisor/core/api"
-APP_VERSION = "0.5.2"
+APP_VERSION = "0.6.0"
 HEALTH_PORT = 8099
 OPTIONS_PATH_ENV = "HOME_ENERGY_APP_OPTIONS_PATH"
 SUPERVISOR_OPTIONS_PATH = Path("/data/options.json")
@@ -76,6 +76,17 @@ class HomeAssistantAppOptions(BaseModel):
     calibration_complete_day_coverage_percent: float = Field(default=95.0, gt=0, le=100)
     calibration_min_weekday_days: int = Field(default=5, ge=0, le=365)
     calibration_min_weekend_days: int = Field(default=1, ge=0, le=365)
+    shadow_decisioning_enabled: bool = False
+    shadow_allow_non_hold_recommendations: bool = False
+    shadow_decision_interval_minutes: int = Field(default=30, ge=5, le=1440)
+    shadow_decision_max_runtime_seconds: int = Field(default=60, ge=5, le=900)
+    shadow_min_expected_value_aud: float = Field(default=0.25, ge=0)
+    shadow_outcome_scoring_delay_minutes: int = Field(default=10, ge=0, le=1440)
+    shadow_max_analysis_horizon_hours: int = Field(default=24, ge=1, le=168)
+    shadow_max_export_power_w: float = Field(default=0, ge=0)
+    shadow_max_discharge_power_w: float = Field(default=0, ge=0)
+    shadow_import_limit_w: float = Field(default=0, ge=0)
+    shadow_discharge_efficiency: float = Field(default=0.95, gt=0, le=1)
 
     @model_validator(mode="after")
     def validate_forecast_schedule(self):
@@ -83,6 +94,17 @@ class HomeAssistantAppOptions(BaseModel):
             raise ValueError("unsupported forecast alignment")
         if self.forecast_interval_minutes % self.forecast_alignment_minutes:
             raise ValueError("forecast interval must be a multiple of alignment")
+        if (
+            self.shadow_decisioning_enabled
+            and self.shadow_decision_interval_minutes != self.forecast_interval_minutes
+        ):
+            raise ValueError(
+                "shadow decision interval must match the forecast interval"
+            )
+        if self.shadow_decisioning_enabled and not self.forecast_operations_enabled:
+            raise ValueError("shadow decisioning requires forecast operations")
+        if self.shadow_decisioning_enabled and not self.reserve_snapshot_enabled:
+            raise ValueError("shadow decisioning requires reserve snapshots")
         return self
 
     @model_validator(mode="after")
@@ -269,6 +291,9 @@ def validate_startup(
             "reserve_opportunity_evaluations",
             "forecast_accuracy_rollups",
             "forecast_maintenance_runs",
+            "shadow_decision_runs",
+            "shadow_decision_candidates",
+            "shadow_decision_outcomes",
         }
         if not required_tables.issubset(repository.table_counts().__dict__):
             raise ConfigurationError("Database application-readiness check failed")
@@ -304,10 +329,16 @@ class AppHealth:
     forecast_scheduler: str = "disabled"
     reserve_scheduler: str = "disabled"
     calibration_rollups: str = "unknown"
+    rollup_backfill_status: dict[str, Any] = field(default_factory=dict)
     calibration_status: str = "insufficient_data"
     reserve_empirical_confidence: str = "unavailable"
     solar_diagnostics: str = "optional"
     invalid_household_demand: str = "none_current"
+    shadow_decisioning: str = "disabled"
+    last_shadow_decision_utc: datetime | None = None
+    last_shadow_decision_status: str | None = None
+    shadow_outcome_scoring: str = "disabled"
+    last_outcome_score_utc: datetime | None = None
     last_forecast_success_utc: datetime | None = None
     last_reserve_success_utc: datetime | None = None
     next_forecast_run_utc: datetime | None = None
@@ -318,6 +349,8 @@ class AppHealth:
     _home_assistant_failures: int = 0
     _forecast_failures: int = 0
     _reserve_failures: int = 0
+    _shadow_failures: int = 0
+    _outcome_failures: int = 0
     _lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
 
     def record_success(self, observation: Any) -> None:
@@ -385,9 +418,52 @@ class AppHealth:
                     "degraded" if self._reserve_failures >= 3 else "warning"
                 )
 
-    def record_calibration_rollup(self, *, successful: bool) -> None:
+    def record_calibration_rollup(
+        self, *, successful: bool, progress: dict[str, Any] | None = None
+    ) -> None:
         with self._lock:
             self.calibration_rollups = "healthy" if successful else "warning"
+            if progress is not None:
+                self.rollup_backfill_status = {
+                    key: value
+                    for key, value in progress.items()
+                    if key != "remaining_local_dates"
+                }
+
+    def configure_shadow_decisioning(self, *, enabled: bool) -> None:
+        with self._lock:
+            self.shadow_decisioning = "healthy" if enabled else "disabled"
+            self.shadow_outcome_scoring = "healthy" if enabled else "disabled"
+
+    def record_shadow_decision(
+        self, *, timestamp: datetime, status: str, successful: bool
+    ) -> None:
+        with self._lock:
+            self.last_shadow_decision_utc = timestamp.astimezone(UTC)
+            self.last_shadow_decision_status = status
+            if successful:
+                self._shadow_failures = 0
+                self.shadow_decisioning = (
+                    "warning" if status == "blocked" else "healthy"
+                )
+            else:
+                self._shadow_failures += 1
+                self.shadow_decisioning = (
+                    "degraded" if self._shadow_failures >= 3 else "warning"
+                )
+
+    def record_shadow_outcome_success(self, timestamp: datetime) -> None:
+        with self._lock:
+            self._outcome_failures = 0
+            self.shadow_outcome_scoring = "healthy"
+            self.last_outcome_score_utc = timestamp.astimezone(UTC)
+
+    def record_shadow_outcome_failure(self) -> None:
+        with self._lock:
+            self._outcome_failures += 1
+            self.shadow_outcome_scoring = (
+                "degraded" if self._outcome_failures >= 3 else "warning"
+            )
 
     def response(self, *, now: datetime | None = None) -> tuple[int, dict[str, Any]]:
         current = (now or datetime.now(UTC)).astimezone(UTC)
@@ -417,6 +493,7 @@ class AppHealth:
                 "next_forecast_run_utc": _iso(self.next_forecast_run_utc),
                 "reserve_scheduler": self.reserve_scheduler,
                 "calibration_rollups": self.calibration_rollups,
+                "rollup_backfill_status": self.rollup_backfill_status,
                 "calibration_status": self.calibration_status,
                 "reserve_empirical_confidence": self.reserve_empirical_confidence,
                 "solar_diagnostics": self.solar_diagnostics,
@@ -427,6 +504,16 @@ class AppHealth:
                     if self.last_reserve_success_utc is not None
                     else None
                 ),
+                "shadow_decisioning": self.shadow_decisioning,
+                "last_shadow_decision_utc": _iso(self.last_shadow_decision_utc),
+                "shadow_decision_age_seconds": (
+                    round((current - self.last_shadow_decision_utc).total_seconds(), 1)
+                    if self.last_shadow_decision_utc is not None
+                    else None
+                ),
+                "last_shadow_decision_status": self.last_shadow_decision_status,
+                "shadow_outcome_scoring": self.shadow_outcome_scoring,
+                "last_outcome_score_utc": _iso(self.last_outcome_score_utc),
                 "last_successful_collection_utc": _iso(
                     self.last_successful_collection_utc
                 ),

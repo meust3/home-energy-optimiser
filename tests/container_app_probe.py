@@ -59,6 +59,12 @@ def parse_options() -> None:
     assert options.forecast_scoring_delay_minutes == 10
     assert options.forecast_max_runtime_seconds == 120
     assert options.reserve_snapshot_enabled
+    assert not options.shadow_decisioning_enabled
+    assert not options.shadow_allow_non_hold_recommendations
+    assert options.shadow_decision_interval_minutes == 30
+    assert options.shadow_decision_max_runtime_seconds == 60
+    assert options.shadow_min_expected_value_aud == 0.25
+    assert options.shadow_outcome_scoring_delay_minutes == 10
     assert os.environ.get("SUPERVISOR_TOKEN")
     environment = app_environment(options)
     assert environment["GRID_POWER_SIGN"] == "positive_export"
@@ -94,6 +100,7 @@ def parse_options() -> None:
                 "runtime_copy_uid": runtime_metadata.st_uid,
                 "forecast_environment": "propagated",
                 "sign_environment": "propagated",
+                "shadow_defaults": "safe",
                 "status": "ok",
                 "token_present": True,
                 "uid": os.getuid(),
@@ -119,6 +126,8 @@ def wait_for_sigterm() -> None:
 
 def dashboard_smoke() -> None:
     """Exercise current local dashboard code without Home Assistant or PostgreSQL."""
+    from datetime import UTC, datetime
+
     from energy_optimizer.dashboard_api import LiveResponse, StatusResponse
     from energy_optimizer.dashboard_web import IngressAccessPolicy, make_handler
     from energy_optimizer.home_assistant import HomeAssistantClient
@@ -143,7 +152,7 @@ def dashboard_smoke() -> None:
 
         def status(self):
             return StatusResponse(
-                app_version="0.5.2",
+                app_version="0.6.0",
                 overall_status="healthy",
                 collector_status="healthy",
                 database_status="healthy",
@@ -155,6 +164,47 @@ def dashboard_smoke() -> None:
                 expected_schema_revision="test",
             )
 
+        def forecast_comparison_card(self, **kwargs):
+            from energy_optimizer.dashboard_api import ForecastComparisonCardResponse
+
+            return ForecastComparisonCardResponse(
+                mode=kwargs.get("mode", "live"),
+                identity={
+                    "forecast_type": "baseline_household_load",
+                    "model_version": "current",
+                    "alignment_version": "full_5m_v1",
+                    "training_policy": "verified_preferred",
+                },
+                now_utc=datetime.now(UTC),
+                empty_state={
+                    "code": "no_current_forecast",
+                    "message": "No current forecast is available.",
+                },
+            )
+
+        def latest_shadow_decision(self):
+            from energy_optimizer.dashboard_api import ShadowDecisionResponse
+
+            return ShadowDecisionResponse(
+                available=False,
+                message="Shadow decisioning is disabled.",
+            )
+
+        def shadow_decisions(self, **_kwargs):
+            from energy_optimizer.dashboard_api import ShadowDecisionListResponse
+
+            return ShadowDecisionListResponse(empty=True)
+
+        def shadow_decision(self, _decision_id):
+            from energy_optimizer.dashboard_api import ShadowDecisionResponse
+
+            return ShadowDecisionResponse(available=False, message="Not found")
+
+        def shadow_outcomes(self, **_kwargs):
+            from energy_optimizer.dashboard_api import ShadowOutcomeListResponse
+
+            return ShadowOutcomeListResponse(empty=True)
+
     def start(policy):
         handler = make_handler(
             health=AppHealth(900), service=Service(), access_policy=policy
@@ -164,9 +214,9 @@ def dashboard_smoke() -> None:
         thread.start()
         return server, thread
 
-    def request(server, path, headers=None):
+    def request(server, path, headers=None, *, method="GET"):
         connection = HTTPConnection("127.0.0.1", server.server_port, timeout=5)
-        connection.request("GET", path, headers=headers or {})
+        connection.request(method, path, headers=headers or {})
         response = connection.getresponse()
         body = response.read()
         connection.close()
@@ -178,9 +228,11 @@ def dashboard_smoke() -> None:
         status, shell = request(server, prefix, {"X-Ingress-Path": prefix})
         assert status == 200 and f'<base href="{prefix}">'.encode() in shell
         assert b'id="overview-ev"' in shell
+        assert b'id="overview-forecast-actual"' in shell
+        assert b'id="decisions"' in shell
         status, css = request(
             server,
-            prefix + "static/app.css?v=0.5.2",
+            prefix + "static/app.css?v=0.6.0",
             {"X-Ingress-Path": prefix},
         )
         assert status == 200 and b"prefers-color-scheme" in css
@@ -191,6 +243,31 @@ def dashboard_smoke() -> None:
         )
         payload = json.loads(api)
         assert status == 200 and payload["ev_vehicle_status"] == "plugged_idle"
+        for route, expected in (
+            (
+                "forecast-comparison-card?mode=live",
+                {"mode": "live", "points": []},
+            ),
+            ("decisions/latest", {"available": False}),
+            ("decisions?limit=10", {"empty": True}),
+            ("decisions/1", {"available": False}),
+            ("decision-outcomes?limit=10", {"empty": True}),
+        ):
+            status, body = request(
+                server,
+                prefix + "api/v1/" + route,
+                {"X-Ingress-Path": prefix},
+            )
+            assert status == 200
+            payload = json.loads(body)
+            assert all(payload.get(key) == value for key, value in expected.items())
+        status, _ = request(
+            server,
+            prefix + "api/v1/decisions/latest",
+            {"X-Ingress-Path": prefix},
+            method="POST",
+        )
+        assert status == 405
         assert "vin" not in api.decode().lower()
         assert "latitude" not in api.decode().lower()
         assert "longitude" not in api.decode().lower()

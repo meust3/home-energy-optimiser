@@ -32,6 +32,7 @@ SHELL_ROUTES = {
     "/calibration",
     "/solar-diagnostics",
     "/reserve",
+    "/decisions",
     "/data-quality",
 }
 
@@ -277,6 +278,31 @@ def make_handler(
                 self._require_params(params, {"range"})
                 response = service.reserve_history(
                     range_name=self._single(params, "range") or "30d"
+                )
+            elif route == "/api/v1/forecast-comparison-card":
+                self._require_params(params, {"mode"})
+                response = service.forecast_comparison_card(
+                    mode=self._single(params, "mode") or "live"
+                )
+            elif route == "/api/v1/decisions/latest":
+                self._require_params(params, set())
+                response = service.latest_shadow_decision()
+            elif route == "/api/v1/decisions":
+                self._require_params(params, {"limit"})
+                response = service.shadow_decisions(
+                    limit=self._integer(
+                        params, "limit", default=50, minimum=1, maximum=200
+                    )
+                )
+            elif re.fullmatch(r"/api/v1/decisions/[1-9][0-9]*", route):
+                self._require_params(params, set())
+                response = service.shadow_decision(int(route.rsplit("/", 1)[1]))
+            elif route == "/api/v1/decision-outcomes":
+                self._require_params(params, {"limit"})
+                response = service.shadow_outcomes(
+                    limit=self._integer(
+                        params, "limit", default=100, minimum=1, maximum=200
+                    )
                 )
             elif route == "/api/v1/data-quality":
                 self._require_params(params, {"range", "start", "end"})

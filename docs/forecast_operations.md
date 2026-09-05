@@ -1,5 +1,17 @@
 # Forecast operations
 
+## v0.6.0 sequencing
+
+When both opt-in forecast operations and shadow decisioning are enabled, the same
+coordinator persists forecast, then reserve, then decision/candidates. Delayed
+outcomes are scored in the same cycle after maturity. Shadow exceptions are
+isolated from forecast success and collection; its 60-second default budget is
+checked before persistence. No second scheduler or execution path exists.
+
+Rollup backfill now plans from exact current-identity scored target dates, not the
+earliest mixed/legacy detail dates. Each cycle refreshes at most two missing dates
+plus the normal recent date and reports deterministic progress.
+
 v0.5.2 refreshes bounded, deterministic calibration rollups after scoring within
 the existing coordinator. It creates no thread, process, service, or collector;
 rollup failure is a warning and does not fail a forecast or collection.

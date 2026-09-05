@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.6.0 - 2026-09-05
+
+- Adds opt-in, HOLD-only-by-default battery shadow decisions after linked forecast
+  and reserve persistence in the existing coordinator.
+- Adds immutable candidate evidence, append-only simulated outcomes, exact
+  calibration/rollup gates, and database-enforced no-command records.
+- Adds bounded GET-only Decisions and Forecast vs Actual views plus safe health
+  and progress status.
+- Requires manual additive revision `20260905_01`. The App performs no migration,
+  retention, Home Assistant service call, device command, or trade.
+
 ## 0.5.2
 
 - Uses independent date/horizon calibration rollups and conservative linked-run

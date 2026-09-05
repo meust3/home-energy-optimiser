@@ -1,5 +1,9 @@
 # Reserve persistence
 
+In v0.6.0, the saved reserve ID is passed directly to optional shadow decisioning
+after the reserve transaction succeeds. The decision run has a foreign key to this
+immutable audit. No reserve row is updated and no reserve arithmetic changes.
+
 Reserve empirical diagnostics follow `reserve_runs.forecast_run_id` to the exact
 four-field calibration identity. Legacy source-name MAPE is not repurposed;
 unavailable evidence remains null and all persisted `command_issued` values remain

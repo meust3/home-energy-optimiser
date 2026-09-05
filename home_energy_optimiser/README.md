@@ -1,5 +1,12 @@
 # Home Energy Optimiser
 
+Version 0.6.0 retains UID/GID 10001, GET-only Home Assistant access, one process,
+one collector, and the existing forecast coordinator. Its battery shadow engine,
+Decisions view, and Forecast vs Actual card are advisory only. Shadow decisioning
+and non-HOLD selection default off; unknown power limits block dependent
+candidates. Revision `20260905_01` must be migrated manually and the App never
+executes an action or migrates at startup.
+
 Version 0.5.2 retains the UID/GID 10001, read-only Home Assistant access, one
 process and one collector. It requires schema revision `20260814_01` and adds
 independent calibration rollups, negative-demand validation, and GET-only solar

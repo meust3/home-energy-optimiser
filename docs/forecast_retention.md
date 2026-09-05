@@ -1,5 +1,10 @@
 # Forecast retention
 
+v0.6.0 does not enable or execute retention. Exact-identity backfill progress is a
+calibration/decision gate and does not bypass the existing durable rollup coverage
+checks. Shadow tables are not automatically pruned by this release.
+
+
 Retention remains disabled. If explicitly enabled later, v0.5.2 fails closed
 unless durable identity/date/horizon rollups already represent every candidate
 prediction row. Rollups are rebuilt as whole local-date units; partial batches are

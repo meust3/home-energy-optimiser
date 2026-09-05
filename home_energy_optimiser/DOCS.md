@@ -1,5 +1,22 @@
 # Home Energy Optimiser
 
+## v0.6.0 shadow options
+
+Version 0.6.0 adds `shadow_decisioning_enabled` (false),
+`shadow_allow_non_hold_recommendations` (false),
+`shadow_decision_interval_minutes` (30),
+`shadow_decision_max_runtime_seconds` (60),
+`shadow_min_expected_value_aud` (0.25), and
+`shadow_outcome_scoring_delay_minutes` (10). Constraint options default to zero,
+meaning unknown/infeasible rather than zero-priced or unlimited. Enable candidate
+analysis first while leaving non-HOLD selection false. The result is data only and
+always says no command was issued.
+
+Revision `20260905_01` adds shadow history only. It is a manual migration;
+downgrade to `20260814_01` discards shadow records but preserves observations,
+forecasts, scores, reserve audits, and BYD fields. The Decisions and Forecast vs
+Actual views use bounded GET-only APIs and offer no execute/run controls.
+
 ## v0.5.2 calibration-integrity options
 
 The existing `calibration_window_days` option is joined by
@@ -57,9 +74,9 @@ five-minute intervals, stores it in an external PostgreSQL database, and present
 the stored information in an administrator-only Ingress dashboard. It provides
 explainable, advisory analysis; it does not operate energy equipment.
 
-Version 0.4.1 is operational on the production Home Assistant OS host at Alembic
-revision `20260811_01`. Version 0.5.0 requires an explicit upgrade to
-`20260812_01` before the App is updated; startup never runs migrations or historical
+Version 0.5.2 is operational on the production Home Assistant OS host at Alembic
+revision `20260814_01`. Version 0.6.0 is the released successor and requires an
+explicit upgrade to `20260905_01`; startup never runs migrations or historical
 repair automatically.
 
 ## Read-only safety boundary
