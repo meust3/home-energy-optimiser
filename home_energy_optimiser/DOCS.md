@@ -1,5 +1,11 @@
 # Home Energy Optimiser
 
+Version 0.6.1 corrects observed outcome accounting and appends scoring v2. HOLD
+comparisons, hindsight, regret and simulated reserve safety remain unavailable
+until a counterfactual model is validated. Existing v1 rows remain audit-only.
+This update retains schema `20260905_01`; do not migrate an existing v0.6.0 database.
+Keep non-HOLD selection and retention disabled. No hardware command is issued.
+
 ## v0.6.0 shadow options
 
 Version 0.6.0 adds `shadow_decisioning_enabled` (false),

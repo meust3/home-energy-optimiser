@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.6.1 - 2026-09-12
+
+- Correct outcome accounting to integrate paired slot energy/prices and partial
+  action-window overlaps; incomplete totals remain NULL.
+- Introduce append-only `battery-shadow-outcome-v2`; leave HOLD comparisons,
+  hindsight, regret and simulated reserve safety unavailable until a validated
+  counterfactual model exists. Legacy v1 evidence remains unchanged.
+- Show corrected observed outcomes and explicit legacy limitations in the dashboard.
+- No schema, decision policy, recommendation defaults or hardware access change.
+
 ## 0.6.0 - 2026-09-05
 
 - Added an opt-in deterministic battery-only shadow engine inside the existing

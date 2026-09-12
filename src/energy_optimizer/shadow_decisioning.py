@@ -12,6 +12,7 @@ import json
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime, timedelta
 from enum import StrEnum
+from math import isfinite
 from typing import Any
 from zoneinfo import ZoneInfo
 
@@ -19,7 +20,7 @@ from energy_optimizer.timestamps import aware_datetime, native_json
 
 POLICY_VERSION = "battery-shadow-policy-v1"
 ASSUMPTION_SET_VERSION = "battery-shadow-assumptions-v1"
-OUTCOME_SCORING_VERSION = "battery-shadow-outcome-v1"
+OUTCOME_SCORING_VERSION = "battery-shadow-outcome-v2"
 PRICE_GAP_TOLERANCE_SECONDS = 1.0
 
 
@@ -735,156 +736,110 @@ def score_shadow_outcome(
     scored_at_utc: datetime,
     scoring_version: str = OUTCOME_SCORING_VERSION,
 ) -> dict[str, Any]:
-    """Score a matured action window with explicit counterfactual limitations."""
+    """Integrate observed evidence; no validated counterfactual model exists yet.
+
+    Five-minute samples approximate constant power/price until the next slot.
+    Original candidates remain immutable, but are not treated as extra flows on
+    top of the observed (potentially operator-controlled) battery trajectory.
+    """
     window_start = _utc(decision_run["selected_start_utc"])
     window_end = _utc(decision_run["selected_end_utc"])
-    duration = max((window_end - window_start).total_seconds(), 0.0)
-    expected_slots = max(round(duration / 300), 1)
-    rows = [
-        row
-        for row in observations
-        if window_start <= _utc(row["slot_utc"]) < window_end
-    ]
-    coverage = min(len({_utc(row["slot_utc"]) for row in rows}) / expected_slots, 1.0)
-    import_energy = _integrate_observation_power(rows, "grid_import_power_w")
-    export_energy = _integrate_observation_power(rows, "grid_export_power_w")
-    charge_energy = _integrate_observation_power(rows, "battery_charge_power_w")
-    discharge_energy = _integrate_observation_power(rows, "battery_discharge_power_w")
-    household_energy = _integrate_observation_power(rows, "house_consumption_w")
-    pv_energy = _integrate_observation_power(rows, "pv_power_w")
-    import_prices = [
-        float(row["amber_import_price_per_kwh"])
-        for row in rows
-        if row.get("amber_import_price_per_kwh") is not None
-    ]
-    export_prices = [
-        float(row["amber_export_price_per_kwh"])
-        for row in rows
-        if row.get("amber_export_price_per_kwh") is not None
-    ]
-    price_coverage = min(len(import_prices), len(export_prices)) / expected_slots
-    energy_coverage = (
-        sum(
-            row.get("grid_import_power_w") is not None
-            and row.get("grid_export_power_w") is not None
-            for row in rows
-        )
-        / expected_slots
+    if window_end <= window_start or _utc(scored_at_utc) < window_end:
+        raise ValueError("outcome requires a positive, completed action window")
+    duration = (window_end - window_start).total_seconds()
+    samples: list[tuple[dict[str, Any], float]] = []
+    seen: set[datetime] = set()
+    for row in observations:
+        slot = _utc(row["slot_utc"])
+        seconds = (
+            min(slot + timedelta(minutes=5), window_end) - max(slot, window_start)
+        ).total_seconds()
+        if seconds <= 0:
+            continue
+        if slot.second or slot.microsecond or slot.minute % 5 or slot in seen:
+            raise ValueError("outcome observations must have unique five-minute slots")
+        seen.add(slot)
+        samples.append((row, seconds))
+    samples.sort(key=lambda item: _utc(item[0]["slot_utc"]))
+    coverage = sum(seconds for _, seconds in samples) / duration
+    price_fields = ("amber_import_price_per_kwh", "amber_export_price_per_kwh")
+    flow_fields = ("grid_import_power_w", "grid_export_power_w")
+    price_seconds = sum(
+        seconds
+        for row, seconds in samples
+        if all(_outcome_number(row.get(key)) is not None for key in price_fields)
     )
-    import_average = sum(import_prices) / len(import_prices) if import_prices else None
-    export_average = sum(export_prices) / len(export_prices) if export_prices else None
-    observed_value = (
-        (export_energy or 0.0) * export_average
-        - (import_energy or 0.0) * import_average
-        if import_average is not None and export_average is not None
-        else None
-    )
-    increments = {
-        int(item["id"]): _realised_candidate_increment(
-            item, import_price=import_average, export_price=export_average
-        )
-        for item in candidates
-        if bool(item.get("feasible"))
-    }
-    selected = next(
-        (
-            item
-            for item in candidates
-            if item.get("action") == decision_run.get("selected_action")
-        ),
-        None,
-    )
-    selected_increment = increments.get(int(selected["id"])) if selected else None
-    hold = next((item for item in candidates if item.get("action") == "HOLD"), None)
-    hold_increment = increments.get(int(hold["id"]), 0.0) if hold else 0.0
-    ranked_realised = sorted(
-        (
-            (value, str(item.get("action")), int(item["id"]))
-            for item in candidates
-            if (value := increments.get(int(item["id"]))) is not None
-        ),
-        key=lambda item: (-item[0], item[1]),
-    )
-    hindsight_value, hindsight_action, _ = (
-        ranked_realised[0] if ranked_realised else (None, None, None)
-    )
-    selected_simulated = (
-        observed_value + selected_increment
-        if observed_value is not None and selected_increment is not None
-        else None
-    )
-    hold_simulated = (
-        observed_value + hold_increment if observed_value is not None else None
-    )
-    hindsight_simulated = (
-        observed_value + hindsight_value
-        if observed_value is not None and hindsight_value is not None
-        else None
-    )
-    battery_values = [_number(row.get("battery_energy_estimate_kwh")) for row in rows]
-    battery_values = [value for value in battery_values if value is not None]
-    reserve = _number(
-        (decision_run.get("constraint_snapshot_json") or {}).get(
-            "recommended_reserve_kwh"
+    energy_seconds = sum(
+        seconds
+        for row, seconds in samples
+        if all(
+            _outcome_number(row.get(key), power=True) is not None for key in flow_fields
         )
     )
-    minimum_battery = min(battery_values) if battery_values else None
-    intervention = _operator_intervention(rows)
-    counterfactual_confidence = (
-        "medium"
-        if coverage >= 0.95 and price_coverage >= 0.95 and not intervention["possible"]
-        else "low"
-    )
+    observed_value = 0.0 if coverage >= 1.0 - 1e-9 else None
+    for row, seconds in samples:
+        import_power, export_power = (
+            _outcome_number(row.get(key), power=True) for key in flow_fields
+        )
+        import_price, export_price = (
+            _outcome_number(row.get(key)) for key in price_fields
+        )
+        if None in (import_power, export_power, import_price, export_price):
+            observed_value = None
+            break
+        if observed_value is not None:
+            observed_value += (
+                (export_power * export_price - import_power * import_price)
+                * seconds
+                / 3_600_000
+            )
+    intervention = _operator_intervention([row for row, _ in samples])
     return {
         "decision_run_id": int(decision_run["id"]),
         "scoring_version": scoring_version,
         "scored_at_utc": _utc(scored_at_utc),
         "window_start_utc": window_start,
         "window_end_utc": window_end,
-        "actual_coverage_percent": coverage * 100,
-        "actual_price_coverage_percent": min(price_coverage, 1.0) * 100,
-        "actual_energy_coverage_percent": min(energy_coverage, 1.0) * 100,
-        "observed_import_kwh": import_energy,
-        "observed_export_kwh": export_energy,
-        "observed_battery_charge_kwh": charge_energy,
-        "observed_battery_discharge_kwh": discharge_energy,
-        "observed_household_kwh": household_energy,
-        "observed_pv_kwh": pv_energy,
+        "actual_coverage_percent": min(coverage, 1.0) * 100,
+        "actual_price_coverage_percent": min(price_seconds / duration, 1.0) * 100,
+        "actual_energy_coverage_percent": min(energy_seconds / duration, 1.0) * 100,
+        "observed_import_kwh": _integrate_outcome_power(
+            samples, "grid_import_power_w", coverage
+        ),
+        "observed_export_kwh": _integrate_outcome_power(
+            samples, "grid_export_power_w", coverage
+        ),
+        "observed_battery_charge_kwh": _integrate_outcome_power(
+            samples, "battery_charge_power_w", coverage
+        ),
+        "observed_battery_discharge_kwh": _integrate_outcome_power(
+            samples, "battery_discharge_power_w", coverage
+        ),
+        "observed_household_kwh": _integrate_outcome_power(
+            samples, "house_consumption_w", coverage
+        ),
+        "observed_pv_kwh": _integrate_outcome_power(samples, "pv_power_w", coverage),
         "observed_variable_energy_value_aud": observed_value,
-        "simulated_selected_value_aud": selected_simulated,
-        "simulated_hold_value_aud": hold_simulated,
-        "selected_vs_hold_value_aud": (
-            selected_simulated - hold_simulated
-            if selected_simulated is not None and hold_simulated is not None
-            else None
-        ),
-        "hindsight_best_action": hindsight_action,
-        "hindsight_best_value_aud": hindsight_simulated,
-        "regret_aud": (
-            max(hindsight_simulated - selected_simulated, 0.0)
-            if hindsight_simulated is not None and selected_simulated is not None
-            else None
-        ),
-        "simulated_min_battery_energy_kwh": minimum_battery,
-        "simulated_reserve_breach": (
-            minimum_battery < reserve
-            if minimum_battery is not None and reserve is not None
-            else None
-        ),
+        "simulated_selected_value_aud": None,
+        "simulated_hold_value_aud": None,
+        "selected_vs_hold_value_aud": None,
+        "hindsight_best_action": None,
+        "hindsight_best_value_aud": None,
+        "regret_aud": None,
+        "simulated_min_battery_energy_kwh": None,
+        "simulated_reserve_breach": None,
         "operator_intervention_possible": intervention["possible"],
         "operator_intervention_confidence": intervention["confidence"],
         "operator_intervention_evidence_json": intervention["evidence"],
-        "counterfactual_confidence": counterfactual_confidence,
+        "counterfactual_confidence": "unavailable",
         "counterfactual_limitations_json": [
-            "simulated_counterfactual_not_a_physical_measurement",
-            "charge_and_discharge_efficiency_assumptions",
-            "unverified_inverter_and_bms_limits",
-            "unknown_or_configured_import_limit",
-            "operator_intervention_possible",
-            "direct_ev_charger_power_unavailable",
-            "five_minute_data_granularity",
-            "dynamic_export_behaviour",
-            "constrained_solar_generation_possible",
+            "counterfactual_model_not_validated",
+            "observed_operation_is_not_a_hold_baseline",
+            "candidate_battery_trajectory_not_simulated",
+            "incomplete_window_totals_are_null",
+            "five_minute_constant_sample_approximation",
+            "observed_value_is_gross_variable_energy_only",
+            "operator_intent_not_proven",
         ],
     }
 
@@ -1373,28 +1328,25 @@ def _hash_snapshot(value: dict[str, Any]) -> str:
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
-def _realised_candidate_increment(
-    candidate: dict[str, Any], *, import_price: float | None, export_price: float | None
-) -> float | None:
-    action = str(candidate.get("action"))
-    grid = abs(_number(candidate.get("grid_energy_delta_kwh")) or 0.0)
-    if action in {"HOLD", "PRESERVE_BATTERY", "DEFER_EXPORT"}:
-        return 0.0
-    if action == "CHARGE_BATTERY_FROM_GRID":
-        return -grid * import_price if import_price is not None else None
-    if action == "DISCHARGE_FOR_SELF_CONSUMPTION":
-        return grid * import_price if import_price is not None else None
-    if action == "EXPORT_BATTERY":
-        return grid * export_price if export_price is not None else None
-    return None
+def _outcome_number(value: Any, *, power: bool = False) -> float | None:
+    number = _number(value)
+    if number is None or not isfinite(number) or (power and number < 0):
+        return None
+    return number
 
 
-def _integrate_observation_power(
-    rows: list[dict[str, Any]], field_name: str
+def _integrate_outcome_power(
+    samples: list[tuple[dict[str, Any], float]], field_name: str, coverage: float
 ) -> float | None:
-    values = [_number(row.get(field_name)) for row in rows]
-    present = [value for value in values if value is not None]
-    return sum(max(value, 0.0) / 12_000 for value in present) if present else None
+    if coverage < 1.0 - 1e-9:
+        return None
+    total = 0.0
+    for row, seconds in samples:
+        power = _outcome_number(row.get(field_name), power=True)
+        if power is None:
+            return None
+        total += power * seconds / 3_600_000
+    return total
 
 
 def _operator_intervention(rows: list[dict[str, Any]]) -> dict[str, Any]:

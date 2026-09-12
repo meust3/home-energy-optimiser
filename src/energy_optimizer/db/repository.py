@@ -1143,6 +1143,9 @@ class DatabaseRepository:
         _require_aware(end)
         if start >= end or not 1 <= limit <= 1000:
             raise ValueError("invalid bounded shadow outcome observation query")
+        # Include the five-minute sample overlapping a partial first slot.
+        first_slot = start.astimezone(UTC).replace(second=0, microsecond=0)
+        first_slot -= timedelta(minutes=first_slot.minute % 5)
         columns = (
             Observation.slot_utc,
             Observation.battery_energy_estimate_kwh,
@@ -1161,7 +1164,7 @@ class DatabaseRepository:
                 for row in session.execute(
                     select(*columns)
                     .where(
-                        Observation.slot_utc >= start.astimezone(UTC),
+                        Observation.slot_utc >= first_slot,
                         Observation.slot_utc < end.astimezone(UTC),
                     )
                     .order_by(Observation.slot_utc)

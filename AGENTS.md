@@ -28,20 +28,26 @@ migration and an end-to-end live observation write have been manually validated.
 SQLite remains supported for local/offline development and as the retained final
 pre-migration backup; it is not a production fallback.
 
-Home Assistant App v0.5.2 is the current production release on the amd64 Home
-Assistant OS 18.1 NUC. It provides strictly advisory forecast operations and
-reserve audit against PostgreSQL revision `20260814_01`. Its opt-in coordinator
-must remain one lightweight thread in the existing process, preserve collector
-priority, create no second collector or cron service, and expose no action
-endpoint. Forecast scoring and reserve persistence are analytical database writes
-only; hardware remains read-only.
+Home Assistant App v0.6.0 is running in production on the amd64 Home Assistant
+OS NUC. Read-only Home Assistant UI inspection on 2026-09-12 confirmed shadow
+decisioning enabled, non-HOLD selection disabled, and retention disabled. Logs
+show HOLD decisions, outcome persistence, and advancing healthy collection. The
+release requires PostgreSQL revision `20260905_01`; the exact live revision was
+not independently read in that inspection. Do not repeat production migration
+based on older deployment-pending documentation.
 
-Version 0.6.0 is the released successor pending controlled production deployment,
-with an opt-in battery-only shadow decision engine and additive revision
-`20260905_01`. It evaluates only after a linked forecast and reserve are persisted,
-defaults to HOLD-only selection, and has no execution path. Development must not
-connect to or migrate production. Calibration uses independent
-target-slot/local-date evidence; retention remains disabled by default.
+Its coordinator must remain one lightweight thread in the existing process,
+preserve collector priority, create no second collector or cron service, and
+expose no action endpoint. Forecast scoring and reserve persistence are analytical
+database writes only; hardware remains read-only. The battery-only shadow engine
+evaluates only after a linked forecast and reserve are persisted and has no
+execution path. Development must not connect to or migrate production. Calibration
+uses independent target-slot/local-date evidence; retention stays disabled.
+
+The v0.6.1 candidate uses `battery-shadow-outcome-v2` to correct observed accounting
+and withholds unsupported HOLD comparisons, hindsight, regret and simulated
+reserve safety. The published v0.6.0 tag retains v1 estimates, which are not
+validated decision-quality evidence. See `docs/decision_outcome_scoring.md`.
 
 ## Architecture
 

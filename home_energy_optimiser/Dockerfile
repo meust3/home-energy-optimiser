@@ -1,7 +1,7 @@
 FROM python:3.12.11-slim-bookworm
 
-ARG BUILD_VERSION=0.6.0
-ARG APP_SOURCE_REF=v0.6.0
+ARG BUILD_VERSION=0.6.1
+ARG APP_SOURCE_REF=v0.6.1
 
 LABEL io.hass.name="Home Energy Optimiser" \
       io.hass.description="Read-only Home Assistant energy dashboard and collector" \
