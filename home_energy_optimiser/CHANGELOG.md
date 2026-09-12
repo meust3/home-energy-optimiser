@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.6.1 - 2026-09-12
+
+- Corrects observed outcome value using paired slot energy/prices and partial
+  interval overlap; missing or invalid data leaves whole-window totals unavailable.
+- Appends scoring v2 without changing original decisions or legacy v1 outcomes.
+- Withholds unsupported HOLD comparisons, hindsight, regret and simulated reserve
+  safety until a counterfactual model is validated; labels legacy dashboard values.
+- Requires the existing revision `20260905_01`; no migration from v0.6.0.
+- Keeps the existing coordinator, HOLD-only recommendation gate and retention
+  defaults. No device command or Home Assistant write path is added.
+
 ## 0.6.0 - 2026-09-05
 
 - Adds opt-in, HOLD-only-by-default battery shadow decisions after linked forecast

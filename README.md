@@ -1,5 +1,12 @@
 # Home Energy Optimiser
 
+> Operational update (2026-09-12): Home Assistant directly shows App v0.6.0 running,
+> shadow enabled, non-HOLD disabled and retention disabled. Exact live schema
+> revision has not been independently read.
+> The v0.6.1 outcome-accounting correction is under review; v0.6.0's outcome
+> comparisons must not be used as validated decision-quality evidence. See
+> [outcome scoring](docs/decision_outcome_scoring.md).
+
 > v0.6.0 is a strictly advisory battery shadow-decisioning release. It adds
 > deterministic candidate analysis, immutable evidence,
 > delayed counterfactual scoring, a Decisions view, and a Forecast vs Actual
@@ -47,8 +54,8 @@ forecast_max_runtime_seconds: 120
 reserve_snapshot_enabled: true
 ```
 
-The v0.6.0 schema head is additive revision `20260905_01`. Production
-remains on released v0.5.2 and revision `20260814_01`. The v0.6.0 migration must
+The v0.6.0 schema head is additive revision `20260905_01`. Production App v0.6.0
+is running (verified through Home Assistant on 2026-09-12). The v0.6.0 migration must
 be applied manually only after the production gates pass; the App never migrates
 PostgreSQL during startup. Validate the
 immutable image and Home Assistant discovery, then create and restore-test a fresh
@@ -70,9 +77,9 @@ collects and analyses data but does not control Home Assistant or energy hardwar
 ## Current status
 
 - **PostgreSQL production:** working and manually validated end to end
-- **Continuous collector:** App v0.5.2 is installed and collecting successfully on
+- **Continuous collector:** App v0.6.0 is installed and collecting successfully on
   the Home Assistant OS 18.1 NUC
-- **Ingress dashboard:** deployed through App v0.5.2
+- **Ingress dashboard:** deployed through App v0.6.0
 - **Reserve forecasting:** working and advisory
 - **Solar and price forecasts:** Solcast and Amber Electric integrated
 - **EV telemetry:** optional read-only vehicle-cloud integration was introduced in
@@ -93,7 +100,7 @@ Version 0.3.0 added a strictly read-only Ingress presentation layer, and version
 sparse forecast, reserve, and normalized-flow data look intentional rather than
 broken. Version 0.4.0 adds optional vehicle status, SOC, freshness,
 home/away, and confirmed-charging detection without pretending raw vehicle battery
-power is charger AC demand. Version 0.5.2 is the working production collector.
+power is charger AC demand. Version 0.6.0 is the working production collector.
 
 Forecast confidence can remain medium or low while household history is limited,
 and EV charging may still be embedded in historical household demand.

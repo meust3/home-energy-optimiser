@@ -28,6 +28,7 @@ from energy_optimizer.models import ForecastPoint, ForecastRun
 from energy_optimizer.persistence import open_repository
 from energy_optimizer.shadow_decisioning import (
     ASSUMPTION_SET_VERSION,
+    OUTCOME_SCORING_VERSION,
     POLICY_VERSION,
     BatteryAction,
     CalibrationGate,
@@ -406,7 +407,7 @@ def test_entity_specific_stale_soc_blocks_even_with_fresh_observation():
     assert "battery_soc_stale" in result.reason_codes
 
 
-def test_outcome_scoring_reports_coverage_regret_reserve_and_intervention():
+def test_outcome_scoring_does_not_claim_counterfactual_or_reserve_simulation():
     result = _evaluate()
     candidates = []
     for candidate_id, candidate in enumerate(result.candidates, 1):
@@ -440,15 +441,143 @@ def test_outcome_scoring_reports_coverage_regret_reserve_and_intervention():
         scored_at_utc=BOUNDARY + timedelta(hours=1),
     )
     assert outcome["actual_coverage_percent"] == 100
-    assert outcome["simulated_reserve_breach"] is True
+    assert outcome["simulated_reserve_breach"] is None
+    assert outcome["simulated_min_battery_energy_kwh"] is None
     assert outcome["operator_intervention_possible"] is True
-    assert outcome["counterfactual_confidence"] == "low"
-    assert outcome["hindsight_best_action"] is not None
-    assert outcome["regret_aud"] is not None
+    assert outcome["counterfactual_confidence"] == "unavailable"
+    assert outcome["hindsight_best_action"] is None
+    assert outcome["regret_aud"] is None
+    assert outcome["selected_vs_hold_value_aud"] is None
+    assert outcome["simulated_selected_value_aud"] is None
+    assert outcome["simulated_hold_value_aud"] is None
+    assert outcome["observed_variable_energy_value_aud"] == pytest.approx(0.8)
     assert (
-        "simulated_counterfactual_not_a_physical_measurement"
+        "counterfactual_model_not_validated"
         in outcome["counterfactual_limitations_json"]
     )
+
+
+def _score_observed(rows, *, start=BOUNDARY, end=None, scored_at=None):
+    end = end or BOUNDARY + timedelta(minutes=10)
+    return score_shadow_outcome(
+        decision_run={
+            "id": 9,
+            "selected_action": "HOLD",
+            "selected_start_utc": start,
+            "selected_end_utc": end,
+        },
+        candidates=[],
+        observations=rows,
+        scored_at_utc=scored_at or end + timedelta(minutes=10),
+    )
+
+
+def _actual_row(offset=0, **overrides):
+    return {
+        "slot_utc": BOUNDARY + timedelta(minutes=offset),
+        "grid_import_power_w": 1200.0,
+        "grid_export_power_w": 0.0,
+        "amber_import_price_per_kwh": 0.2,
+        "amber_export_price_per_kwh": 0.1,
+        **overrides,
+    }
+
+
+def test_observed_value_pairs_each_slots_energy_and_price():
+    rows = [
+        _actual_row(),
+        _actual_row(5, grid_import_power_w=2400.0, amber_import_price_per_kwh=-0.1),
+    ]
+    outcome = _score_observed(rows)
+    # 0.1 kWh at $0.20, then 0.2 kWh at -$0.10: net cost is zero.
+    assert outcome["scoring_version"] == OUTCOME_SCORING_VERSION
+    assert OUTCOME_SCORING_VERSION == "battery-shadow-outcome-v2"
+    assert outcome["observed_import_kwh"] == pytest.approx(0.3)
+    assert outcome["observed_variable_energy_value_aud"] == pytest.approx(0.0)
+    assert outcome["actual_price_coverage_percent"] == 100
+
+
+def test_observed_value_weights_partial_first_and_last_slots():
+    outcome = _score_observed(
+        [
+            _actual_row(),
+            _actual_row(5, grid_import_power_w=2400.0, amber_import_price_per_kwh=0.5),
+        ],
+        start=BOUNDARY + timedelta(minutes=2),
+        end=BOUNDARY + timedelta(minutes=8),
+    )
+    assert outcome["actual_coverage_percent"] == 100
+    assert outcome["observed_import_kwh"] == pytest.approx(0.18)
+    assert outcome["observed_variable_energy_value_aud"] == pytest.approx(-0.072)
+
+
+@pytest.mark.parametrize("missing", [None, float("nan"), float("inf"), -1.0])
+def test_invalid_directional_power_is_not_zero(missing):
+    outcome = _score_observed(
+        [_actual_row(grid_import_power_w=missing), _actual_row(5)]
+    )
+    assert outcome["observed_import_kwh"] is None
+    assert outcome["observed_variable_energy_value_aud"] is None
+    assert outcome["actual_energy_coverage_percent"] == 50
+    assert outcome["observed_export_kwh"] == 0
+
+
+@pytest.mark.parametrize("invalid", [None, float("nan"), float("inf")])
+def test_missing_or_invalid_price_does_not_borrow_another_slots_price(invalid):
+    outcome = _score_observed(
+        [_actual_row(amber_import_price_per_kwh=invalid), _actual_row(5)]
+    )
+    assert outcome["observed_variable_energy_value_aud"] is None
+    assert outcome["observed_import_kwh"] == pytest.approx(0.2)
+    assert outcome["actual_price_coverage_percent"] == 50
+
+
+def test_price_coverage_requires_both_prices_on_the_same_slot():
+    outcome = _score_observed(
+        [
+            _actual_row(amber_import_price_per_kwh=None),
+            _actual_row(5, amber_export_price_per_kwh=None),
+        ]
+    )
+    assert outcome["actual_price_coverage_percent"] == 0
+    assert outcome["observed_variable_energy_value_aud"] is None
+
+
+@pytest.mark.parametrize("rows", [[], [_actual_row()]])
+def test_missing_slots_leave_whole_window_totals_unavailable(rows):
+    outcome = _score_observed(rows)
+    assert outcome["actual_coverage_percent"] == len(rows) * 50
+    assert outcome["observed_import_kwh"] is None
+    assert outcome["observed_export_kwh"] is None
+    assert outcome["observed_variable_energy_value_aud"] is None
+
+
+def test_outcome_excludes_samples_outside_window_and_rejects_duplicates():
+    rows = [_actual_row(-5), _actual_row(), _actual_row(5), _actual_row(10)]
+    assert _score_observed(rows)["observed_import_kwh"] == pytest.approx(0.2)
+    with pytest.raises(ValueError, match="unique five-minute"):
+        _score_observed([_actual_row(), _actual_row()])
+    with pytest.raises(ValueError, match="completed action window"):
+        _score_observed(rows, scored_at=BOUNDARY)
+
+
+def test_outcome_repository_includes_overlapping_first_slot(
+    tmp_path, healthy_states, config
+):
+    url = f"sqlite+pysqlite:///{(tmp_path / 'outcome-slots.db').as_posix()}"
+    repository = open_repository(url)
+    try:
+        repository.create_schema_for_tests()
+        repository.save_observation(
+            build_observation(healthy_states, config, observed_at=BOUNDARY)
+        )
+        rows = repository.shadow_outcome_observations_read_only(
+            start=BOUNDARY + timedelta(seconds=30),
+            end=BOUNDARY + timedelta(minutes=5),
+        )
+        assert [row["slot_utc"] for row in rows] == [BOUNDARY]
+    finally:
+        repository.close()
 
 
 def test_backfill_planner_ignores_legacy_identity_and_exposes_progress():
@@ -694,9 +823,10 @@ def test_outcome_rows_are_idempotent_per_version_and_append_for_new_version(tmp_
         observations=rows,
         scored_at_utc=BOUNDARY + timedelta(hours=1),
     )
-    assert repository.save_shadow_outcome(outcome) is not None
-    assert repository.save_shadow_outcome(outcome) is None
-    revised = {**outcome, "scoring_version": "battery-shadow-outcome-v2-test"}
+    legacy = {**outcome, "scoring_version": "battery-shadow-outcome-v1"}
+    assert repository.save_shadow_outcome(legacy) is not None
+    assert repository.save_shadow_outcome(legacy) is None
+    revised = outcome
     assert repository.save_shadow_outcome(revised) is not None
     assert len(repository.shadow_outcome_rows_read_only(limit=10)) == 2
     assert (

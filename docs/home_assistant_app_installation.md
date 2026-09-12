@@ -1,5 +1,25 @@
 # Home Assistant App installation
 
+> Status update, 2026-09-12: Home Assistant directly shows v0.6.0 running with
+> shadow enabled, non-HOLD disabled and retention disabled. The older deployment/version statements below are historical, not an
+> instruction to repeat a migration. Confirm actual schema and settings first.
+> The outcome correction on the development branch is not in the published v0.6.0
+> tag. It requires its own reviewed release and exact-artifact validation.
+
+## v0.6.1 candidate gate
+
+This candidate corrects outcome accounting and labels unsupported comparisons.
+Validate its committed source and image before publishing a new immutable tag;
+do not move `v0.6.0`. The correction requires no new migration: both versions use
+`20260905_01`. Preserve non-HOLD=false and retention=false. Existing HOLD-only
+shadow analysis may remain enabled, appending v2 outcomes without replacing v1.
+
+A production update still requires a fresh backup with a recorded restore test,
+confirmation of the actual schema, collector stop/start discipline, and normal
+collection/forecast/reserve/Ingress acceptance. No backup, restore or migration
+should run automatically. For rollback to v0.6.0, keep the same schema and retain
+v2 evidence; do not downgrade to the pre-shadow schema for this patch.
+
 ## v0.6.0 controlled deployment gate
 
 Do not install this release over production until the immutable amd64 image,
