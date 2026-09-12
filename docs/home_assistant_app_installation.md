@@ -1,14 +1,15 @@
 # Home Assistant App installation
 
-> Status update, 2026-09-12: Home Assistant directly shows v0.6.0 running with
-> shadow enabled, non-HOLD disabled and retention disabled. The older deployment/version statements below are historical, not an
-> instruction to repeat a migration. Confirm actual schema and settings first.
-> The outcome correction on the development branch is not in the published v0.6.0
-> tag. It requires its own reviewed release and exact-artifact validation.
+> Status update, 2026-09-12: v0.6.1 is installed and running with shadow enabled,
+> non-HOLD disabled and retention disabled. The live schema is `20260905_01`;
+> no migration was required. Exact-tag validation, Home Assistant discovery,
+> fresh backup and local restore checks passed. See the
+> [production acceptance record](Testing/v061_production_acceptance_20260912.md).
+> Older deployment/version statements below are historical.
 
-## v0.6.1 candidate gate
+## v0.6.1 update gate
 
-This candidate corrects outcome accounting and labels unsupported comparisons.
+This release corrects outcome accounting and labels unsupported comparisons.
 Validate its committed source and image before publishing a new immutable tag;
 do not move `v0.6.0`. The correction requires no new migration: both versions use
 `20260905_01`. Preserve non-HOLD=false and retention=false. Existing HOLD-only

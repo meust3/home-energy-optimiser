@@ -28,13 +28,13 @@ migration and an end-to-end live observation write have been manually validated.
 SQLite remains supported for local/offline development and as the retained final
 pre-migration backup; it is not a production fallback.
 
-Home Assistant App v0.6.0 is running in production on the amd64 Home Assistant
-OS NUC. Read-only Home Assistant UI inspection on 2026-09-12 confirmed shadow
-decisioning enabled, non-HOLD selection disabled, and retention disabled. Logs
-show HOLD decisions, outcome persistence, and advancing healthy collection. The
-release requires PostgreSQL revision `20260905_01`; the exact live revision was
-not independently read in that inspection. Do not repeat production migration
-based on older deployment-pending documentation.
+Home Assistant App v0.6.1 is running in production on the amd64 Home Assistant
+OS NUC following the controlled update on 2026-09-12. Shadow decisioning remains
+enabled, non-HOLD selection disabled, and retention disabled. A read-only database
+audit confirmed PostgreSQL revision `20260905_01`; no migration was required.
+The fresh backup and local PostgreSQL 17 restore test passed. See
+`docs/Testing/v061_production_acceptance_20260912.md` for deployment evidence.
+Do not repeat production migration based on older deployment documentation.
 
 Its coordinator must remain one lightweight thread in the existing process,
 preserve collector priority, create no second collector or cron service, and
@@ -44,7 +44,7 @@ evaluates only after a linked forecast and reserve are persisted and has no
 execution path. Development must not connect to or migrate production. Calibration
 uses independent target-slot/local-date evidence; retention stays disabled.
 
-The v0.6.1 candidate uses `battery-shadow-outcome-v2` to correct observed accounting
+The v0.6.1 release uses `battery-shadow-outcome-v2` to correct observed accounting
 and withholds unsupported HOLD comparisons, hindsight, regret and simulated
 reserve safety. The published v0.6.0 tag retains v1 estimates, which are not
 validated decision-quality evidence. See `docs/decision_outcome_scoring.md`.
