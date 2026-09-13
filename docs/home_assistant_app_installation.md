@@ -1,13 +1,20 @@
 # Home Assistant App installation
 
-> Status update, 2026-09-12: v0.6.1 is installed and running with shadow enabled,
+> Status update, 2026-09-13: v0.6.2 is installed and running with shadow enabled,
 > non-HOLD disabled and retention disabled. The live schema is `20260905_01`;
 > no migration was required. Exact-tag validation, Home Assistant discovery,
 > fresh backup and local restore checks passed. See the
-> [production acceptance record](Testing/v061_production_acceptance_20260912.md).
+> [production acceptance record](Testing/v062_production_acceptance_20260913.md).
 > Older deployment/version statements below are historical.
 
-## v0.6.1 update gate
+## v0.6.2 update gate
+
+The forecast comparison patch uses the same `20260905_01` schema. Retain the
+fresh backup/restore, exact-tag validation, discovery and sole-collector update
+gates below. Preserve non-HOLD=false and retention=false. Rollback to v0.6.1
+requires no schema downgrade. See the production acceptance record above.
+
+## v0.6.1 update gate (historical)
 
 This release corrects outcome accounting and labels unsupported comparisons.
 Validate its committed source and image before publishing a new immutable tag;

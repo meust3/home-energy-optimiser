@@ -51,3 +51,7 @@ configuration change, or hardware command is part of this fix.
 
 The fix is on `codex/fix-forecast-comparison`; production remains v0.6.1. A release
 and controlled update are still needed to display these changes in Home Assistant.
+
+Deployment follow-up: v0.6.2 was released and installed on 2026-09-13. See
+[production acceptance](v062_production_acceptance_20260913.md). The earlier
+release-pending statement describes the investigation checkpoint.

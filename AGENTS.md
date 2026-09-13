@@ -28,12 +28,12 @@ migration and an end-to-end live observation write have been manually validated.
 SQLite remains supported for local/offline development and as the retained final
 pre-migration backup; it is not a production fallback.
 
-Home Assistant App v0.6.1 is running in production on the amd64 Home Assistant
-OS NUC following the controlled update on 2026-09-12. Shadow decisioning remains
+Home Assistant App v0.6.2 is running in production on the amd64 Home Assistant
+OS NUC following the controlled update on 2026-09-13. Shadow decisioning remains
 enabled, non-HOLD selection disabled, and retention disabled. A read-only database
 audit confirmed PostgreSQL revision `20260905_01`; no migration was required.
 The fresh backup and local PostgreSQL 17 restore test passed. See
-`docs/Testing/v061_production_acceptance_20260912.md` for deployment evidence.
+`docs/Testing/v062_production_acceptance_20260913.md` for deployment evidence.
 Do not repeat production migration based on older deployment documentation.
 
 Its coordinator must remain one lightweight thread in the existing process,

@@ -1,9 +1,10 @@
 # Home Energy Optimiser
 
-> Operational update (2026-09-12): App v0.6.1 is running with shadow enabled,
+> Operational update (2026-09-13): App v0.6.2 is running with shadow enabled,
 > non-HOLD disabled and retention disabled. The live PostgreSQL revision is
 > `20260905_01`; no migration was required. The fresh backup and local restore
-> test passed. See the [production acceptance record](docs/Testing/v061_production_acceptance_20260912.md).
+> test passed. See the [production acceptance record](docs/Testing/v062_production_acceptance_20260913.md).
+> v0.6.2 fixes the forecast comparison time axis and baseline actual eligibility.
 > v0.6.1 corrects observed outcome accounting and withholds unsupported decision
 > comparisons; retained v1 estimates are not validated decision-quality evidence.
 > See [outcome scoring](docs/decision_outcome_scoring.md).
@@ -55,8 +56,8 @@ forecast_max_runtime_seconds: 120
 reserve_snapshot_enabled: true
 ```
 
-The v0.6.0/v0.6.1 schema head is additive revision `20260905_01`, directly
-verified in production on 2026-09-12. App v0.6.1 is running; this patch required no
+The v0.6.0-v0.6.2 schema head is additive revision `20260905_01`, directly
+verified in production on 2026-09-13. App v0.6.2 is running; this patch required no
 migration. The App never migrates PostgreSQL during startup. For future updates,
 validate the immutable image and Home Assistant discovery, then create and
 restore-test a fresh backup before stopping the sole collector and updating the
@@ -77,9 +78,9 @@ collects and analyses data but does not control Home Assistant or energy hardwar
 ## Current status
 
 - **PostgreSQL production:** working and manually validated end to end
-- **Continuous collector:** App v0.6.1 is installed and collecting successfully on
+- **Continuous collector:** App v0.6.2 is installed and collecting successfully on
   the Home Assistant OS 18.1 NUC
-- **Ingress dashboard:** deployed through App v0.6.1
+- **Ingress dashboard:** deployed through App v0.6.2
 - **Reserve forecasting:** working and advisory
 - **Solar and price forecasts:** Solcast and Amber Electric integrated
 - **EV telemetry:** optional read-only vehicle-cloud integration was introduced in
@@ -100,7 +101,7 @@ Version 0.3.0 added a strictly read-only Ingress presentation layer, and version
 sparse forecast, reserve, and normalized-flow data look intentional rather than
 broken. Version 0.4.0 adds optional vehicle status, SOC, freshness,
 home/away, and confirmed-charging detection without pretending raw vehicle battery
-power is charger AC demand. Version 0.6.1 is the working production collector.
+power is charger AC demand. Version 0.6.2 is the working production collector.
 
 Forecast confidence can remain medium or low while household history is limited,
 and EV charging may still be embedded in historical household demand.
@@ -219,8 +220,8 @@ The amd64 Home Assistant App deployment wrapper:
 - presents existing stored data through administrator-only Ingress and a bounded
   GET-only API introduced in v0.3.0.
 
-Version 0.6.1 is the production collector following the controlled update on
-2026-09-12. See:
+Version 0.6.2 is the production collector following the controlled update on
+2026-09-13. See:
 
 - [App design](docs/home_assistant_app.md)
 - [Installation](docs/home_assistant_app_installation.md)
