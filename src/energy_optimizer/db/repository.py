@@ -16,6 +16,7 @@ from sqlalchemy.orm import Session
 from energy_optimizer.data_validation import (
     INVALID_ACTUAL_NEGATIVE_HOUSEHOLD_DEMAND,
     INVALID_NEGATIVE_HOUSEHOLD_DEMAND,
+    MATERIAL_NEGATIVE_HOUSEHOLD_DEMAND_W,
     materially_negative_household_demand,
 )
 from energy_optimizer.db.engine import translate_database_error
@@ -1509,6 +1510,44 @@ class DatabaseRepository:
                 .correlate(ForecastPoint)
                 .scalar_subquery()
             )
+            raw_actual = actual
+            if run["forecast_type"] == "baseline_household_load":
+                slot_conditions = _actual_slot_conditions(
+                    ForecastPoint, run.get("metadata_json")
+                )
+                invalid_actual = (
+                    select(func.count())
+                    .select_from(Observation)
+                    .where(
+                        *slot_conditions,
+                        (
+                            Observation.house_consumption_w
+                            < MATERIAL_NEGATIVE_HOUSEHOLD_DEMAND_W
+                        )
+                        | (
+                            Observation.baseline_exclusion_reason
+                            == INVALID_NEGATIVE_HOUSEHOLD_DEMAND
+                        ),
+                    )
+                    .correlate(ForecastPoint)
+                    .scalar_subquery()
+                )
+                eligible_actual = (
+                    select(func.avg(actual_column))
+                    .where(
+                        *slot_conditions,
+                        Observation.telemetry_is_healthy.is_(True),
+                        Observation.baseline_training_eligible.is_(True),
+                        (Observation.house_consumption_w.is_(None))
+                        | (
+                            Observation.house_consumption_w
+                            >= MATERIAL_NEGATIVE_HOUSEHOLD_DEMAND_W
+                        ),
+                    )
+                    .correlate(ForecastPoint)
+                    .scalar_subquery()
+                )
+                actual = case((invalid_actual > 0, None), else_=eligible_actual)
             statement = select(
                 ForecastPoint.period_start_utc,
                 ForecastPoint.period_end_utc,
@@ -1518,6 +1557,7 @@ class DatabaseRepository:
                 ForecastPoint.unit,
                 ForecastPoint.metadata_json,
                 actual.label("actual_value"),
+                raw_actual.label("raw_actual_value"),
             ).where(ForecastPoint.forecast_run_id == run["id"])
             if start is not None:
                 statement = statement.where(
@@ -1532,6 +1572,11 @@ class DatabaseRepository:
             for point in session.execute(statement).mappings():
                 item = dict(point)
                 observed = item["actual_value"]
+                item["actual_missing_reason"] = (
+                    "actual_unhealthy_or_ineligible"
+                    if observed is None and item["raw_actual_value"] is not None
+                    else "no_comparable_observation" if observed is None else None
+                )
                 item["error_value"] = (
                     float(observed) - float(item["expected_value"])
                     if observed is not None

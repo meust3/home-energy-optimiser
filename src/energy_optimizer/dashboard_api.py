@@ -265,6 +265,8 @@ class ForecastRunsResponse(ApiModel):
 
 
 class ForecastComparisonPoint(ApiModel):
+    raw_actual_value: float | None = None
+    actual_missing_reason: str | None = None
     period_start_utc: datetime
     period_end_utc: datetime
     expected_value: float
@@ -288,6 +290,7 @@ class ForecastComparisonResponse(ApiModel):
     unit: str | None = None
     sample_count: int = 0
     missing_actual_count: int = 0
+    excluded_actual_count: int = 0
     mae: float | None = None
     bias: float | None = None
     points: list[ForecastComparisonPoint] = Field(default_factory=list)
@@ -968,6 +971,8 @@ class DashboardService:
                     lower_value=_number(row.get("lower_value")),
                     upper_value=_number(row.get("upper_value")),
                     actual_value=actual,
+                    raw_actual_value=_number(row.get("raw_actual_value")),
+                    actual_missing_reason=row.get("actual_missing_reason"),
                     error_value=error,
                     missing_actual=actual is None,
                 )
@@ -984,6 +989,10 @@ class DashboardService:
             unit=run["points"][0]["unit"],
             sample_count=len(errors),
             missing_actual_count=len(points) - len(errors),
+            excluded_actual_count=sum(
+                p.actual_value is None and p.raw_actual_value is not None
+                for p in points
+            ),
             mae=sum(abs(value) for value in errors) / len(errors) if errors else None,
             bias=sum(errors) / len(errors) if errors else None,
             points=points,
