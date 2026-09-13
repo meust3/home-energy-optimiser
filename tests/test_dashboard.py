@@ -1,11 +1,15 @@
 import http.client
 import json
+import os
 import threading
+import uuid
 from datetime import datetime, timedelta
 from http.server import ThreadingHTTPServer
 from pathlib import Path
 
 import pytest
+from sqlalchemy import text
+from sqlalchemy.engine import make_url
 
 from energy_optimizer.collector import build_observation
 from energy_optimizer.dashboard_api import (
@@ -31,8 +35,27 @@ def _repository_url(config):
 
 
 @pytest.fixture
-def dashboard_database(healthy_states, config, now):
+def dashboard_database(healthy_states, config, now, request):
     url = _repository_url(config)
+    if getattr(request, "param", "sqlite") == "postgresql":
+        configured = os.getenv("TEST_POSTGRES_URL")
+        if not configured:
+            pytest.skip("TEST_POSTGRES_URL is required for PostgreSQL compatibility")
+        admin = open_repository(configured)
+        schema = f"dashboard_{uuid.uuid4().hex}"
+        with admin.engine.begin() as connection:
+            connection.execute(text(f'CREATE SCHEMA "{schema}"'))
+
+        def cleanup():
+            with admin.engine.begin() as connection:
+                connection.execute(text(f'DROP SCHEMA "{schema}" CASCADE'))
+            admin.close()
+
+        request.addfinalizer(cleanup)
+        parsed = make_url(configured)
+        query = dict(parsed.query)
+        query["options"] = f"{query.get('options', '')} -csearch_path={schema}".strip()
+        url = parsed.set(query=query).render_as_string(hide_password=False)
     repository = open_repository(url)
     repository.create_schema_for_tests()
     first = build_observation(healthy_states, config, observed_at=now)
@@ -670,3 +693,100 @@ def test_missing_directional_flows_use_one_concise_fallback():
     assert "flows.map" not in javascript
     assert "directionalState(data.grid_import_power_w" in javascript
     assert "data.energy_balance_residual_w == null" in javascript
+
+
+@pytest.mark.parametrize("dashboard_database", ["sqlite", "postgresql"], indirect=True)
+@pytest.mark.parametrize(
+    "changes,comparable",
+    [
+        ({"baseline_training_eligible": True}, True),
+        (
+            {
+                "baseline_training_eligible": False,
+                "baseline_exclusion_reason": "known_ev_session_without_ac_power",
+                "ev_charging_active": True,
+            },
+            False,
+        ),
+        ({"telemetry_is_healthy": False}, False),
+        ({"house_consumption_w": -200, "baseline_training_eligible": True}, False),
+        (
+            {
+                "baseline_exclusion_reason": "invalid_negative_household_demand",
+                "baseline_training_eligible": True,
+            },
+            False,
+        ),
+        (
+            {
+                "ev_power_w": 4200,
+                "ev_charging_active": True,
+                "baseline_training_eligible": True,
+            },
+            True,
+        ),
+    ],
+)
+def test_baseline_comparison_uses_eligible_actuals_without_writes(
+    dashboard_database, changes, comparable
+):
+    url, first, _ = dashboard_database
+    repository = open_repository(url)
+    start = first.slot_utc + timedelta(hours=2)
+    observation = first.model_copy(
+        update={
+            "slot_utc": start,
+            "baseline_house_consumption_w": 1500,
+            "house_consumption_w": 5700,
+            "telemetry_is_healthy": True,
+            "baseline_training_eligible": True,
+            "baseline_exclusion_reason": None,
+            **changes,
+        }
+    )
+    if changes.get("telemetry_is_healthy") is False:
+        observation.data_health = observation.data_health.model_copy(
+            update={
+                "telemetry": observation.data_health.telemetry.model_copy(
+                    update={"is_healthy": False}
+                )
+            }
+        )
+    repository.save_observation(observation)
+    run_id = repository.save_forecast_run(
+        ForecastRun(
+            created_at_utc=start - timedelta(hours=1),
+            forecast_type="baseline_household_load",
+            source="scheduled_forecast_operations",
+            horizon_start_utc=start,
+            horizon_end_utc=start + timedelta(minutes=10),
+            model_version="test-v1",
+            metadata={"alignment_version": "full_5m_v1"},
+            points=[
+                ForecastPoint(
+                    period_start_utc=start + timedelta(minutes=5 * i),
+                    period_end_utc=start + timedelta(minutes=5 * (i + 1)),
+                    expected_value=1200,
+                    unit="W",
+                )
+                for i in range(2)
+            ],
+        )
+    )
+    before = repository.forecast_run(run_id)
+    counts = repository.table_counts()
+    result = DashboardService(url, AppHealth(900)).forecast_comparison(
+        forecast_run_id=run_id
+    )
+    assert result.sample_count == int(comparable)
+    assert result.excluded_actual_count == int(not comparable)
+    assert result.mae == (300 if comparable else None)
+    assert result.bias == (300 if comparable else None)
+    assert result.points[0].raw_actual_value == 1500
+    assert result.points[0].actual_value == (1500 if comparable else None)
+    assert result.points[1].expected_value == 1200
+    assert result.points[1].actual_value is None
+    assert result.points[1].raw_actual_value is None
+    assert repository.table_counts() == counts
+    assert repository.forecast_run(run_id) == before
+    repository.close()

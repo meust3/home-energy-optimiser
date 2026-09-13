@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.6.2 - 2026-09-13
+
+- Shows all persisted forecast points even when actuals are missing, and rebuilds
+  the dated time axis for the selected horizon. Preserves run selection on refresh.
+- Excludes unhealthy and baseline-ineligible actuals from baseline comparisons,
+  including known charging without measured charger AC power. Reports exclusions.
+- Preserves genuine forecast errors, stored evidence, model and scoring policies.
+- Uses revision `20260905_01`; no migration from v0.6.1. HOLD-only and retention
+  settings remain unchanged; no hardware-control path is added.
+
 ## 0.6.1 - 2026-09-12
 
 - Corrects observed outcome value using paired slot energy/prices and partial

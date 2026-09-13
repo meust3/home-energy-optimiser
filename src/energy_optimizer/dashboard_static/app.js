@@ -315,8 +315,8 @@ const chartDefinitions = [
   ["Amber prices", "AUD/kWh", [["Buy", "amber_buy_price_aud_per_kwh"], ["Sell", "amber_sell_price_aud_per_kwh"]], v => v],
 ];
 
-function chartAxisTime(value) {
-  return value ? new Intl.DateTimeFormat(undefined, { hour: "2-digit", minute: "2-digit", timeZone: "Australia/Brisbane" }).format(new Date(value)) : "";
+function chartAxisTime(value, includeDate = false) {
+  return value ? new Intl.DateTimeFormat(undefined, { ...(includeDate ? { day: "numeric", month: "short" } : {}), hour: "2-digit", minute: "2-digit", timeZone: "Australia/Brisbane" }).format(new Date(value)) : "";
 }
 
 function makeChart(title, unit, series, points, transform = value => value, emptyMessage = "No chartable data is available for this period.", options = {}) {
@@ -339,7 +339,11 @@ function makeChart(title, unit, series, points, transform = value => value, empt
   svg.setAttribute("tabindex", "0");
   const all = chartableSeries.flatMap(item => points.map(point => plottedValue(point, item.field)).filter(isNumeric));
   let min = Math.min(...all), max = Math.max(...all); if (min === max) { min -= 1; max += 1; }
-  const x = index => 35 + (index / Math.max(points.length - 1, 1)) * 700; const y = value => 220 - ((value - min) / (max - min)) * 190;
+  const timeStart = Date.parse(options.start || points[0].timestamp_utc);
+  const timeEnd = Date.parse(options.end || points.at(-1).timestamp_utc);
+  const timeSpan = Math.max(timeEnd - timeStart, 1);
+  const timeX = time => 35 + (time - timeStart) / timeSpan * 700;
+  const x = index => timeX(Date.parse(points[index].timestamp_utc)); const y = value => 220 - ((value - min) / (max - min)) * 190;
   [[35, 20, 35, 220], [35, 220, 735, 220]].forEach(coords => { const line = document.createElementNS(svgNS, "line"); ["x1", "y1", "x2", "y2"].forEach((name, index) => line.setAttribute(name, coords[index])); line.setAttribute("class", "axis"); svg.append(line); });
   if (options.band && points.some(point => isNumeric(plottedValue(point, options.band[0])) && isNumeric(plottedValue(point, options.band[1])))) {
     let bandSegment = [];
@@ -375,8 +379,9 @@ function makeChart(title, unit, series, points, transform = value => value, empt
     const marker = document.createElementNS(svgNS, "line"); const markerX = 35 + Math.max(0, Math.min(100, options.nowPercent)) / 100 * 700;
     marker.setAttribute("x1", markerX); marker.setAttribute("x2", markerX); marker.setAttribute("y1", "20"); marker.setAttribute("y2", "220"); marker.setAttribute("class", "now-marker"); svg.append(marker);
   }
-  [0, Math.floor((points.length - 1) / 2), points.length - 1].filter((value, index, values) => value >= 0 && values.indexOf(value) === index).forEach(pointIndex => {
-    const label = document.createElementNS(svgNS, "text"); label.setAttribute("x", x(pointIndex)); label.setAttribute("y", "240"); label.setAttribute("text-anchor", pointIndex === 0 ? "start" : pointIndex === points.length - 1 ? "end" : "middle"); label.setAttribute("class", "chart-axis-label"); label.textContent = chartAxisTime(points[pointIndex]?.timestamp_utc); svg.append(label);
+  [0, .25, .5, .75, 1].forEach(fraction => {
+    const tick = timeStart + fraction * timeSpan;
+    const label = document.createElementNS(svgNS, "text"); label.setAttribute("x", timeX(tick)); label.setAttribute("y", "240"); label.setAttribute("text-anchor", fraction === 0 ? "start" : fraction === 1 ? "end" : "middle"); label.setAttribute("class", "chart-axis-label"); label.textContent = chartAxisTime(new Date(tick).toISOString(), timeSpan >= 86400000); svg.append(label);
   });
   const chartWrap = document.createElement("div"); chartWrap.className = "chart-wrap";
   const tooltip = document.createElement("div"); tooltip.className = "chart-tooltip"; tooltip.setAttribute("role", "status");
@@ -390,7 +395,8 @@ function makeChart(title, unit, series, points, transform = value => value, empt
   };
   svg.addEventListener("pointermove", event => {
     const rect = svg.getBoundingClientRect();
-    const index = Math.max(0, Math.min(points.length - 1, Math.round(((event.clientX - rect.left) / rect.width) * (points.length - 1))));
+    const hoverTime = timeStart + Math.max(0, Math.min(1, ((event.clientX - rect.left) / rect.width * 760 - 35) / 700)) * timeSpan;
+    const index = points.reduce((best, point, current) => Math.abs(Date.parse(point.timestamp_utc) - hoverTime) < Math.abs(Date.parse(points[best].timestamp_utc) - hoverTime) ? current : best, 0);
     showTooltip(index, Math.min(event.clientX - rect.left + 12, rect.width - 180), Math.max(event.clientY - rect.top - 20, 0));
   });
   svg.addEventListener("keydown", event => {
@@ -435,7 +441,9 @@ async function loadForecastRuns() {
   try {
     const data = await request("forecast-runs", "forecast-runs", { limit: 50 }); const select = $("#forecast-run");
     if (data.empty) { select.innerHTML = '<option value="">No persisted runs</option>'; setState("#forecast-state", "No persisted forecast series is available for this period."); $("#forecast-comparison").innerHTML = '<div class="empty-state">The dashboard did not generate a forecast.</div>'; return; }
+    const selectedRun = select.value;
     select.innerHTML = data.runs.map(run => `<option value="${run.forecast_run_id}">${safeText(run.forecast_type)} · ${localTime(run.created_at_utc)}</option>`).join("");
+    if (data.runs.some(run => String(run.forecast_run_id) === selectedRun)) select.value = selectedRun;
     select.dataset.runs = JSON.stringify(data.runs); await loadForecastComparison();
   } catch (error) { setState("#forecast-state", error.message, "error-state"); }
 }
@@ -445,13 +453,15 @@ async function loadForecastComparison() {
   setState("#forecast-state", "Comparing stored forecast points with stored observations (no database write)…");
   try {
     const data = await request("forecast-comparison", "forecast-comparison", { forecast_run_id: id });
+    if ($("#forecast-run").value !== id) return;
     if (!data.available) { setState("#forecast-state", data.message); $("#forecast-comparison").innerHTML = `<div class="empty-state">${safeText(data.message)}</div>`; return; }
-    setState("#forecast-state", `${data.sample_count} actual samples; ${data.missing_actual_count} missing actual points.`);
+    setState("#forecast-state", `${data.sample_count} comparable actual samples; ${data.excluded_actual_count || 0} excluded observations; ${data.missing_actual_count - (data.excluded_actual_count || 0)} points without actuals (including future intervals). MAE and bias use comparable samples only; bias is actual minus forecast.`);
     $("#forecast-run-meta").innerHTML = definition([["Created", localTime(data.created_at_utc)], ["Model", data.model_version], ["Horizon", `${localTime(data.horizon_start_utc)} – ${localTime(data.horizon_end_utc)}`], ["MAE", number(data.mae, 3)], ["Bias", number(data.bias, 3)], ["Unit", data.unit]]);
-    const points = data.points.map(p => ({ timestamp_utc: p.period_start_utc, has_observation: p.actual_value != null, expected: p.expected_value, actual: p.actual_value, lower: p.lower_value, upper: p.upper_value }));
-    const panel = makeChart("Expected versus actual", data.unit || "Stored unit", [["Expected", "expected"], ["Actual", "actual"], ["Lower bound", "lower"], ["Upper bound", "upper"]], points);
+    const points = data.points.map(p => ({ timestamp_utc: p.period_start_utc, series_available: { expected: true, lower: true, upper: true, actual: p.actual_value != null }, actual_missing_reason: p.actual_missing_reason, expected: p.expected_value, actual: p.actual_value, lower: p.lower_value, upper: p.upper_value }));
+    const panel = makeChart("Expected versus actual", data.unit || "Stored unit", [["Expected", "expected"], ["Comparable actual", "actual"], ["Lower bound", "lower"], ["Upper bound", "upper"]], points, value => value, undefined, { start: data.horizon_start_utc, end: data.horizon_end_utc });
+    if (data.forecast_type === "baseline_household_load") panel.insertAdjacentHTML("beforeend", '<p class="muted">Baseline household demand excludes known EV charging without measured charger AC power and unhealthy or ineligible observations. Those actuals remain gaps; no EV power is inferred or subtracted. Forecast values cover the full selected horizon.</p>');
     const target = $("#forecast-comparison"); target.replaceWith(panel); panel.id = "forecast-comparison";
-  } catch (error) { setState("#forecast-state", error.message, "error-state"); }
+  } catch (error) { if (error.name !== "AbortError" && $("#forecast-run").value === id) setState("#forecast-state", error.message, "error-state"); }
 }
 
 function metricCard(label, metric) {
