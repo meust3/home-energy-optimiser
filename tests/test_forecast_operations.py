@@ -156,7 +156,9 @@ def test_runtime_deadline_marks_attempt_failed(tmp_path, config):
     try:
         attempt = repository.forecast_operations_status_read_only()["last_attempt"]
         assert attempt["status"] == "failed"
-        assert attempt["failure_summary"] == "Configured forecast runtime exceeded"
+        assert attempt["failure_summary"] == (
+            "Configured forecast runtime exceeded; phase=save_forecast"
+        )
     finally:
         repository.close()
 
@@ -475,3 +477,38 @@ def test_no_hardware_or_home_assistant_write_surface():
     coordinator_methods = set(vars(ForecastCoordinator))
     assert not coordinator_methods & {"post", "put", "patch", "delete", "write_modbus"}
     assert ForecastOperationsConfig().enabled is False
+
+
+def test_query_cancellation_audit_preserves_stage_without_error_details(
+    tmp_path, config, monkeypatch
+):
+    from energy_optimizer.db.engine import DatabaseQueryCanceledError
+    from energy_optimizer.db.repository import DatabaseRepository
+
+    path = tmp_path / "canceled.db"
+    factory = _repository_factory(path)
+    boundary = datetime(2026, 8, 11, 2, 30, tzinfo=UTC)
+
+    def cancel(*args, **kwargs):
+        raise DatabaseQueryCanceledError("private SQL and credentials must not appear")
+
+    monkeypatch.setattr(DatabaseRepository, "score_completed_forecast_points", cancel)
+    coordinator = ForecastCoordinator(
+        repository_factory=factory,
+        collector_config=config,
+        operations_config=ForecastOperationsConfig(enabled=True),
+        health=AppHealth(900),
+        clock=lambda: boundary,
+    )
+    assert coordinator.run_boundary(boundary) is False
+    repository = factory()
+    try:
+        attempt = repository.forecast_operations_status_read_only()["last_attempt"]
+        assert attempt["forecast_point_count"] == 288
+        assert (
+            attempt["failure_summary"]
+            == "DatabaseQueryCanceledError during forecast operation; "
+            "phase=score_forecast_points"
+        )
+    finally:
+        repository.close()

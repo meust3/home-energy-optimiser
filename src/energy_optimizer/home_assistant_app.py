@@ -48,6 +48,8 @@ class HomeAssistantAppOptions(BaseModel):
     sign_convention_confidence: ConfidenceLevel = "unconfirmed"
     sign_convention_supporting_samples: int = Field(default=0, ge=0)
     balance_tolerance_w: float = Field(default=250.0, gt=0)
+    maximum_plausible_pv_power_w: float = Field(default=20000.0, gt=0)
+    goodwe_soc_timestamp_enabled: bool = False
     ev_vehicle_enabled: bool = False
     ev_charging_entity: str = ""
     ev_plugged_entity: str = ""
@@ -214,6 +216,10 @@ def app_environment(
             options.sign_convention_supporting_samples
         ),
         "BALANCE_TOLERANCE_W": str(options.balance_tolerance_w),
+        "MAXIMUM_PLAUSIBLE_PV_POWER_W": str(options.maximum_plausible_pv_power_w),
+        "GOODWE_SOC_TIMESTAMP_ENABLED": str(
+            options.goodwe_soc_timestamp_enabled
+        ).lower(),
         "EV_VEHICLE_ENABLED": str(options.ev_vehicle_enabled).lower(),
         "EV_CHARGING_ENTITY": options.ev_charging_entity.strip(),
         "EV_PLUGGED_ENTITY": options.ev_plugged_entity.strip(),

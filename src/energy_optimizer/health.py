@@ -2,6 +2,7 @@
 
 from datetime import UTC, datetime, timedelta
 from typing import Literal
+from zoneinfo import ZoneInfo
 
 from energy_optimizer import entity_ids as ids
 from energy_optimizer.data_validation import materially_negative_household_demand
@@ -129,6 +130,7 @@ def _telemetry_health(
 ) -> HealthDomain:
     issues: list[HealthIssue] = []
     freshness_statuses: dict[str, str] = {}
+    freshness_evidence: dict[str, dict] = {}
     for entity_id in TELEMETRY_ENTITIES:
         freshness = (
             config.battery_soc_freshness_minutes
@@ -156,6 +158,26 @@ def _telemetry_health(
             ),
             zero_can_be_unchanged=entity_id == ids.GOODWE_PV_POWER,
         )
+        if entity_id == ids.GOODWE_BATTERY_SOC and config.goodwe_soc_timestamp_enabled:
+            status, evidence = _soc_timestamp_status(states, config, current)
+            freshness_statuses[entity_id] = status
+            freshness_evidence[entity_id] = evidence
+            issues = [
+                issue
+                for issue in issues
+                if not (
+                    issue.entity_id == entity_id and issue.code == "source_update_stale"
+                )
+            ]
+            if status == "source_update_stale":
+                issues.append(
+                    _issue(
+                        "source_update_stale",
+                        "GoodWe SOC runtime timestamp is not trustworthy",
+                        entity_id,
+                        warning=True,
+                    )
+                )
     soc_state = states.get(ids.GOODWE_BATTERY_SOC)
     soc = parse_number(soc_state.state) if soc_state else None
     if soc is not None and not 0 <= soc <= 100:
@@ -169,7 +191,12 @@ def _telemetry_health(
     for entity_id in POWER_ENTITIES:
         state = states.get(entity_id)
         power = parse_number(state.state) if state else None
-        if power is not None and abs(power) > config.maximum_plausible_inverter_power_w:
+        limit = (
+            config.maximum_plausible_pv_power_w
+            if entity_id == ids.GOODWE_PV_POWER
+            else config.maximum_plausible_inverter_power_w
+        )
+        if power is not None and abs(power) > limit:
             issues.append(
                 _issue(
                     "implausible_power",
@@ -187,10 +214,71 @@ def _telemetry_health(
                 ids.GOODWE_HOUSE_CONSUMPTION,
             )
         )
-    return _domain(
+    domain = _domain(
         issues,
         ["display", "load_profile", "grid_charge", "battery_export"],
         entity_freshness=freshness_statuses,
+    )
+    domain.entity_freshness_evidence = freshness_evidence
+    return domain
+
+
+def _soc_timestamp_status(
+    states: dict[str, HomeAssistantState], config: CollectorConfig, current: datetime
+) -> tuple[str, dict]:
+    """Use the configured GoodWe runtime-frame clock, never sibling power or REST cache.
+
+    Timestamp and SOC are decoded from the same GoodWe runtime register response.
+    The inverter's naive clock is interpreted in the configured installation zone.
+    Both device time and HA receipt must be fresh; no unchanged grace applies.
+    """
+    soc = states.get(ids.GOODWE_BATTERY_SOC)
+    report = states.get(ids.GOODWE_TIMESTAMP)
+    evidence = {
+        "policy": "goodwe_runtime_timestamp_v1",
+        "source_entity_id": ids.GOODWE_TIMESTAMP,
+        "evaluated_at_utc": current.isoformat(),
+        "source_state": report.state if report else None,
+        "source_last_updated": report.last_updated.isoformat() if report else None,
+        "soc_last_updated": soc.last_updated.isoformat() if soc else None,
+        "timezone": config.timezone,
+        "freshness_minutes": config.battery_soc_freshness_minutes,
+    }
+    basic = _freshness_status(
+        soc, current=current, freshness_minutes=config.battery_soc_freshness_minutes
+    )
+    if basic in {"missing", "unavailable", "unknown", "invalid"}:
+        evidence["reason"] = "soc_unavailable_or_invalid"
+        return basic, evidence
+    if report is None:
+        evidence["reason"] = "runtime_timestamp_missing"
+        return "source_update_stale", evidence
+    try:
+        device_time = datetime.fromisoformat(report.state)
+        if device_time.tzinfo is None:
+            local = device_time.replace(tzinfo=ZoneInfo(config.timezone))
+            if local.utcoffset() != local.replace(fold=1).utcoffset():
+                raise ValueError("ambiguous or nonexistent local time")
+            device_time = local
+    except ValueError:
+        evidence["reason"] = "runtime_timestamp_invalid"
+        return "source_update_stale", evidence
+    device_age = (current - device_time.astimezone(UTC)).total_seconds()
+    receipt_age = (current - report.last_updated.astimezone(UTC)).total_seconds()
+    soc_age = (current - soc.last_updated.astimezone(UTC)).total_seconds()
+    evidence.update(device_age_seconds=device_age, receipt_age_seconds=receipt_age)
+    maximum = config.battery_soc_freshness_minutes * 60
+    if not (
+        -60 <= device_age <= maximum
+        and -60 <= receipt_age <= maximum
+        and soc_age >= -60
+    ):
+        evidence["reason"] = "runtime_timestamp_stale_or_future"
+        return "source_update_stale", evidence
+    evidence["reason"] = "runtime_frame_fresh"
+    return (
+        "available_and_fresh" if soc_age <= maximum else "available_but_unchanged",
+        evidence,
     )
 
 

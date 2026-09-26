@@ -40,6 +40,7 @@ class HealthDomain(BaseModel):
     score: int = Field(ge=0, le=100)
     issues: list[HealthIssue] = Field(default_factory=list)
     required_for: list[HealthUse] = Field(default_factory=list)
+    entity_freshness_evidence: dict[str, dict[str, Any]] = Field(default_factory=dict)
     entity_freshness: dict[
         str,
         Literal[
@@ -281,6 +282,8 @@ class CollectorConfig(BaseModel):
     collection_interval_seconds: int = Field(default=300, gt=0)
     usable_battery_capacity_kwh: float = Field(default=40.0, gt=0)
     maximum_plausible_inverter_power_w: float = Field(default=15000.0, gt=0)
+    maximum_plausible_pv_power_w: float = Field(default=20000.0, gt=0)
+    goodwe_soc_timestamp_enabled: bool = False
     live_power_freshness_minutes: int = Field(default=5, gt=0)
     battery_soc_freshness_minutes: int = Field(default=10, gt=0)
     amber_current_price_freshness_minutes: int = Field(default=10, gt=0)

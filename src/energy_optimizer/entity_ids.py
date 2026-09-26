@@ -20,6 +20,7 @@ GOODWE_PV_POWER = "sensor.outside_back_goodwe_inverter_pv_power"
 GOODWE_HOUSE_CONSUMPTION = "sensor.outside_back_goodwe_inverter_house_consumption"
 GOODWE_GRID_POWER = "sensor.outside_back_goodwe_inverter_meter_active_power_total"
 GOODWE_WORK_MODE = "sensor.outside_back_goodwe_inverter_work_mode"
+GOODWE_TIMESTAMP = "sensor.outside_back_goodwe_inverter_timestamp"
 
 AMBER_ENTITIES = (
     AMBER_IMPORT_PRICE,
@@ -45,5 +46,5 @@ GOODWE_ENTITIES = (
     GOODWE_WORK_MODE,
 )
 REQUIRED_ENTITY_IDS = AMBER_ENTITIES + SOLCAST_REQUIRED_ENTITIES + GOODWE_ENTITIES
-OPTIONAL_ENTITY_IDS = (SOLCAST_POWER_NOW,)
+OPTIONAL_ENTITY_IDS = (SOLCAST_POWER_NOW, GOODWE_TIMESTAMP)
 ALL_ENTITY_IDS = REQUIRED_ENTITY_IDS + OPTIONAL_ENTITY_IDS

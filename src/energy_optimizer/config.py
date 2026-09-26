@@ -79,6 +79,12 @@ def load_config(env_file: Path | None = Path(".env")) -> CollectorConfig:
         maximum_plausible_inverter_power_w=float(
             os.getenv("MAXIMUM_PLAUSIBLE_INVERTER_POWER_W", "15000")
         ),
+        maximum_plausible_pv_power_w=float(
+            os.getenv("MAXIMUM_PLAUSIBLE_PV_POWER_W", "20000")
+        ),
+        goodwe_soc_timestamp_enabled=(
+            os.getenv("GOODWE_SOC_TIMESTAMP_ENABLED", "false").lower() == "true"
+        ),
         live_power_freshness_minutes=int(
             os.getenv("LIVE_POWER_FRESHNESS_MINUTES", "5")
         ),
