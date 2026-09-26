@@ -178,6 +178,7 @@ class ForecastCoordinator:
             return False
         started_monotonic = self.monotonic()
         durable_lock: Any = None
+        phase = "claim"
         forecast_run_id: int | None = None
         forecast_point_count = 0
         try:
@@ -200,10 +201,13 @@ class ForecastCoordinator:
             )
             if attempt_id is None:
                 return False
+            phase = "build_forecast"
             forecast_run = self._build_forecast(repository, started_at)
+            phase = "save_forecast"
             forecast_run_id = repository.save_forecast_run(forecast_run)
             forecast_point_count = len(forecast_run.points)
             self._check_deadline(started_monotonic)
+            phase = "score_forecast_points"
             scored = repository.score_completed_forecast_points(
                 now=started_at,
                 delay_minutes=self.config.scoring_delay_minutes,
@@ -213,6 +217,7 @@ class ForecastCoordinator:
             rollup_result: dict[str, Any] | None = None
             rollup_status: dict[str, Any] | None = None
             try:
+                phase = "refresh_rollups"
                 local_today = started_at.astimezone(
                     ZoneInfo(self.config.timezone)
                 ).date()
@@ -292,6 +297,7 @@ class ForecastCoordinator:
                     )
             reserve_run_id = None
             if self.config.reserve_snapshot_enabled:
+                phase = "estimate_reserve"
                 estimate = estimate_battery_reserve(
                     repository,
                     self.collector_config,
@@ -302,6 +308,7 @@ class ForecastCoordinator:
                 estimate.operational_context["linked_forecast_reconciliation"] = (
                     build_reserve_forecast_reconciliation(estimate, forecast_run)
                 )
+                phase = "save_reserve"
                 reserve_run_id = repository.save_reserve_run(
                     estimate,
                     forecast_run_id=forecast_run_id,
@@ -312,6 +319,7 @@ class ForecastCoordinator:
             decision_run_id = None
             outcome_count = 0
             if self.shadow_config.enabled and reserve_run_id is not None:
+                phase = "shadow_decision"
                 decision_started = self.monotonic()
                 try:
                     forecast_snapshot = repository.forecast_run(forecast_run_id)
@@ -407,6 +415,7 @@ class ForecastCoordinator:
                     successful=False,
                 )
             self._check_deadline(started_monotonic)
+            phase = "finish_audit"
             finished = self.clock().astimezone(UTC)
             duration = self.monotonic() - started_monotonic
             repository.finish_forecast_operation(
@@ -463,7 +472,7 @@ class ForecastCoordinator:
                         duration_seconds=self.monotonic() - started_monotonic,
                         forecast_run_id=forecast_run_id,
                         forecast_point_count=forecast_point_count,
-                        failure_summary=_safe_failure(exc),
+                        failure_summary=f"{_safe_failure(exc)}; phase={phase}",
                     )
                 except Exception:
                     LOGGER.error("Forecast failure audit could not be stored")

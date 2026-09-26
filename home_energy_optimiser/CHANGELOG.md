@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.6.3 - 2026-09-27
+
+- Bounds forecast scoring scans and adds the scoring index in revision `20260927_01`.
+  Stop the App and take a verified backup before the controlled index migration.
+- Separates PV plausibility from AC power limits, with a configurable 20 kW PV default.
+- Adds opt-in GoodWe runtime timestamp evidence for SOC freshness; missing or stale
+  evidence blocks recommendations. Historical freshness evidence is not rewritten.
+- Distinguishes query cancellation, lock timeout and connection failures, and records
+  the failed coordinator phase without exposing SQL or credentials.
+- Preserves HOLD-only operation, disabled retention and read-only hardware access.
+
 ## 0.6.2 - 2026-09-13
 
 - Shows all persisted forecast points even when actuals are missing, and rebuilds

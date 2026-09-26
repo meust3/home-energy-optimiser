@@ -1,5 +1,5 @@
 name: Home Energy Optimiser
-version: "0.6.2"
+version: "0.6.3"
 slug: home_energy_optimiser
 description: Read-only energy dashboard and five-minute PostgreSQL collector
 url: https://github.com/meust3/home-energy-optimiser
@@ -27,6 +27,8 @@ options:
   sign_convention_confidence: unconfirmed
   sign_convention_supporting_samples: 0
   balance_tolerance_w: 250
+  maximum_plausible_pv_power_w: 20000
+  goodwe_soc_timestamp_enabled: false
   ev_vehicle_enabled: false
   ev_charging_entity: ""
   ev_plugged_entity: ""
@@ -77,6 +79,8 @@ schema:
   sign_convention_confidence: list(unconfirmed|low|medium|high)
   sign_convention_supporting_samples: int(0,)
   balance_tolerance_w: float(0.001,)
+  maximum_plausible_pv_power_w: float(0.001,)
+  goodwe_soc_timestamp_enabled: bool
   ev_vehicle_enabled: bool
   ev_charging_entity: str
   ev_plugged_entity: str

@@ -4,7 +4,7 @@ Revision ID: 20260810_01
 """
 
 from alembic import op
-from sqlalchemy import inspect
+from sqlalchemy import MetaData, inspect
 
 from energy_optimizer.db.models import Base
 
@@ -29,9 +29,17 @@ BASELINE_TABLES = {
 def upgrade() -> None:
     """Create a fresh schema; an existing v6 SQLite database must be stamped."""
     connection = op.get_bind()
+    metadata = MetaData()
     tables = [
-        table for table in Base.metadata.sorted_tables if table.name in BASELINE_TABLES
+        table.to_metadata(metadata)
+        for table in Base.metadata.sorted_tables
+        if table.name in BASELINE_TABLES
     ]
+    # New ORM indexes must not leak into an earlier revision or be created twice
+    # during a fresh upgrade. Clone metadata so test/application metadata is intact.
+    for index in list(metadata.tables["forecast_points"].indexes):
+        if index.name != "idx_forecast_points_run_period":
+            metadata.tables["forecast_points"].indexes.remove(index)
     if op.get_context().as_sql:
         for table in tables:
             table.create(connection, checkfirst=False)

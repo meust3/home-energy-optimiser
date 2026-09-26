@@ -20,6 +20,14 @@ class DatabaseTransactionError(DatabaseError):
     """A database transaction failed."""
 
 
+class DatabaseQueryCanceledError(DatabaseTransactionError):
+    """PostgreSQL canceled a query (57014), including statement timeout."""
+
+
+class DatabaseLockTimeoutError(DatabaseTransactionError):
+    """PostgreSQL could not acquire a lock (55P03)."""
+
+
 def create_database_engine(
     database_url: str,
     *,
@@ -67,6 +75,15 @@ def _enable_sqlite_foreign_keys(dbapi_connection, _connection_record) -> None:
 
 def translate_database_error(exc: DBAPIError) -> DatabaseError:
     message = redact_database_urls(exc)
-    if isinstance(exc, OperationalError) or exc.connection_invalidated:
+    sqlstate = getattr(exc.orig, "sqlstate", None)
+    if sqlstate == "57014":
+        return DatabaseQueryCanceledError(message)
+    if sqlstate == "55P03":
+        return DatabaseLockTimeoutError(message)
+    if (
+        exc.connection_invalidated
+        or (isinstance(sqlstate, str) and sqlstate.startswith("08"))
+        or (sqlstate is None and isinstance(exc, OperationalError))
+    ):
         return DatabaseConnectionError(message)
     return DatabaseTransactionError(message)

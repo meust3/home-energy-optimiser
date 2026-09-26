@@ -35,6 +35,12 @@ configuration:
   balance_tolerance_w:
     name: Balance tolerance
     description: Positive watt tolerance used by the unchanged energy-balance check.
+  maximum_plausible_pv_power_w:
+    name: Maximum plausible PV input power
+    description: PV DC input limit in watts, separate from AC output. The GW9.999K-EHA-G20 supports 20000 W PV input.
+  goodwe_soc_timestamp_enabled:
+    name: Verify SOC using the GoodWe runtime clock
+    description: Require a fresh inverter timestamp and Home Assistant receipt. Enable only after verifying the configured inverter clock and local timezone; missing or stale clock evidence blocks recommendations.
   ev_vehicle_enabled:
     name: Enable vehicle telemetry
     description: Read configured vehicle entities without enabling any control action.

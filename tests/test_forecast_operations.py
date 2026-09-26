@@ -156,7 +156,9 @@ def test_runtime_deadline_marks_attempt_failed(tmp_path, config):
     try:
         attempt = repository.forecast_operations_status_read_only()["last_attempt"]
         assert attempt["status"] == "failed"
-        assert attempt["failure_summary"] == "Configured forecast runtime exceeded"
+        assert attempt["failure_summary"] == (
+            "Configured forecast runtime exceeded; phase=save_forecast"
+        )
     finally:
         repository.close()
 
@@ -206,7 +208,9 @@ def test_failure_isolated_from_collector_health(tmp_path, config):
             raise RuntimeError("secret detail")
 
         def finish_forecast_operation(self, *_args, **kwargs):
-            assert kwargs["failure_summary"] == "RuntimeError during forecast operation"
+            assert kwargs["failure_summary"] == (
+                "RuntimeError during forecast operation; phase=build_forecast"
+            )
 
         def close(self):
             return None
@@ -411,7 +415,7 @@ def test_migration_upgrade_downgrade_reupgrade_preserves_observations(tmp_path):
         column["name"] for column in inspect(engine).get_columns("observations")
     }
     command.upgrade(config, "head")
-    assert current_revision(engine) == "20260905_01"
+    assert current_revision(engine) == "20260927_01"
     assert set(inspect(engine).get_table_names()) >= {
         "forecast_point_scores",
         "forecast_operation_attempts",
@@ -430,7 +434,7 @@ def test_migration_upgrade_downgrade_reupgrade_preserves_observations(tmp_path):
     } == legacy_columns
     assert "reserve_runs" not in inspect(engine).get_table_names()
     command.upgrade(config, "head")
-    assert current_revision(engine) == "20260905_01"
+    assert current_revision(engine) == "20260927_01"
 
 
 def test_migration_compiles_reversible_postgresql_ddl():
@@ -475,3 +479,77 @@ def test_no_hardware_or_home_assistant_write_surface():
     coordinator_methods = set(vars(ForecastCoordinator))
     assert not coordinator_methods & {"post", "put", "patch", "delete", "write_modbus"}
     assert ForecastOperationsConfig().enabled is False
+
+
+def test_query_cancellation_audit_preserves_stage_without_error_details(
+    tmp_path, config, monkeypatch
+):
+    from energy_optimizer.db.engine import DatabaseQueryCanceledError
+    from energy_optimizer.db.repository import DatabaseRepository
+
+    path = tmp_path / "canceled.db"
+    factory = _repository_factory(path)
+    boundary = datetime(2026, 8, 11, 2, 30, tzinfo=UTC)
+
+    def cancel(*args, **kwargs):
+        raise DatabaseQueryCanceledError("private SQL and credentials must not appear")
+
+    monkeypatch.setattr(DatabaseRepository, "score_completed_forecast_points", cancel)
+    coordinator = ForecastCoordinator(
+        repository_factory=factory,
+        collector_config=config,
+        operations_config=ForecastOperationsConfig(enabled=True),
+        health=AppHealth(900),
+        clock=lambda: boundary,
+    )
+    assert coordinator.run_boundary(boundary) is False
+    repository = factory()
+    try:
+        attempt = repository.forecast_operations_status_read_only()["last_attempt"]
+        assert attempt["forecast_point_count"] == 288
+        assert (
+            attempt["failure_summary"]
+            == "DatabaseQueryCanceledError during forecast operation; "
+            "phase=score_forecast_points"
+        )
+    finally:
+        repository.close()
+
+
+def test_scoring_batches_keep_older_backlog_without_rescoring(tmp_path, now):
+    repository = DatabaseRepository(create_database_engine(_url(tmp_path / "batch.db")))
+    repository.create_schema_for_tests()
+    start = now - timedelta(days=90)
+    model = ForecastRunModel(
+        created_at_utc=start - timedelta(minutes=30),
+        forecast_type="baseline_household_load",
+        source="test",
+        horizon_start_utc=start,
+        horizon_end_utc=start + timedelta(minutes=30),
+        model_version="test",
+        metadata={"alignment_version": "full_5m_v1"},
+        points=[
+            ForecastPointModel(
+                period_start_utc=start + timedelta(minutes=i),
+                period_end_utc=start + timedelta(minutes=i + 5),
+                expected_value=1000,
+                unit="W",
+            )
+            for i in [20, 0, 10, 5, 15]
+        ],
+    )
+    run_id = repository.save_forecast_run(model)
+    before = repository.forecast_run(run_id)
+    try:
+        for expected in [2, 2, 1, 0]:
+            assert (
+                repository.score_completed_forecast_points(
+                    now=now, delay_minutes=10, limit=2
+                )
+                == expected
+            )
+        assert repository.forecast_run(run_id) == before
+        with Session(repository.engine) as session:
+            assert len(list(session.scalars(select(ForecastPointScore)))) == 5
+    finally:
+        repository.engine.dispose()

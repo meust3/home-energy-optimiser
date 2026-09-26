@@ -843,14 +843,14 @@ def test_v060_sqlite_migration_downgrade_reupgrade_preserves_preexisting_data(tm
     engine = open_repository(url)
     forecast_id, _ = _persist_dependencies(engine)
     command.upgrade(config, "head")
-    assert current_revision(engine.engine) == "20260905_01"
+    assert current_revision(engine.engine) == "20260927_01"
     assert "shadow_decision_runs" in inspect(engine.engine).get_table_names()
     command.downgrade(config, "20260814_01")
     assert current_revision(engine.engine) == "20260814_01"
     assert "shadow_decision_runs" not in inspect(engine.engine).get_table_names()
     assert engine.forecast_run(forecast_id) is not None
     command.upgrade(config, "head")
-    assert current_revision(engine.engine) == "20260905_01"
+    assert current_revision(engine.engine) == "20260927_01"
     assert engine.forecast_run(forecast_id) is not None
     engine.close()
 
