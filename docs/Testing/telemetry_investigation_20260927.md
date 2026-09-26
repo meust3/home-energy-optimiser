@@ -83,7 +83,7 @@ unchanged SOC and clock failures. The option defaults off pending controlled
 deployment. Historical SOC blocks remain unchanged because clock evidence was
 not persisted with them.
 
-## Overnight database failures: still under investigation
+## Overnight database failures: confirmed scoring statement timeouts
 
 Four failures since September 19: September 24 03:00/04:00, September 26 03:00,
 and September 27 05:30 Brisbane. Each saved 288 forecast points, had no linked
@@ -98,27 +98,47 @@ these transaction errors and records the coordinator stage, without exposing SQL
 parameters or exception messages in the operational audit. A real local PostgreSQL
 statement timeout verified the corrected classification.
 
-This explains why the old label is unreliable; it does **not** prove the four
-failures were timeouts. Their SQLSTATE was discarded. The App log says only
-"details withheld". The scoring query scans about 632k points and 625k scores;
-on the restored database its EXPLAIN ANALYZE completed in 154 ms. This is not a
-reproduction of overnight NAS conditions. No timeout increase, speculative index,
-or retry of an uncertain transaction was introduced.
+The signed-in Synology Container Manager log subsequently confirmed all four
+statement timeouts: September 24 03:00:52.864 and 04:00:52.825, September 26
+03:00:54.036, September 27 05:30:52.914 AEST. Matching scoring SELECT statements were found for all four windows; the latest
+full statement matches `score_completed_forecast_points`' historical anti-join
+and its 2,500-row limit.
+Its parallel workers are terminated as a consequence of query cancellation; this
+is not evidence of a database restart or a separate administrator intervention.
 
-Server/container logs for the four windows are needed to identify the actual
-cause. Browser access to the NAS database host's DSM HTTP address was blocked by
-the browser client; a signed-in Container Manager page/address was requested.
-No security bypass was attempted.
+The candidate now materializes a narrow pending-ID batch before loading full
+point/run payloads. It preserves all historical backlog, cutoff, forecast-type
+and score eligibility rules, and orders equal-time points by ID. A covering index
+`idx_forecast_points_scoring(id, period_end_utc, forecast_run_id)` allows the
+historical point scan to avoid fetching every point payload. The index starts
+with ID to support a merge anti-join against the score primary key.
+
+On the restored database, identical 144-row results were verified. The measured
+baseline was 330.291 ms with 25,291 shared blocks read; the candidate was 92.177 ms
+with 3,113 shared blocks read and no temporary blocks. These local measurements
+include different cache states and do not predict NAS latency or prove that
+production will never time out. They demonstrate the intended index-only plan
+and reduced data reads. The actual repository method then scored the same 144
+pending points locally, with zero on a repeated pass (0.416 seconds combined).
+No timeout increase or uncertain-transaction retry was
+introduced. Keep the 30-second statement bound and verify overnight after release.
+
+**New index-only migration `20260927_01` is required for this candidate.** Local
+upgrade, downgrade and re-upgrade preserved counts in all 17 restored tables.
+The baseline migration clones metadata and excludes later forecast-point indexes
+so a fresh install cannot create the new index twice. A normal transactional
+index build can block point writes: stop the App/coordinator during the manual
+migration gate. Production still remains at `20260905_01`; no migration was run
+there. This supersedes the earlier no-schema-change candidate description.
 
 ## Validation and remaining gates
 
-- Full suite with isolated PostgreSQL 17: 396 passed.
-- Subsequent failure-stage, telemetry persistence and App option tests: 95 passed.
+- Final full suite with a fresh isolated PostgreSQL 17 database: 400 passed.
 - Ruff, Black and diff whitespace checks passed.
-- No schema change; application options added with conservative SOC opt-in.
+- Index-only migration rehearsed locally; application options retain SOC opt-in.
 
-Before release: obtain the database error evidence and implement/test any needed
-root-cause fix; review this candidate; exact-tag container validation and App
-discovery; fresh backup/restore and schema comparison; controlled HOLD-only
-deployment with explicit SOC option; then 48-hour observation. No soak or release
+Before release: complete review and exact-tag container validation/App discovery;
+fresh backup/restore and stopped-App manual index migration; controlled HOLD-only
+deployment with explicit SOC option; then 48-hour observation including overnight
+scoring. Validate the new index and confirm the collector resumes. No soak or release
 acceptance is claimed by this document.

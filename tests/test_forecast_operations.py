@@ -208,7 +208,9 @@ def test_failure_isolated_from_collector_health(tmp_path, config):
             raise RuntimeError("secret detail")
 
         def finish_forecast_operation(self, *_args, **kwargs):
-            assert kwargs["failure_summary"] == "RuntimeError during forecast operation"
+            assert kwargs["failure_summary"] == (
+                "RuntimeError during forecast operation; phase=build_forecast"
+            )
 
         def close(self):
             return None
@@ -413,7 +415,7 @@ def test_migration_upgrade_downgrade_reupgrade_preserves_observations(tmp_path):
         column["name"] for column in inspect(engine).get_columns("observations")
     }
     command.upgrade(config, "head")
-    assert current_revision(engine) == "20260905_01"
+    assert current_revision(engine) == "20260927_01"
     assert set(inspect(engine).get_table_names()) >= {
         "forecast_point_scores",
         "forecast_operation_attempts",
@@ -432,7 +434,7 @@ def test_migration_upgrade_downgrade_reupgrade_preserves_observations(tmp_path):
     } == legacy_columns
     assert "reserve_runs" not in inspect(engine).get_table_names()
     command.upgrade(config, "head")
-    assert current_revision(engine) == "20260905_01"
+    assert current_revision(engine) == "20260927_01"
 
 
 def test_migration_compiles_reversible_postgresql_ddl():
@@ -512,3 +514,42 @@ def test_query_cancellation_audit_preserves_stage_without_error_details(
         )
     finally:
         repository.close()
+
+
+def test_scoring_batches_keep_older_backlog_without_rescoring(tmp_path, now):
+    repository = DatabaseRepository(create_database_engine(_url(tmp_path / "batch.db")))
+    repository.create_schema_for_tests()
+    start = now - timedelta(days=90)
+    model = ForecastRunModel(
+        created_at_utc=start - timedelta(minutes=30),
+        forecast_type="baseline_household_load",
+        source="test",
+        horizon_start_utc=start,
+        horizon_end_utc=start + timedelta(minutes=30),
+        model_version="test",
+        metadata={"alignment_version": "full_5m_v1"},
+        points=[
+            ForecastPointModel(
+                period_start_utc=start + timedelta(minutes=i),
+                period_end_utc=start + timedelta(minutes=i + 5),
+                expected_value=1000,
+                unit="W",
+            )
+            for i in [20, 0, 10, 5, 15]
+        ],
+    )
+    run_id = repository.save_forecast_run(model)
+    before = repository.forecast_run(run_id)
+    try:
+        for expected in [2, 2, 1, 0]:
+            assert (
+                repository.score_completed_forecast_points(
+                    now=now, delay_minutes=10, limit=2
+                )
+                == expected
+            )
+        assert repository.forecast_run(run_id) == before
+        with Session(repository.engine) as session:
+            assert len(list(session.scalars(select(ForecastPointScore)))) == 5
+    finally:
+        repository.engine.dispose()

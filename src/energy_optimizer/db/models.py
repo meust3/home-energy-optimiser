@@ -203,6 +203,7 @@ class ForecastPoint(Base):
     metadata_json: Mapped[Any] = mapped_column(JSON_TYPE, nullable=False)
     __table_args__ = (
         Index("idx_forecast_points_run_period", "forecast_run_id", "period_start_utc"),
+        Index("idx_forecast_points_scoring", "id", "period_end_utc", "forecast_run_id"),
     )
 
 

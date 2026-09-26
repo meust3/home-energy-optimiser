@@ -713,21 +713,32 @@ class DatabaseRepository:
             raise ValueError("score limit must be 1-2500")
         cutoff = now.astimezone(UTC) - timedelta(minutes=delay_minutes)
         with self.transaction() as session:
+            # Keep full JSON payloads out of the historical anti-join. The covering
+            # index permits an index-only scan; materialization bounds payload reads
+            # to the selected batch. Include ID for deterministic equal-time batches.
+            pending = (
+                select(ForecastPoint.id, ForecastPoint.period_end_utc)
+                .join(ForecastRun, ForecastRun.id == ForecastPoint.forecast_run_id)
+                .outerjoin(
+                    ForecastPointScore,
+                    ForecastPointScore.forecast_point_id == ForecastPoint.id,
+                )
+                .where(
+                    ForecastPoint.period_end_utc <= cutoff,
+                    ForecastPointScore.forecast_point_id.is_(None),
+                    ForecastRun.forecast_type == "baseline_household_load",
+                )
+                .order_by(ForecastPoint.period_end_utc, ForecastPoint.id)
+                .limit(limit)
+                .cte("pending_forecast_points")
+                .prefix_with("MATERIALIZED", dialect="postgresql")
+            )
             points = list(
                 session.execute(
                     select(ForecastPoint, ForecastRun.metadata_json)
+                    .join(pending, pending.c.id == ForecastPoint.id)
                     .join(ForecastRun, ForecastRun.id == ForecastPoint.forecast_run_id)
-                    .outerjoin(
-                        ForecastPointScore,
-                        ForecastPointScore.forecast_point_id == ForecastPoint.id,
-                    )
-                    .where(
-                        ForecastPoint.period_end_utc <= cutoff,
-                        ForecastPointScore.forecast_point_id.is_(None),
-                        ForecastRun.forecast_type == "baseline_household_load",
-                    )
-                    .order_by(ForecastPoint.period_end_utc)
-                    .limit(limit)
+                    .order_by(pending.c.period_end_utc, pending.c.id)
                 )
             )
             for point, run_metadata in points:
