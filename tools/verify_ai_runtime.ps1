@@ -2,6 +2,7 @@ param(
     [Parameter(Mandatory)][string]$Image,
     [Parameter(Mandatory)][string]$HandoffDirectory,
     [Parameter(Mandatory)][ValidatePattern('^https://')][string]$BaseUrl,
+    [ValidateSet('production', 'test', 'development')][string]$Environment = 'production',
     [Guid]$OperationId = [Guid]::Empty
 )
 $ErrorActionPreference = 'Stop'
@@ -11,6 +12,9 @@ if ((Split-Path $handoffRoot -Leaf) -ne 'home-energy') {
     throw 'Use only the protected home-energy handoff directory'
 }
 if ($Image -notmatch '^sha256:[a-f0-9]{64}$') { throw 'Use an inspected immutable image ID' }
+if ($OperationId -ne [Guid]::Empty -and $Environment -ne 'development') {
+    throw 'Production and test runtime identities permit discovery only'
+}
 $wheels = Join-Path $energyRoot '.local/ai-control-panel/wheels'
 if (-not (Test-Path -LiteralPath $wheels)) { throw 'Prepare the pinned SDK dependency wheels first' }
 $arguments = @('run', '--rm', '--read-only', '--user', '10001:10001',
@@ -19,13 +23,13 @@ $arguments = @('run', '--rm', '--read-only', '--user', '10001:10001',
     '--mount', "type=bind,source=$energyRoot/src,target=/consumer/src,readonly",
     '--mount', "type=bind,source=$energyRoot/tools,target=/consumer/tools,readonly",
     '--mount', "type=bind,source=$wheels,target=/wheels,readonly")
-foreach ($file in @('runtime-development.key', 'ca.crt', 'client.crt', 'client.key')) {
+foreach ($file in @("runtime-$Environment.key", 'ca.crt', 'client.crt', 'client.key')) {
     $source = (Resolve-Path -LiteralPath (Join-Path $handoffRoot $file)).Path
     $arguments += @('--mount', "type=bind,source=$source,target=/run/energy-ai/$file,readonly")
 }
 $arguments += @('-e', 'PYTHONPATH=/consumer/src:/consumer:/tmp/site',
-    '-e', 'ENERGY_AI_ENABLED=true', '-e', 'ENERGY_AI_ENVIRONMENT=development',
-    '-e', "ENERGY_AI_BASE_URL=$BaseUrl", '-e', 'ENERGY_AI_KEY_FILE=/run/energy-ai/runtime-development.key',
+    '-e', 'ENERGY_AI_ENABLED=true', '-e', "ENERGY_AI_ENVIRONMENT=$Environment",
+    '-e', "ENERGY_AI_BASE_URL=$BaseUrl", '-e', "ENERGY_AI_KEY_FILE=/run/energy-ai/runtime-$Environment.key",
     '-e', 'ENERGY_AI_CA_FILE=/run/energy-ai/ca.crt', '-e', 'ENERGY_AI_CERT_FILE=/run/energy-ai/client.crt',
     '-e', 'ENERGY_AI_CERT_KEY_FILE=/run/energy-ai/client.key', '--entrypoint', 'sh', $Image)
 $mode = if ($OperationId -eq [Guid]::Empty) { '--discover' } else { "--decide --operation-id $OperationId" }

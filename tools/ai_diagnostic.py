@@ -14,7 +14,13 @@ from energy_optimizer.ai_integration import AISettings, local_status
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--config", type=Path, help="Explicit Energy-only env file")
+    configuration = parser.add_mutually_exclusive_group()
+    configuration.add_argument(
+        "--config", type=Path, help="Explicit Energy-only env file"
+    )
+    configuration.add_argument(
+        "--app-runtime", action="store_true", help="Use the App's production bundle"
+    )
     actions = parser.add_mutually_exclusive_group()
     actions.add_argument("--discover", action="store_true")
     actions.add_argument(
@@ -27,6 +33,10 @@ def main() -> int:
     if args.decide != (args.operation_id is not None):
         parser.error("--decide requires --operation-id; other modes do not accept it")
     env = dict(os.environ)
+    if args.app_runtime:
+        from energy_optimizer.ai_app import app_ai_environment
+
+        env.update(app_ai_environment())
     if args.config:
         if not args.config.is_file():
             print('{"configuration": "unavailable"}')

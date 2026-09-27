@@ -3,6 +3,7 @@ param(
     [string]$Python,
     [switch]$Inspect,
     [switch]$Probe,
+    [switch]$ApproveDiagnostic,
     [Guid]$OperationId = [Guid]::Empty
 )
 $ErrorActionPreference = 'Stop'
@@ -18,6 +19,9 @@ if ($Probe -and ($OperationId -eq [Guid]::Empty)) {
     throw 'The probe requires an explicit stable OperationId; no automatic retry'
 }
 if ($Probe -and $Inspect) { throw 'Choose Inspect or Probe' }
+if ($ApproveDiagnostic -and -not $Probe) {
+    throw 'Explicit diagnostic approval is limited to the fixed probe'
+}
 # Exact scoped overrides from contract 1.0.0; no global config/auth/routing edits.
 $arguments = @('-C', $repository,
     '-c', "mcp_servers.panel_consumer.command=`"$Python`"",
@@ -28,6 +32,13 @@ $arguments = @('-C', $repository,
     '-c', 'mcp_servers.panel_consumer.required=false',
     '-c', 'mcp_servers.panel_consumer.startup_timeout_sec=10',
     '-c', 'mcp_servers.panel_consumer.tool_timeout_sec=20')
+if ($ApproveDiagnostic) {
+    # Caller explicitly approves this fixed synthetic probe, not general coding.
+    # These overrides exist only in this child process; no shared policy changes.
+    foreach ($tool in @('panel_health', 'panel_capabilities', 'panel_decide')) {
+        $arguments += @('-c', "mcp_servers.panel_consumer.tools.$tool.approval_mode=`"approve`"")
+    }
+}
 if ($Inspect) { $arguments += @('mcp', 'get', 'panel_consumer', '--json') }
 if ($Probe) {
     $evidence = Join-Path $repository '.local/ai-control-panel'

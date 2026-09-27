@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.6.4 - candidate
+
+- Packages the optional shared AI adapter and pinned SDK. No database migration.
+- Loads an administrator-installed production-only mTLS bundle from the App's
+  private data directory. Missing or invalid AI configuration never blocks ingestion.
+- Adds authenticated local AI status and explicit container discovery diagnostics.
+  Production inference remains forbidden by the scoped panel credential.
+- No automatic model calls, new worker, hardware commands or business activation.
+
 ## 0.6.3 - 2026-09-27
 
 - Bounds forecast scoring scans and adds the scoring index in revision `20260927_01`.

@@ -1,7 +1,7 @@
 FROM python:3.12.11-slim-bookworm
 
-ARG BUILD_VERSION=0.6.3
-ARG APP_SOURCE_REF=v0.6.3
+ARG BUILD_VERSION=0.6.4
+ARG APP_SOURCE_REF=v0.6.4
 
 LABEL io.hass.name="Home Energy Optimiser" \
       io.hass.description="Read-only Home Assistant energy dashboard and collector" \
@@ -14,14 +14,14 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PIP_NO_CACHE_DIR=1
 
 RUN apt-get update \
-    && apt-get install --no-install-recommends --yes ca-certificates curl gosu \
+    && apt-get install --no-install-recommends --yes ca-certificates curl git gosu \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /opt/home-energy-optimiser
 RUN curl --fail --location --silent --show-error \
       "https://github.com/meust3/home-energy-optimiser/archive/${APP_SOURCE_REF}.tar.gz" \
       | tar --extract --gzip --strip-components=1 \
-    && python -m pip install . \
+    && python -m pip install '.[ai]' \
     && chmod 0755 home_energy_optimiser/run.sh \
     && rm -rf .git .env .venv data logs captures exports secrets credentials \
       tests docs .pytest_cache .ruff_cache .mypy_cache htmlcov \
@@ -29,7 +29,7 @@ RUN curl --fail --location --silent --show-error \
       -o -name '*.backup' -o -name '*.bak' -o -name '*.sql' -o -name '*.jsonl' \
       -o -name '*.pem' -o -name '*.key' -o -name '*.p12' -o -name '*.pfx' \) \
       -delete \
-    && apt-get purge --auto-remove --yes curl \
+    && apt-get purge --auto-remove --yes curl git \
     && rm -rf /root/.cache
 
 RUN groupadd --gid 10001 app \
