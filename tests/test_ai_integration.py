@@ -116,9 +116,9 @@ def test_success_preserves_typed_value_without_interpreting_as_telemetry():
 def test_status_is_local_and_never_claims_live_verification():
     status = local_status({"ENERGY_AI_ENABLED": "true", "HA_TOKEN": "secret"})
     assert status["enabled"]
-    assert status["connection"] == "handoff_pending"
+    assert status["connection"] == "unconfigured"
     assert status["latest_manual_live_test"] is None
-    assert status["contract_version"] is None
+    assert status["contract_version"] == "1.0.0"
     assert "secret" not in json.dumps(status)
     assert local_status({"ENERGY_AI_ENABLED": "secret"})["configuration"] == "invalid"
 

@@ -1,5 +1,9 @@
 # Energy consumer preparation evidence — 2026-09-27
 
+Historical preparation checkpoint. See the subsequent
+[live development/runtime evidence](ai-control-panel-live-evidence-20260927.md)
+for the now-available contract and actual consumer calls.
+
 This is an isolated Windows consumer test, not a deployed/live AI connection.
 Contract/client version: **none available**. Panel HEAD was checked at discovery
 and once after implementation: `10446b1c5d8b531358bfca766c9bfd042d39c984` both times.

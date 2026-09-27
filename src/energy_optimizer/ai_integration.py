@@ -1,9 +1,4 @@
-"""Optional AI execution boundary, independent of any provider wire contract.
-
-No network implementation or credentials are installed here. A future committed
-SDK adapter must supply a cancellable async operation with validated output and
-bounded transport timeouts. Never call this boundary from the collector.
-"""
+"""Optional AI boundary and local status; never called from the collector."""
 
 from __future__ import annotations
 
@@ -11,9 +6,12 @@ import asyncio
 import math
 import os
 from collections.abc import Awaitable, Callable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import StrEnum
+from importlib.metadata import PackageNotFoundError, version
+from pathlib import Path
 from typing import TypeVar
+from urllib.parse import urlsplit
 
 T = TypeVar("T")
 
@@ -28,6 +26,7 @@ class AIFailure(StrEnum):
     UNAVAILABLE = "unavailable"
     INVALID_RESPONSE = "invalid_response"
     TIMEOUT = "timeout"
+    DUPLICATE = "duplicate_receipt"
 
 
 class AIUnavailable(RuntimeError):
@@ -40,15 +39,47 @@ class AIUnavailable(RuntimeError):
 
 @dataclass(frozen=True)
 class AISettings:
-    """Energy-only policy knobs; deliberately no guessed URL/key/route fields."""
+    """Energy runtime configuration, separate from project Codex credentials."""
 
     enabled: bool = False
     connect_timeout_seconds: float = 2.0
-    read_timeout_seconds: float = 10.0
-    total_timeout_seconds: float = 15.0
+    read_timeout_seconds: float = 8.0
+    total_timeout_seconds: float = 10.0
+    base_url: str | None = field(default=None, repr=False)
+    key_file: Path | None = field(default=None, repr=False)
+    environment: str = "production"
+    ca_file: Path | None = field(default=None, repr=False)
+    cert_file: Path | None = field(default=None, repr=False)
+    cert_key_file: Path | None = field(default=None, repr=False)
+    status_file: Path | None = field(default=None, repr=False)
 
     def __post_init__(self) -> None:
         if type(self.enabled) is not bool:
+            raise ValueError("Invalid Energy AI configuration")
+        if self.environment not in {"development", "test", "production"}:
+            raise ValueError("Invalid Energy AI configuration")
+        if bool(self.base_url) != bool(self.key_file):
+            raise ValueError("Invalid Energy AI configuration")
+        if self.base_url:
+            try:
+                url = urlsplit(self.base_url)
+                allowed = url.scheme == "https" or (
+                    url.scheme == "http" and url.hostname in {"127.0.0.1", "localhost"}
+                )
+                if (
+                    not allowed
+                    or not url.hostname
+                    or url.username
+                    or url.password
+                    or url.query
+                    or url.fragment
+                    or url.path not in {"", "/"}
+                ):
+                    raise ValueError()
+                _ = url.port
+            except ValueError:
+                raise ValueError("Invalid Energy AI configuration") from None
+        if bool(self.cert_file) != bool(self.cert_key_file):
             raise ValueError("Invalid Energy AI configuration")
         for value in (
             self.connect_timeout_seconds,
@@ -73,17 +104,29 @@ class AISettings:
         if enabled not in {"true", "false"}:
             raise ValueError("Invalid Energy AI configuration")
         try:
+
+            def path(name: str) -> Path | None:
+                value = source.get(name, "").strip()
+                return Path(value) if value else None
+
             return cls(
                 enabled=enabled == "true",
                 connect_timeout_seconds=float(
                     source.get("ENERGY_AI_CONNECT_TIMEOUT_SECONDS", "2")
                 ),
                 read_timeout_seconds=float(
-                    source.get("ENERGY_AI_READ_TIMEOUT_SECONDS", "10")
+                    source.get("ENERGY_AI_READ_TIMEOUT_SECONDS", "8")
                 ),
                 total_timeout_seconds=float(
-                    source.get("ENERGY_AI_TOTAL_TIMEOUT_SECONDS", "15")
+                    source.get("ENERGY_AI_TOTAL_TIMEOUT_SECONDS", "10")
                 ),
+                base_url=source.get("ENERGY_AI_BASE_URL", "").strip() or None,
+                key_file=path("ENERGY_AI_KEY_FILE"),
+                environment=source.get("ENERGY_AI_ENVIRONMENT", "production"),
+                ca_file=path("ENERGY_AI_CA_FILE"),
+                cert_file=path("ENERGY_AI_CERT_FILE"),
+                cert_key_file=path("ENERGY_AI_CERT_KEY_FILE"),
+                status_file=path("ENERGY_AI_STATUS_FILE"),
             )
         except (ValueError, TypeError):
             raise ValueError("Invalid Energy AI configuration") from None
@@ -131,11 +174,19 @@ def local_status(env: Mapping[str, str] | None = None) -> dict[str, object]:
         settings = AISettings.from_environment(env)
     except ValueError:
         settings = None
-    return {
+    try:
+        sdk_version = version("ai-control-panel-client")
+    except PackageNotFoundError:
+        sdk_version = None
+    result = {
         "configuration": "valid" if settings is not None else "invalid",
         "enabled": settings.enabled if settings is not None else False,
-        "connection": "handoff_pending",
-        "contract_version": None,
+        "connection": (
+            "configured" if settings and settings.base_url else "unconfigured"
+        ),
+        "contract_version": "1.0.0",
+        "sdk_version": sdk_version,
+        "sdk_expected_version": "1.0.1",
         "transport_authentication": "unverified",
         "capability_permissions": "unverified",
         "worker_health": "unverified",
@@ -145,3 +196,16 @@ def local_status(env: Mapping[str, str] | None = None) -> dict[str, object]:
         "paid_calls_enabled": False,
         "hardware_commands_enabled": False,
     }
+    if settings and settings.status_file:
+        from energy_optimizer.ai_panel import read_status
+
+        result["last_explicit_check"] = read_status(settings)
+        snapshot = (
+            read_status(settings, diagnostic=True) or result["last_explicit_check"]
+        )
+        if snapshot and snapshot["local_diagnostic"] == "shadow":
+            result["latest_manual_live_test"] = {
+                k: snapshot[k]
+                for k in ("checked_at", "trace_id", "event_id", "environment", "caller")
+            }
+    return result
