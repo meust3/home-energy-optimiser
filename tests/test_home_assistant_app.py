@@ -595,7 +595,8 @@ def test_app_patch_versions_are_consistent():
     assert APP_VERSION == "0.6.4"
     assert 'version: "0.6.4"' in manifest
     assert "ARG BUILD_VERSION=0.6.4" in dockerfile
-    assert "ARG APP_SOURCE_REF=v0.6.4" in dockerfile
+    assert re.search(r"ARG APP_SOURCE_REF=[a-f0-9]{40}\b", dockerfile)
+    assert 'org.opencontainers.image.revision="${APP_SOURCE_REF}"' in dockerfile
     assert 'version = "0.6.4"' in project
 
 

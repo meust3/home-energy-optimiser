@@ -1,5 +1,9 @@
 # Energy AI consumer verification — 27 September 2026
 
+Historical development evidence. The later fresh Codex success, production-slot
+readiness and candidate packaging are recorded in
+[candidate acceptance](ai-control-panel-candidate-evidence-20260927.md).
+
 This work follows preparation commit `7aaa687`. It connects the actual Energy
 Python adapter in development and verifies it in an isolated copy of the production
 App image. **It does not deploy the adapter to the NUC, and it does not claim a
