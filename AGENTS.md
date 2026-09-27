@@ -1,5 +1,15 @@
 # Home Energy Optimiser
 
+## Shared AI integration
+
+See `docs/integrations/ai-control-panel.md` for readiness and the contract gate.
+Future app AI features must use the shared adapter, not provider-specific calls
+or duplicate workers. Local decisions are explicit optional diagnostics, never a
+mandatory coding/test step. Prefer normal code for exact checks/calculations.
+Consult published capabilities for new features, not every turn. Handle unknown,
+offline and disabled routes honestly without fallback or fabricated results.
+Never send production household data or hardware commands through this integration.
+
 ## Project objective
 
 Build a safe, explainable home energy optimisation platform using:

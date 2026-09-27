@@ -1,5 +1,13 @@
 # Home Energy Optimiser
 
+Version 0.6.4 adds optional shared AI infrastructure. It uses the same database
+revision as 0.6.3; do not run a migration for this update. Core collection and
+calculation remain independent of AI. The connection defaults off unless an
+administrator installs the Energy-only production bundle in private App storage.
+See `docs/integrations/ai-control-panel.md` in the repository for the protected
+file layout, explicit readiness command, deployment gates and evidence. The App
+never calls a model on startup, from the dashboard or from its watchdog.
+
 Version 0.6.1 corrects observed outcome accounting and appends scoring v2. HOLD
 comparisons, hindsight, regret and simulated reserve safety remain unavailable
 until a counterfactual model is validated. Existing v1 rows remain audit-only.
