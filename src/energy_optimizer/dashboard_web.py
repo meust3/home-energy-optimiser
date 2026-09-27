@@ -14,6 +14,7 @@ from pathlib import Path, PurePosixPath
 from typing import Any
 from urllib.parse import parse_qs, urlsplit
 
+from energy_optimizer.ai_integration import local_status
 from energy_optimizer.dashboard_api import DashboardQueryError, DashboardService
 
 LOGGER = logging.getLogger(__name__)
@@ -202,7 +203,11 @@ def make_handler(
 
         def _api(self, route: str) -> None:
             params = parse_qs(urlsplit(self.path).query, keep_blank_values=True)
-            if route == "/api/v1/status":
+            if route == "/api/v1/ai/status":
+                self._require_params(params, set())
+                self._json(HTTPStatus.OK, local_status(), cache="no-store")
+                return
+            elif route == "/api/v1/status":
                 self._require_params(params, set())
                 response = service.status()
             elif route == "/api/v1/live":
