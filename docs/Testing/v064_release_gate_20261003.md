@@ -1,5 +1,10 @@
 # v0.6.4 solar forecast release gate - 3 October 2026
 
+This preparation receipt records the initial gate state. Subsequent CI, Docker
+recovery, backup/restore and controlled production update evidence is recorded in
+[v0.6.4 production acceptance](v064_production_acceptance_20261003.md).
+The pending statements below describe preparation time, not current deployment.
+
 Scope: retain bounded Solcast half-hour forecast detail, add an explicit offline
 morning-export diagnostic and replay. No schema change, reserve change, new
 scheduler, executor, recommendation activation or retention activation.
