@@ -7,7 +7,8 @@ LABEL io.hass.name="Home Energy Optimiser" \
       io.hass.description="Read-only Home Assistant energy dashboard and collector" \
       io.hass.type="app" \
       io.hass.version="${BUILD_VERSION}" \
-      io.hass.arch="amd64"
+      io.hass.arch="amd64" \
+      org.opencontainers.image.revision="${APP_SOURCE_REF}"
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
