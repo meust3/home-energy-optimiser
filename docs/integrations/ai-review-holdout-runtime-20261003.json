@@ -1,0 +1,13 @@
+{
+  "suite": "holdout",
+  "panel_process": "isolated uvicorn loopback",
+  "database": "ai_control_panel_test",
+  "backend": "real shared local GPU worker",
+  "consumer": "Energy CLI process with pinned SDK",
+  "ledger_verified": true,
+  "fixture_events": 48,
+  "cli_exit": 2,
+  "operation_id": "2f7cd807-0448-4c8d-8c74-b34516b11e9d",
+  "production_deployed": false,
+  "paid_calls": 0
+}
