@@ -16,6 +16,7 @@ from energy_optimizer.ai_review import offline_report, run_replay
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", type=Path)
+    parser.add_argument("--suite", choices=["pilot", "holdout"], default="pilot")
     parser.add_argument(
         "--run", action="store_true", help="Explicit local synthetic replay"
     )
@@ -41,9 +42,15 @@ def main() -> int:
                 }
             )
         report = (
-            asyncio.run(run_replay(AISettings.from_environment(env), args.operation_id))
+            asyncio.run(
+                run_replay(
+                    AISettings.from_environment(env),
+                    args.operation_id,
+                    suite=args.suite,
+                )
+            )
             if args.run
-            else offline_report()
+            else offline_report(args.suite)
         )
         text = json.dumps(report, indent=2) + "\n"
         if args.output:

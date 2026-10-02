@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from datetime import UTC, datetime
 from time import perf_counter
 from typing import Literal
@@ -12,14 +13,18 @@ from pydantic import BaseModel, ConfigDict, Field
 from energy_optimizer.ai_integration import AISettings, AIUnavailable
 
 TASK_CONTRACT_COMMIT = "4c821193f4c406ddedcc077fd29459e3c435c98d"
+HOLDOUT_CONTRACT_COMMIT = "2aa746e42b6acea0515b099c5ba2ec986e925fc1"
 
 
 class ReviewCapability(BaseModel):
     model_config = ConfigDict(extra="ignore", strict=True)
 
     task: Literal["battery-decision-review"]
-    task_version: Literal["1.0.0"]
-    path: Literal["/v1/integration/tasks/battery-review"]
+    task_version: Literal["1.0.0", "1.1.0"]
+    path: Literal[
+        "/v1/integration/tasks/battery-review",
+        "/v1/integration/tasks/battery-review-holdout",
+    ]
     mode: Literal["synthetic_shadow"]
     dataset_sha256: str
     authorised: bool
@@ -35,6 +40,8 @@ class CaseResult(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
     case_id: str
+    stratum: Literal["pilot", "numeric", "narrative"] = "pilot"
+    label_source: str = "pilot_specification"
     operation_id: str | None = None
     expected: str
     baseline: str
@@ -57,24 +64,38 @@ class CaseResult(BaseModel):
     model_revision: str | None = None
 
 
-def dataset() -> tuple[dict, str]:
+def task_dataset(suite: Literal["pilot", "holdout"] = "pilot"):
     """Load only the pinned provider package, not a mutable sibling repository."""
     import panel_client
-    from panel_energy_review import CASES, DATASET_HASH
 
-    if panel_client.__version__ != "1.0.2":
-        raise ValueError("Synthetic review requires pinned SDK 1.0.2")
-    return CASES, DATASET_HASH
+    if suite == "holdout":
+        if panel_client.__version__ != "1.0.3":
+            raise ValueError("Holdout requires pinned SDK 1.0.3")
+        import panel_energy_review_holdout as data
+    elif suite == "pilot":
+        if panel_client.__version__ not in {"1.0.2", "1.0.3"}:
+            raise ValueError("Synthetic review requires the pinned task SDK")
+        import panel_energy_review as data
+    else:
+        raise ValueError("Unknown synthetic suite")
+    return data
 
 
-def offline_report() -> dict:
-    from panel_energy_review import baseline
+def dataset(suite: Literal["pilot", "holdout"] = "pilot") -> tuple[dict, str]:
+    data = task_dataset(suite)
+    return data.CASES, data.DATASET_HASH
 
-    cases, digest = dataset()
+
+def offline_report(suite: Literal["pilot", "holdout"] = "pilot") -> dict:
+    data = task_dataset(suite)
+    baseline = data.baseline
+    cases, digest = dataset(suite)
     return make_report(
         [
             CaseResult(
                 case_id=case_id,
+                stratum=case.get("stratum", "pilot"),
+                label_source=case.get("label_source", "pilot_specification"),
                 expected=case["expected"],
                 baseline=baseline(case_id),
                 baseline_correct=baseline(case_id) == case["expected"],
@@ -84,16 +105,40 @@ def offline_report() -> dict:
         ],
         digest,
         None,
+        suite=suite,
     )
 
 
-def make_report(rows: list[CaseResult], digest: str, operation_id: UUID | None) -> dict:
+def make_report(
+    rows: list[CaseResult],
+    digest: str,
+    operation_id: UUID | None,
+    *,
+    suite: Literal["pilot", "holdout"] = "pilot",
+) -> dict:
     completed = [row for row in rows if row.status == "shadow"]
+    strata = {}
+    for stratum in sorted({row.stratum for row in rows}):
+        members = [row for row in rows if row.stratum == stratum]
+        strata[stratum] = {
+            "cases": len(members),
+            "baseline_correct": sum(row.baseline_correct for row in members),
+            "model_completed": sum(row.status == "shadow" for row in members),
+            "model_correct": sum(row.model_correct is True for row in members),
+            "false_supported": sum(
+                row.model_review == "supported" and row.expected != "supported"
+                for row in members
+            ),
+        }
     return {
         "checked_at": datetime.now(UTC).isoformat(),
         "task": "battery-decision-review",
-        "task_version": "1.0.0",
-        "task_contract_commit": TASK_CONTRACT_COMMIT,
+        "task_version": task_dataset(suite).VERSION,
+        "suite": suite,
+        "strata": strata,
+        "task_contract_commit": (
+            HOLDOUT_CONTRACT_COMMIT if suite == "holdout" else TASK_CONTRACT_COMMIT
+        ),
         "dataset_sha256": digest,
         "operation_id": str(operation_id) if operation_id else None,
         "mode": "synthetic_development_replay",
@@ -127,19 +172,31 @@ def make_report(rows: list[CaseResult], digest: str, operation_id: UUID | None) 
     }
 
 
-async def run_replay(settings: AISettings, operation_id: UUID, *, adapter=None) -> dict:
-    from panel_energy_review import baseline, checked_result
-
+async def run_replay(
+    settings: AISettings,
+    operation_id: UUID,
+    *,
+    adapter=None,
+    suite: Literal["pilot", "holdout"] = "pilot",
+) -> dict:
     from energy_optimizer.ai_panel import EnergyPanelAdapter
 
-    cases, digest = dataset()
+    data = task_dataset(suite)
+    baseline = data.baseline
+    checked_result = (
+        data.checked_holdout_result if suite == "holdout" else data.checked_result
+    )
+    cases, digest = dataset(suite)
     adapter = adapter or EnergyPanelAdapter(settings)
     rows = []
+    run_started = perf_counter()
     for case_id, case in cases.items():
         # A caller retains the root ID; uncertain cases never receive new IDs on rerun.
         case_operation = uuid5(operation_id, f"battery-review-v1:{digest}:{case_id}")
         fields = dict(
             case_id=case_id,
+            stratum=case.get("stratum", "pilot"),
+            label_source=case.get("label_source", "pilot_specification"),
             operation_id=str(case_operation),
             expected=case["expected"],
             baseline=baseline(case_id),
@@ -147,7 +204,17 @@ async def run_replay(settings: AISettings, operation_id: UUID, *, adapter=None) 
         )
         started = perf_counter()
         try:
-            value = await adapter.review_synthetic_case(case_id, case_operation)
+            remaining = 120 - (perf_counter() - run_started)
+            if remaining <= 0:
+                raise TimeoutError()
+            async with asyncio.timeout(remaining):
+                value = (
+                    await adapter.review_synthetic_case(
+                        case_id, case_operation, suite="holdout"
+                    )
+                    if suite == "holdout"
+                    else await adapter.review_synthetic_case(case_id, case_operation)
+                )
             if value.get("case_id") != case_id:
                 raise ValueError("Wrong case receipt")
             checked_result(value, str(case_operation))
@@ -155,16 +222,17 @@ async def run_replay(settings: AISettings, operation_id: UUID, *, adapter=None) 
             answer = (
                 value.get("answers", {}).get("review", {}) if status == "shadow" else {}
             )
+            floor = (
+                data.hard_review_floor(case_id)
+                if suite == "holdout"
+                else baseline(case_id)
+            )
             result = CaseResult(
                 **fields,
                 status=status,
                 model_review=answer.get("choice"),
                 review_disposition=(
-                    (
-                        baseline(case_id)
-                        if baseline(case_id) != "supported"
-                        else answer.get("choice")
-                    )
+                    (floor if floor != "supported" else answer.get("choice"))
                     if status == "shadow"
                     else None
                 ),
@@ -184,6 +252,10 @@ async def run_replay(settings: AISettings, operation_id: UUID, *, adapter=None) 
             )
         except AIUnavailable as exc:
             result = CaseResult(**fields, status="failed", failure=exc.reason.value)
+        except TimeoutError:
+            result = CaseResult(
+                **fields, status="failed", failure="evaluation_deadline"
+            )
         except (ValueError, KeyError, TypeError):
             result = CaseResult(**fields, status="failed", failure="invalid_response")
         result.elapsed_ms = round((perf_counter() - started) * 1000, 3)
@@ -191,7 +263,20 @@ async def run_replay(settings: AISettings, operation_id: UUID, *, adapter=None) 
         # Stop after a failed request; do not repeat a discovery/transport failure.
         if result.status == "failed":
             break
-    report = make_report(rows, digest, operation_id)
+    report = make_report(rows, digest, operation_id, suite=suite)
     report["dataset_cases"] = len(cases)
     report["not_attempted"] = len(cases) - len(rows)
+    report["false_supported"] = sum(
+        item["false_supported"] for item in report["strata"].values()
+    )
+    report["model_gate_passed"] = (
+        report["model_completed"] == len(cases)
+        and report["false_supported"] == 0
+        and all(
+            item["model_correct"] >= item["baseline_correct"]
+            for item in report["strata"].values()
+        )
+    )
+    report["independent_expert_label_review"] = "pending"
+    report["activation_gate_passed"] = False
     return report

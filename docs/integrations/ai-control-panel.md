@@ -1,5 +1,10 @@
 # Shared AI infrastructure
 
+Expanded evaluation on 3 October 2026: SDK 1.0.3/task 1.1.0 freeze a separate 48-case
+synthetic set. Actual model execution matched 16/48 labels versus 44/48 rule labels,
+with 20 false-supported results. The predeclared quality gate failed; production
+and active routing remain disabled. See [expanded evidence](ai-review-holdout-20261003.md).
+
 Update on 3 October 2026: an explicit synthetic battery-review pilot is implemented
 with the additive panel task contract and pinned SDK 1.0.2. A real local replay
 through an isolated panel/test database matched 7/8 review labels versus an 8/8

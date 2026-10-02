@@ -23,7 +23,7 @@ from energy_optimizer.ai_integration import (
 )
 
 CONTRACT_COMMIT = "436b04c50514487f9558d67c93facd0998e2f8a6"
-SDK_COMMIT = "4c821193f4c406ddedcc077fd29459e3c435c98d"
+SDK_COMMIT = "2aa746e42b6acea0515b099c5ba2ec986e925fc1"
 T = TypeVar("T")
 
 
@@ -33,6 +33,9 @@ class PanelSession(Protocol):
     async def health(self) -> dict[str, Any]: ...
     async def capabilities(self) -> dict[str, Any]: ...
     async def review_battery_case(
+        self, case_id: str, *, operation_id: str
+    ) -> dict[str, Any]: ...
+    async def review_battery_holdout_case(
         self, case_id: str, *, operation_id: str
     ) -> dict[str, Any]: ...
     async def decide(
@@ -98,7 +101,7 @@ class DiagnosticReport(BaseModel):
     checked_at: datetime
     configuration_hash: str = Field(pattern=r"^[a-f0-9]{64}$")
     contract_version: Literal["1.0.0"] = "1.0.0"
-    sdk_version: Literal["1.0.1", "1.0.2"] = "1.0.1"
+    sdk_version: Literal["1.0.1", "1.0.2", "1.0.3"] = "1.0.1"
     project: Literal["home-energy"] = "home-energy"
     caller: Literal["application_backend"] = "application_backend"
     environment: Literal["development", "test", "production"]
@@ -183,7 +186,7 @@ async def sdk_client(settings: AISettings) -> PanelSession:
     import httpx
     import panel_client
 
-    if panel_client.__version__ not in {"1.0.1", "1.0.2"}:
+    if panel_client.__version__ not in {"1.0.1", "1.0.2", "1.0.3"}:
         raise AIUnavailable(AIFailure.UNAVAILABLE)
     if not settings.key_file or not settings.base_url:
         raise AIUnavailable(AIFailure.HANDOFF_PENDING)
@@ -281,7 +284,11 @@ class EnergyPanelAdapter:
         return await self.boundary.run_manual(operation)
 
     async def _discover_with_client(
-        self, client: PanelSession, *, require_review_task: bool = False
+        self,
+        client: PanelSession,
+        *,
+        require_review_task: bool = False,
+        review_suite: Literal["pilot", "holdout"] = "pilot",
     ) -> DiagnosticReport:
         health = Health.model_validate(await client.health())
         catalogue = Catalogue.model_validate(await client.capabilities())
@@ -299,19 +306,23 @@ class EnergyPanelAdapter:
         if type(ready) is not bool:
             raise AIUnavailable(AIFailure.INVALID_RESPONSE)
         if require_review_task:
-            from panel_energy_review import DATASET_HASH
+            from energy_optimizer.ai_review import ReviewCapability, task_dataset
 
-            from energy_optimizer.ai_review import ReviewCapability
+            review_data = task_dataset(review_suite)
 
             tasks = [
                 item
                 for item in catalogue.tasks
                 if item.get("task") == "battery-decision-review"
+                and item.get("task_version") == review_data.VERSION
             ]
             if len(tasks) != 1:
                 raise AIUnavailable(AIFailure.HANDOFF_PENDING)
             task = ReviewCapability.model_validate(tasks[0])
-            if task.dataset_sha256 != DATASET_HASH:
+            if (
+                task.dataset_sha256 != review_data.DATASET_HASH
+                or task.path != review_data.PATH
+            ):
                 raise AIUnavailable(AIFailure.INVALID_RESPONSE)
             if not task.authorised or not task.policy_enabled:
                 raise AIUnavailable(AIFailure.POLICY_DENIED)
@@ -335,21 +346,32 @@ class EnergyPanelAdapter:
         return await self._execute(self._discover_with_client)
 
     async def review_synthetic_case(
-        self, case_id: str, operation_id: UUID
+        self,
+        case_id: str,
+        operation_id: UUID,
+        *,
+        suite: Literal["pilot", "holdout"] = "pilot",
     ) -> dict[str, Any]:
         """Explicit published fixture only; no household input or model selection."""
         if self.settings.environment != "development":
             raise AIUnavailable(AIFailure.POLICY_DENIED)
 
         async def action(client: PanelSession) -> dict[str, Any]:
-            report = await self._discover_with_client(client, require_review_task=True)
+            report = await self._discover_with_client(
+                client, require_review_task=True, review_suite=suite
+            )
             if not report.permission or not report.policy_enabled or report.paused:
                 raise AIUnavailable(AIFailure.POLICY_DENIED)
             if not report.worker_ready:
                 raise AIUnavailable(AIFailure.UNAVAILABLE)
-            if not hasattr(client, "review_battery_case"):
+            method_name = (
+                "review_battery_holdout_case"
+                if suite == "holdout"
+                else "review_battery_case"
+            )
+            if not hasattr(client, method_name):
                 raise AIUnavailable(AIFailure.HANDOFF_PENDING)
-            return await client.review_battery_case(
+            return await getattr(client, method_name)(
                 case_id, operation_id=str(operation_id)
             )
 

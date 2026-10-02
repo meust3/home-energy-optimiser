@@ -21,7 +21,7 @@ dependencies = [
 
 [project.optional-dependencies]
 ai = [
-    "ai-control-panel-client @ git+https://github.com/meust3/AI_Control_Planel.git@4c821193f4c406ddedcc077fd29459e3c435c98d#subdirectory=packages/client-python",
+    "ai-control-panel-client @ git+https://github.com/meust3/AI_Control_Planel.git@2aa746e42b6acea0515b099c5ba2ec986e925fc1#subdirectory=packages/client-python",
 ]
 dev = [
     "black>=24.0",
