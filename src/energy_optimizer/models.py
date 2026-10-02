@@ -142,6 +142,16 @@ class AmberPriceInterval(BaseModel):
     spike_status: str | bool | None = None
 
 
+class SolarForecastInterval(BaseModel):
+    """Allowlisted Solcast detailedForecast power, never an invented solar curve."""
+
+    period_start_utc: datetime
+    period_end_utc: datetime
+    estimate_kw: float | None = None
+    estimate10_kw: float | None = None
+    estimate90_kw: float | None = None
+
+
 class SolarForecastSummary(BaseModel):
     """Solcast energy summary normalized to kWh with its source preserved."""
 
@@ -155,6 +165,8 @@ class SolarForecastSummary(BaseModel):
     conversion_status: Literal[
         "native_kwh", "converted_from_wh", "unit_missing", "unit_unsupported"
     ]
+    intervals: list[SolarForecastInterval] = Field(default_factory=list)
+    interval_issues: list[str] = Field(default_factory=list)
 
 
 class LoadProfilePoint(BaseModel):

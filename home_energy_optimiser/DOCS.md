@@ -1,5 +1,13 @@
 # Home Energy Optimiser
 
+Version 0.6.4 retains the existing schema `20260927_01`; no migration is
+required from a running v0.6.3 installation. It preserves Solcast half-hourly
+P10/P50/P90 forecasts in observation JSON and adds an explicit offline morning
+export diagnostic. Production recommendations remain HOLD-only, retention stays
+disabled, and no hardware control or scheduled export planner is introduced.
+Take a fresh backup and validate its isolated restore before a controlled update.
+Older migration instructions below apply only to their named releases.
+
 Version 0.6.1 corrects observed outcome accounting and appends scoring v2. HOLD
 comparisons, hindsight, regret and simulated reserve safety remain unavailable
 until a counterfactual model is validated. Existing v1 rows remain audit-only.

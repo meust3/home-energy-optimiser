@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.6.4 - 2026-10-03
+
+- Retains allowlisted Solcast half-hour P10/P50/P90 power forecasts in existing
+  observation JSON for time-based recharge analysis; no schema migration.
+- Adds an explicit offline morning-export planner and replay tool with linked
+  reserve, calibration, power, recharge and economic gates. No scheduled activation.
+- Keeps HOLD-only production recommendations, retention disabled, and GET-only
+  hardware access. The reserve estimator is unchanged; hardware controls remain absent.
+- Historical snapshots without interval solar or export/discharge limits remain
+  blocked; model comparisons are not measured savings.
+
 ## 0.6.3 - 2026-09-27
 
 - Bounds forecast scoring scans and adds the scoring index in revision `20260927_01`.
