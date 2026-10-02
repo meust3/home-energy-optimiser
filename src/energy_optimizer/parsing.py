@@ -1,11 +1,12 @@
 """Safe conversion of Home Assistant string and attribute values."""
 
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from energy_optimizer.models import (
     AmberPriceInterval,
     HomeAssistantState,
+    SolarForecastInterval,
     SolarForecastSummary,
 )
 
@@ -117,6 +118,7 @@ def parse_solar_summary(
     def to_kwh(value: float | None) -> float | None:
         return None if value is None or factor is None else value * factor
 
+    intervals, interval_issues = parse_solar_intervals(attrs.get("detailedForecast"))
     return SolarForecastSummary(
         estimate_kwh=to_kwh(source_estimate),
         estimate10_kwh=to_kwh(source_estimate10),
@@ -126,4 +128,65 @@ def parse_solar_summary(
         source_estimate90=source_estimate90,
         source_unit=source_unit,
         conversion_status=conversion_status,
+        intervals=intervals,
+        interval_issues=interval_issues,
     )
+
+
+def parse_solar_intervals(
+    detail: Any,
+) -> tuple[list[SolarForecastInterval], list[str]]:
+    """BJReplay detailedForecast has half-hour average kW, independent of total unit.
+
+    Missing or malformed optional detail cannot affect core telemetry health.
+    Do not use hourly/site-specific arrays, duplicate them, or replace missing P10.
+    """
+    if detail is None:
+        return [], []
+    if not isinstance(detail, list) or len(detail) > 96:
+        return [], ["solar_interval_payload_invalid"]
+    intervals = []
+    issues = []
+    previous_end = None
+    for item in detail:
+        if not isinstance(item, dict):
+            issues.append("solar_interval_invalid")
+            continue
+        try:
+            start = datetime.fromisoformat(str(item.get("period_start")))
+            if start.tzinfo is None or start.utcoffset() is None:
+                raise ValueError("timezone required")
+            start = start.astimezone(UTC)
+        except (TypeError, ValueError):
+            issues.append("solar_interval_timestamp_invalid")
+            continue
+        end = start + timedelta(minutes=30)
+        if previous_end is not None and start != previous_end:
+            issues.append("solar_interval_gap_or_overlap")
+        previous_end = end
+        values = [
+            parse_number(item.get(key))
+            for key in ("pv_estimate", "pv_estimate10", "pv_estimate90")
+        ]
+        if any(value is not None and value < 0 for value in values):
+            issues.append("solar_interval_power_invalid")
+            values = [
+                None if value is not None and value < 0 else value for value in values
+            ]
+        p50, p10, p90 = values
+        if p10 is None:
+            issues.append("solar_interval_p10_missing")
+        if (p10 is not None and p50 is not None and p10 > p50) or (
+            p50 is not None and p90 is not None and p50 > p90
+        ):
+            issues.append("solar_interval_uncertainty_invalid")
+        intervals.append(
+            SolarForecastInterval(
+                period_start_utc=start,
+                period_end_utc=end,
+                estimate_kw=p50,
+                estimate10_kw=p10,
+                estimate90_kw=p90,
+            )
+        )
+    return intervals, sorted(set(issues))

@@ -592,11 +592,11 @@ def test_app_patch_versions_are_consistent():
     manifest = Path("home_energy_optimiser/config.yaml").read_text(encoding="utf-8")
     dockerfile = Path("home_energy_optimiser/Dockerfile").read_text(encoding="utf-8")
     project = Path("pyproject.toml").read_text(encoding="utf-8")
-    assert APP_VERSION == "0.6.3"
-    assert 'version: "0.6.3"' in manifest
-    assert "ARG BUILD_VERSION=0.6.3" in dockerfile
-    assert "ARG APP_SOURCE_REF=v0.6.3" in dockerfile
-    assert 'version = "0.6.3"' in project
+    assert APP_VERSION == "0.6.4"
+    assert 'version: "0.6.4"' in manifest
+    assert "ARG BUILD_VERSION=0.6.4" in dockerfile
+    assert "ARG APP_SOURCE_REF=v0.6.4" in dockerfile
+    assert 'version = "0.6.4"' in project
 
 
 def test_app_launcher_execs_existing_collector_without_restart_loop():

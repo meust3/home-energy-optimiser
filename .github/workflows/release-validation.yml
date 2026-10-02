@@ -1,0 +1,68 @@
+name: Release validation
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  release:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_DB: release_test
+          POSTGRES_USER: release_test
+          POSTGRES_PASSWORD: ci-${{ github.run_id }}
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U release_test -d release_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      TEST_POSTGRES_URL: postgresql+psycopg://release_test:ci-${{ github.run_id }}@127.0.0.1:5432/release_test
+      SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.SOURCE_SHA }}
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install isolated test dependencies
+        run: python -m pip install -e '.[dev]'
+      - name: Source and PostgreSQL 17 checks
+        run: |
+          ruff check .
+          black --check .
+          git diff --check
+          python -m pytest -q
+      - name: Build frozen amd64 App
+        run: >-
+          docker build --platform linux/amd64
+          --build-arg APP_SOURCE_REF="$SOURCE_SHA"
+          --build-arg BUILD_VERSION=0.6.4
+          --tag home-energy-release:0.6.4
+          --file home_energy_optimiser/Dockerfile .
+      - name: Validate image-baked App bootstrap
+        run: python tools/test_home_assistant_app_container.py --image home-energy-release:0.6.4 --use-image-files
+      - name: Verify installed source and record image identity
+        run: |
+          docker run --rm --entrypoint python home-energy-release:0.6.4 -c 'import hashlib,json,pathlib; root=pathlib.Path("/usr/local/lib/python3.12/site-packages/energy_optimizer"); print(json.dumps({str(p.relative_to(root)):hashlib.sha256(p.read_bytes()).hexdigest() for p in root.rglob("*.py")},sort_keys=True))' > image-source-hashes.json
+          python -c 'import hashlib,json,pathlib; expected={str(p.relative_to(pathlib.Path("src/energy_optimizer"))):hashlib.sha256(p.read_bytes()).hexdigest() for p in pathlib.Path("src/energy_optimizer").rglob("*.py")}; actual=json.loads(pathlib.Path("image-source-hashes.json").read_text()); assert actual==expected, "image source differs from frozen checkout"; print(f"Matched {len(actual)} installed Python source files")'
+          docker image inspect home-energy-release:0.6.4 --format '{{.Id}} {{.Architecture}} {{index .Config.Labels "org.opencontainers.image.revision"}}' > image-identity.txt
+          cat image-identity.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-image-evidence
+          path: |
+            image-source-hashes.json
+            image-identity.txt

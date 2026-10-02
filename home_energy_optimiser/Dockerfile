@@ -1,13 +1,14 @@
 FROM python:3.12.11-slim-bookworm
 
-ARG BUILD_VERSION=0.6.3
-ARG APP_SOURCE_REF=v0.6.3
+ARG BUILD_VERSION=0.6.4
+ARG APP_SOURCE_REF=v0.6.4
 
 LABEL io.hass.name="Home Energy Optimiser" \
       io.hass.description="Read-only Home Assistant energy dashboard and collector" \
       io.hass.type="app" \
       io.hass.version="${BUILD_VERSION}" \
-      io.hass.arch="amd64"
+      io.hass.arch="amd64" \
+      org.opencontainers.image.revision="${APP_SOURCE_REF}"
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
