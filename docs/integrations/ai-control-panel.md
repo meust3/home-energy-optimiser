@@ -1,5 +1,13 @@
 # Shared AI infrastructure
 
+Update on 3 October 2026: an explicit synthetic battery-review pilot is implemented
+with the additive panel task contract and pinned SDK 1.0.2. A real local replay
+through an isolated panel/test database matched 7/8 review labels versus an 8/8
+deterministic baseline, including a material reserve-review error. Active routing
+remains disabled. See [pilot evidence and usage](ai-review-pilot-20261003.md).
+The older production candidate/image and the shared running panel were not updated.
+The sections below describe the preceding diagnostic onboarding release.
+
 Status on 2026-09-27: **fresh project Codex inference verified; development-runtime
 inference and production readiness verified in isolated containers; not deployed
 to the Home Assistant NUC**. The NUC still runs 0.6.3. Candidate 0.6.4 packages the

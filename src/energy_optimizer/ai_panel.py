@@ -1,7 +1,7 @@
-"""Thin Energy adapter for pinned panel contract 1.0.0 / SDK 1.0.1.
+"""Thin Energy adapter for contract 1.0.0 and optional task SDK 1.0.2.
 
-Only explicit synthetic diagnostics are executable. This module is never imported
-by collection/calculation code. SDK imports are lazy so the AI extra is optional.
+Only explicit synthetic diagnostics/reviews are executable. Collection/calculation
+code never imports this module. Lazy SDK imports keep the AI extra optional.
 """
 
 from __future__ import annotations
@@ -23,7 +23,7 @@ from energy_optimizer.ai_integration import (
 )
 
 CONTRACT_COMMIT = "436b04c50514487f9558d67c93facd0998e2f8a6"
-SDK_COMMIT = "17453cb65f8ff7714b203aba8d2a7b964cb3f09c"
+SDK_COMMIT = "4c821193f4c406ddedcc077fd29459e3c435c98d"
 T = TypeVar("T")
 
 
@@ -32,6 +32,9 @@ class PanelSession(Protocol):
 
     async def health(self) -> dict[str, Any]: ...
     async def capabilities(self) -> dict[str, Any]: ...
+    async def review_battery_case(
+        self, case_id: str, *, operation_id: str
+    ) -> dict[str, Any]: ...
     async def decide(
         self,
         state: Any,
@@ -85,6 +88,7 @@ class Catalogue(WireModel):
     capabilities: list[Capability]
     tools: list[dict[str, Any]]
     cloud_fallback: Literal[False]
+    tasks: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class DiagnosticReport(BaseModel):
@@ -94,7 +98,7 @@ class DiagnosticReport(BaseModel):
     checked_at: datetime
     configuration_hash: str = Field(pattern=r"^[a-f0-9]{64}$")
     contract_version: Literal["1.0.0"] = "1.0.0"
-    sdk_version: Literal["1.0.1"] = "1.0.1"
+    sdk_version: Literal["1.0.1", "1.0.2"] = "1.0.1"
     project: Literal["home-energy"] = "home-energy"
     caller: Literal["application_backend"] = "application_backend"
     environment: Literal["development", "test", "production"]
@@ -179,7 +183,7 @@ async def sdk_client(settings: AISettings) -> PanelSession:
     import httpx
     import panel_client
 
-    if panel_client.__version__ != "1.0.1":
+    if panel_client.__version__ not in {"1.0.1", "1.0.2"}:
         raise AIUnavailable(AIFailure.UNAVAILABLE)
     if not settings.key_file or not settings.base_url:
         raise AIUnavailable(AIFailure.HANDOFF_PENDING)
@@ -276,7 +280,9 @@ class EnergyPanelAdapter:
 
         return await self.boundary.run_manual(operation)
 
-    async def _discover_with_client(self, client: PanelSession) -> DiagnosticReport:
+    async def _discover_with_client(
+        self, client: PanelSession, *, require_review_task: bool = False
+    ) -> DiagnosticReport:
         health = Health.model_validate(await client.health())
         catalogue = Catalogue.model_validate(await client.capabilities())
         if (
@@ -292,10 +298,28 @@ class EnergyPanelAdapter:
         ready = (local.health or {}).get("ready")
         if type(ready) is not bool:
             raise AIUnavailable(AIFailure.INVALID_RESPONSE)
+        if require_review_task:
+            from panel_energy_review import DATASET_HASH
+
+            from energy_optimizer.ai_review import ReviewCapability
+
+            tasks = [
+                item
+                for item in catalogue.tasks
+                if item.get("task") == "battery-decision-review"
+            ]
+            if len(tasks) != 1:
+                raise AIUnavailable(AIFailure.HANDOFF_PENDING)
+            task = ReviewCapability.model_validate(tasks[0])
+            if task.dataset_sha256 != DATASET_HASH:
+                raise AIUnavailable(AIFailure.INVALID_RESPONSE)
+            if not task.authorised or not task.policy_enabled:
+                raise AIUnavailable(AIFailure.POLICY_DENIED)
         return DiagnosticReport(
             checked_at=datetime.now(UTC),
             configuration_hash=configuration_hash(self.settings),
             environment=self.settings.environment,
+            sdk_version=__import__("panel_client").__version__,
             principal=UUID(health.principal),
             transport_authenticated=True,
             permission=local.authorised
@@ -309,6 +333,27 @@ class EnergyPanelAdapter:
 
     async def discover(self) -> DiagnosticReport:
         return await self._execute(self._discover_with_client)
+
+    async def review_synthetic_case(
+        self, case_id: str, operation_id: UUID
+    ) -> dict[str, Any]:
+        """Explicit published fixture only; no household input or model selection."""
+        if self.settings.environment != "development":
+            raise AIUnavailable(AIFailure.POLICY_DENIED)
+
+        async def action(client: PanelSession) -> dict[str, Any]:
+            report = await self._discover_with_client(client, require_review_task=True)
+            if not report.permission or not report.policy_enabled or report.paused:
+                raise AIUnavailable(AIFailure.POLICY_DENIED)
+            if not report.worker_ready:
+                raise AIUnavailable(AIFailure.UNAVAILABLE)
+            if not hasattr(client, "review_battery_case"):
+                raise AIUnavailable(AIFailure.HANDOFF_PENDING)
+            return await client.review_battery_case(
+                case_id, operation_id=str(operation_id)
+            )
+
+        return await self._execute(action)
 
     async def diagnose_local(self, operation_id: UUID) -> DiagnosticReport:
         """Only the published fixed synthetic probe; never accepts household input."""
