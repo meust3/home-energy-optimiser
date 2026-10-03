@@ -1,5 +1,14 @@
 # Home Energy Optimiser
 
+Version 0.6.5 is a release candidate, not yet published or deployed. It corrects
+shadow evidence with compatible partial-window household-demand assembly, signed
+HOLD reserve margin separately from clamped available energy, and per-boundary
+price tolerance. New calculations use `battery-shadow-evidence-v2`; legacy and
+unknown markers retain explicit display semantics. Existing records are untouched.
+No schema migration is required from v0.6.4 (`20260927_01`). Policy, assumptions,
+physical limits and no-command authority remain unchanged; outcome-v2 comparative
+economic fields remain unavailable. See the v0.6.5 release preparation notes.
+
 Version 0.6.4 retains the existing schema `20260927_01`; no migration is
 required from a running v0.6.3 installation. It preserves Solcast half-hourly
 P10/P50/P90 forecasts in observation JSON and adds an explicit offline morning

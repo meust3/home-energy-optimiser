@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.6.5 - release candidate (not published)
+
+- Assembles complete action-window household demand from compatible linked
+  prealignment reserve intervals and aligned operational forecast intervals,
+  without double counting, reserve EV demand or filling later forecast gaps.
+- Separates signed HOLD reserve margin from nonnegative available energy; unknown
+  values remain unavailable and a shortfall does not prevent no-command HOLD.
+- Applies the existing one-second price-gap tolerance to each internal boundary;
+  endpoints stay strict and prices retain represented-duration weighting.
+- Marks new calculations `battery-shadow-evidence-v2`. Dashboard and replay retain
+  explicit legacy semantics and label unknown calculation semantics unavailable.
+- No historical recalculation, schema migration or new decision authority.
+  Policy, assumptions, physical limits and HOLD-only gates are unchanged.
+  Outcome-v2 selected-versus-HOLD, hindsight, regret and simulated reserve safety
+  remain unavailable. Corrected inputs may change future diagnostic values.
+
 ## 0.6.4 - 2026-10-03
 
 - Retains allowlisted Solcast half-hour P10/P50/P90 power forecasts in existing

@@ -21,6 +21,7 @@ from energy_optimizer.timestamps import aware_datetime, native_json
 POLICY_VERSION = "battery-shadow-policy-v1"
 ASSUMPTION_SET_VERSION = "battery-shadow-assumptions-v1"
 OUTCOME_SCORING_VERSION = "battery-shadow-outcome-v2"
+CALCULATION_VERSION = "battery-shadow-evidence-v2"
 PRICE_GAP_TOLERANCE_SECONDS = 1.0
 
 
@@ -109,10 +110,17 @@ class PriceCoverage:
     horizon_end_utc: datetime | None
     covered_seconds: float
     required_seconds: float
+    represented_seconds: float = 0.0
+    tolerated_boundary_seconds: float = 0.0
+    uncovered_seconds: float | None = None
 
     @property
     def complete(self) -> bool:
-        return self.required_seconds > 0 and self.coverage_percent >= 99.999
+        return self.required_seconds > 0 and (
+            self.uncovered_seconds <= 1e-9
+            if self.uncovered_seconds is not None
+            else self.coverage_percent >= 99.999
+        )
 
 
 @dataclass
@@ -220,9 +228,9 @@ def evaluate_shadow_decision(
         common_blockers.append("forecast_missing")
     if reserve_run is None:
         common_blockers.append("reserve_missing")
-    elif forecast_run is not None and int(
-        reserve_run.get("forecast_run_id", -1)
-    ) != int(forecast_run.get("id", -2)):
+    elif forecast_run is not None and reserve_run.get(
+        "forecast_run_id", -1
+    ) != forecast_run.get("id", -2):
         common_blockers.append("reserve_forecast_identity_mismatch")
 
     import_intervals = _price_intervals(
@@ -260,14 +268,16 @@ def evaluate_shadow_decision(
         maximum_horizon,
     )
 
-    battery_energy = _number((observation or {}).get("battery_energy_estimate_kwh"))
+    battery_energy = _outcome_number(
+        (observation or {}).get("battery_energy_estimate_kwh")
+    )
     if battery_energy is None:
-        soc = _number((observation or {}).get("battery_soc_percent"))
+        soc = _outcome_number((observation or {}).get("battery_soc_percent"))
         capacity = float(getattr(collector_config, "usable_battery_capacity_kwh", 0))
         battery_energy = (
             capacity * soc / 100 if soc is not None and capacity > 0 else None
         )
-    reserve = _number((reserve_run or {}).get("recommended_reserve_kwh"))
+    reserve = _outcome_number((reserve_run or {}).get("recommended_reserve_kwh"))
     capacity = float(getattr(collector_config, "usable_battery_capacity_kwh", 0))
     energy_above_reserve = (
         max(battery_energy - reserve, 0.0)
@@ -275,7 +285,9 @@ def evaluate_shadow_decision(
         else None
     )
     duration_hours = max((action_end - action_start).total_seconds() / 3600, 0)
-    demand_energy = _forecast_energy(forecast_run, start=action_start, end=action_end)
+    demand_energy, demand_evidence = _action_window_demand(
+        forecast_run, reserve_run, start=action_start, end=action_end
+    )
     conservative_solar = _solar_energy_for_window(solar.get("p10_kwh"), duration_hours)
     household_deficit = (
         max(demand_energy - (conservative_solar or 0.0), 0.0)
@@ -303,7 +315,11 @@ def evaluate_shadow_decision(
         grid_energy_delta_kwh=0.0,
         gross_incremental_value_aud=0.0,
         reserve_before_kwh=reserve,
-        reserve_margin_after_kwh=energy_above_reserve,
+        reserve_margin_after_kwh=(
+            battery_energy - reserve
+            if battery_energy is not None and reserve is not None
+            else None
+        ),
         battery_energy_after_kwh=battery_energy,
         price_coverage_percent=min(
             import_coverage.coverage_percent, export_coverage.coverage_percent
@@ -479,6 +495,7 @@ def evaluate_shadow_decision(
         )
 
     snapshot = {
+        "calculation_version": CALCULATION_VERSION,
         "synthetic_replay": synthetic_replay,
         "observation_slot_utc": _iso(
             _optional_utc((observation or {}).get("slot_utc"))
@@ -496,6 +513,7 @@ def evaluate_shadow_decision(
             "tradable_calibrated": calibration.permits_non_hold,
         },
         "demand_energy_action_window_kwh": demand_energy,
+        "action_window_demand_evidence": demand_evidence,
         "household_deficit_action_window_kwh": household_deficit,
         "import_price_coverage": _coverage_snapshot(import_coverage),
         "export_price_coverage": _coverage_snapshot(export_coverage),
@@ -588,9 +606,17 @@ def integrate_price_intervals(
         interval_end = _optional_utc(item.get("end_time"))
         if interval_start is not None and interval_end is None:
             duration = _number(item.get("duration"))
-            if duration is not None and duration > 0:
-                interval_end = interval_start + timedelta(minutes=duration)
-        if price is None or interval_start is None or interval_end is None:
+            if duration is not None and isfinite(duration) and duration > 0:
+                try:
+                    interval_end = interval_start + timedelta(minutes=duration)
+                except OverflowError:
+                    continue
+        if (
+            price is None
+            or not isfinite(price)
+            or interval_start is None
+            or interval_end is None
+        ):
             continue
         if interval_end <= interval_start:
             continue
@@ -604,10 +630,13 @@ def integrate_price_intervals(
     pieces.sort(key=lambda value: (value[0], value[1]))
     cursor = start_utc
     covered = 0.0
+    tolerated = 0.0
     weighted = 0.0
     for piece_start, piece_end, price in pieces:
-        if piece_start > cursor + timedelta(seconds=PRICE_GAP_TOLERANCE_SECONDS):
-            cursor = piece_start
+        gap = (piece_start - cursor).total_seconds()
+        # Only adjacent represented intervals qualify, never window endpoints.
+        if covered > 0 and 0 < gap <= PRICE_GAP_TOLERANCE_SECONDS:
+            tolerated += gap
         effective_start = max(piece_start, cursor)
         if effective_start > piece_end:
             continue
@@ -617,20 +646,18 @@ def integrate_price_intervals(
         covered += seconds
         weighted += seconds * price
         cursor = max(cursor, piece_end)
-    # Amber can expose adjacent intervals one second apart.  Treat only that
-    # documented boundary offset as covered, without interpolating larger gaps.
-    missing = max(required - covered, 0.0)
-    weighted_seconds = covered
-    if 0 < missing <= PRICE_GAP_TOLERANCE_SECONDS * max(len(pieces) + 1, 1):
-        covered = required
-    coverage = min(covered / required * 100, 100.0)
-    average = weighted / max(weighted_seconds, 1)
+    effective_covered = min(covered + tolerated, required)
+    coverage = effective_covered / required * 100
+    average = weighted / covered if covered > 0 else None
     return PriceCoverage(
         coverage_percent=coverage,
-        weighted_average_aud_per_kwh=average if covered > 0 else None,
+        weighted_average_aud_per_kwh=average,
         horizon_end_utc=horizon,
-        covered_seconds=covered,
+        covered_seconds=effective_covered,
         required_seconds=required,
+        represented_seconds=covered,
+        tolerated_boundary_seconds=tolerated,
+        uncovered_seconds=max(required - effective_covered, 0.0),
     )
 
 
@@ -1129,8 +1156,9 @@ def _rank_candidates(candidates: list[ShadowCandidate]) -> None:
         item.ranking_components = {
             "gross_incremental_value_aud": item.gross_incremental_value_aud,
             "reserve_gate_passed": (
-                item.reserve_margin_after_kwh is None
-                or item.reserve_margin_after_kwh >= -1e-9
+                item.reserve_margin_after_kwh >= -1e-9
+                if item.reserve_margin_after_kwh is not None
+                else None
             ),
         }
         item.tie_break_reason = "stable_action_precedence" if rank > 1 else None
@@ -1181,27 +1209,244 @@ def _price_intervals(value: Any) -> list[dict[str, Any]]:
     )
 
 
-def _forecast_energy(
-    run: dict[str, Any] | None, *, start: datetime, end: datetime
-) -> float | None:
-    if run is None:
-        return None
-    total = 0.0
-    covered = 0.0
-    for point in run.get("points", []):
-        point_start = _optional_utc(point.get("period_start_utc"))
-        point_end = _optional_utc(point.get("period_end_utc"))
-        expected = _number(point.get("expected_value"))
-        if point_start is None or point_end is None or expected is None:
-            continue
-        overlap_start = max(start, point_start)
-        overlap_end = min(end, point_end)
-        seconds = max((overlap_end - overlap_start).total_seconds(), 0.0)
-        if seconds:
-            total += expected / 1000 * seconds / 3600
-            covered += seconds
+def _action_window_demand(
+    run: dict[str, Any] | None,
+    reserve: dict[str, Any] | None,
+    *,
+    start: datetime,
+    end: datetime,
+) -> tuple[float | None, dict[str, Any]]:
+    """Join interval averages once, using reserve only before operational alignment."""
     required = max((end - start).total_seconds(), 0.0)
-    return total if required > 0 and covered >= required - 1 else None
+    evidence: dict[str, Any] = {
+        "calculation_version": CALCULATION_VERSION,
+        "start_utc": _iso(start),
+        "end_utc": _iso(end),
+        "forecast_run_id": (run or {}).get("id"),
+        "reserve_run_id": (reserve or {}).get("id"),
+        "forecast_identity": _forecast_identity(run),
+        "required_seconds": required,
+        "covered_seconds": 0.0,
+        "complete": False,
+        "segments": [],
+        "reason": None,
+    }
+
+    def unavailable(reason: str) -> tuple[None, dict[str, Any]]:
+        evidence["reason"] = reason
+        return None, evidence
+
+    if run is None or required <= 0:
+        return unavailable("forecast_missing" if run is None else "empty_action_window")
+    if run.get("forecast_type") != "baseline_household_load":
+        return unavailable("operational_demand_target_incompatible")
+    if (
+        reserve is None
+        or run.get("id") is None
+        or reserve.get("id") is None
+        or reserve.get("forecast_run_id") != run.get("id")
+    ):
+        return unavailable("reserve_forecast_link_missing_or_mismatched")
+    created = _optional_utc(run.get("created_at_utc"))
+    if created is not None and created > start:
+        return unavailable("forecast_created_after_action_start")
+    points = run.get("points")
+    if not isinstance(points, list) or not points:
+        return unavailable("operational_intervals_missing")
+    if any(
+        isinstance(point, dict) and point.get("forecast_run_id", run["id"]) != run["id"]
+        for point in points
+    ):
+        return unavailable("operational_point_link_mismatched")
+    aligned_start = _optional_utc(run.get("horizon_start_utc"))
+    if aligned_start is None:
+        # Older/synthetic full-coverage snapshots may omit the horizon header.
+        aligned_start = (
+            _optional_utc(points[0].get("period_start_utc"))
+            if isinstance(points[0], dict)
+            else None
+        )
+    if aligned_start is None:
+        return unavailable("operational_start_invalid")
+    pieces: list[dict[str, Any]] = []
+    if start < aligned_start:
+        if any(
+            isinstance(point, dict)
+            and (point_start := _optional_utc(point.get("period_start_utc")))
+            is not None
+            and point_start < aligned_start
+            and (point_end := _optional_utc(point.get("period_end_utc"))) is not None
+            and point_end > start
+            for point in points
+        ):
+            return unavailable("operational_alignment_inconsistent")
+        reason = _partial_demand_compatibility(run, reserve, start=start)
+        if reason is not None:
+            return unavailable(reason)
+        evidence["partial_compatibility"] = {
+            "method": "shared_household_hierarchy_interval_average",
+            "reserve_model_version": reserve.get("model_version"),
+            "evaluation_time_utc": _iso(_utc(reserve["evaluation_timestamp_utc"])),
+            "history_as_of_utc": _iso(_utc(reserve["evaluation_timestamp_utc"])),
+            "aligned_start_utc": _iso(aligned_start),
+        }
+        demand = _json_dict(reserve.get("demand_forecast_json"))
+        slots = demand.get("slot_decisions")
+        if not isinstance(slots, list) or not slots:
+            return unavailable("reserve_partial_slots_missing")
+        reason = _demand_segments(
+            slots,
+            source="reserve_partial",
+            start=start,
+            end=min(end, aligned_start),
+            pieces=pieces,
+        )
+        if reason is not None:
+            return unavailable(reason)
+    reason = _demand_segments(
+        points,
+        source="operational",
+        start=max(start, aligned_start),
+        end=end,
+        pieces=pieces,
+    )
+    if reason is not None:
+        return unavailable(reason)
+    pieces.sort(key=lambda piece: piece["start_utc"])
+    cursor = start
+    total = 0.0
+    for piece in pieces:
+        piece_start = _utc(piece["start_utc"])
+        if piece_start != cursor:
+            evidence["problem_window"] = {
+                "start_utc": _iso(min(piece_start, cursor)),
+                "end_utc": _iso(
+                    piece_start
+                    if piece_start > cursor
+                    else min(cursor, _utc(piece["end_utc"]))
+                ),
+            }
+            return unavailable(
+                "demand_gap" if piece_start > cursor else "demand_overlap"
+            )
+        cursor = _utc(piece["end_utc"])
+        evidence["covered_seconds"] += piece["seconds"]
+        evidence["segments"].append(piece)
+        total += piece["energy_kwh"]
+    if not isfinite(total):
+        return unavailable("demand_energy_nonfinite")
+    if cursor != end:
+        evidence["problem_window"] = {"start_utc": _iso(cursor), "end_utc": _iso(end)}
+        return unavailable("demand_gap")
+    evidence["complete"] = True
+    return total, evidence
+
+
+def _partial_demand_compatibility(
+    run: dict[str, Any], reserve: dict[str, Any], *, start: datetime
+) -> str | None:
+    """Whitelist the released shared household hierarchy, not arbitrary forecasts."""
+    identity = _forecast_identity(run)
+    demand = _json_dict(reserve.get("demand_forecast_json"))
+    diagnostics = demand.get("diagnostics")
+    if not isinstance(diagnostics, dict):
+        return "reserve_demand_identity_missing"
+    if (
+        reserve.get("model_version") != "reserve-estimator-v1"
+        or identity.get("forecast_type") != "baseline_household_load"
+        or identity.get("model_version") != "household-demand-hierarchy-v1-cohort-v1"
+        or identity.get("alignment_version") != "full_5m_v1"
+        or identity.get("training_policy")
+        not in {"legacy_all_eligible", "verified_preferred", "verified_only"}
+        or diagnostics.get("training_policy") != identity.get("training_policy")
+    ):
+        return "reserve_demand_identity_incompatible"
+    context = _json_dict(reserve.get("operational_context_json"))
+    reconciliation = context.get("linked_forecast_reconciliation")
+    if not isinstance(reconciliation, dict):
+        return "reserve_reconciliation_missing"
+    evaluation = _optional_utc(reserve.get("evaluation_timestamp_utc"))
+    aligned_start = _optional_utc(run.get("horizon_start_utc"))
+    observed = _optional_utc(reserve.get("observation_timestamp_utc"))
+    if (
+        evaluation is None
+        or evaluation > start
+        or aligned_start is None
+        or observed is None
+        or observed > evaluation
+        or _optional_utc(run.get("created_at_utc")) != evaluation
+        or _optional_utc(reconciliation.get("evaluation_time_utc")) != evaluation
+        or _optional_utc(reconciliation.get("history_as_of_utc")) != evaluation
+        or _optional_utc(reconciliation.get("linked_forecast_start_utc"))
+        != aligned_start
+        or _optional_utc(demand.get("start_local")) != evaluation
+        or reconciliation.get("semantics")
+        != "reserve_starts_at_evaluation_with_partial_boundaries"
+    ):
+        return "reserve_partial_provenance_incompatible"
+    first_full_boundary = evaluation.replace(second=0, microsecond=0) - timedelta(
+        minutes=evaluation.minute % 5
+    )
+    if first_full_boundary < evaluation:
+        first_full_boundary += timedelta(minutes=5)
+    if aligned_start != first_full_boundary:
+        return "reserve_partial_alignment_incompatible"
+    return None
+
+
+def _demand_segments(
+    rows: list[Any],
+    *,
+    source: str,
+    start: datetime,
+    end: datetime,
+    pieces: list[dict[str, Any]],
+) -> str | None:
+    """Clip interval averages; metadata contains only consumed rows, capped at 290."""
+    if end <= start:
+        return None
+    partial = source == "reserve_partial"
+    for index, row in enumerate(rows):
+        if not isinstance(row, dict):
+            return f"{source}_interval_invalid"
+        row_start = _optional_utc(
+            row.get("period_start_local" if partial else "period_start_utc")
+        )
+        row_end = _optional_utc(
+            row.get("period_end_local" if partial else "period_end_utc")
+        )
+        if row_start is None or row_end is None or row_end <= row_start:
+            return f"{source}_interval_invalid"
+        left, right = max(start, row_start), min(end, row_end)
+        if right <= left:
+            continue
+        value = _outcome_number(
+            row.get("expected_energy_kwh" if partial else "expected_value"), power=True
+        )
+        if value is None or (not partial and row.get("unit", "W") != "W"):
+            return f"{source}_energy_invalid"
+        seconds = (right - left).total_seconds()
+        energy = (
+            value * (seconds / (row_end - row_start).total_seconds())
+            if partial
+            else value * (seconds / 3_600_000)
+        )
+        if not isfinite(energy):
+            return f"{source}_energy_invalid"
+        if len(pieces) >= 290:
+            return "demand_segment_limit_exceeded"
+        pieces.append(
+            {
+                "source": source,
+                "index": index,
+                "point_id": row.get("id"),
+                "start_utc": _iso(left),
+                "end_utc": _iso(right),
+                "seconds": seconds,
+                "energy_kwh": energy,
+            }
+        )
+    return None
 
 
 def _solar_context(
@@ -1285,7 +1530,7 @@ def _maximum_interval_price(
 def _forecast_identity(run: dict[str, Any] | None) -> dict[str, Any]:
     if run is None:
         return {}
-    metadata = run.get("metadata_json") or {}
+    metadata = _json_dict(run.get("metadata_json"))
     return {
         "forecast_type": run.get("forecast_type"),
         "model_version": run.get("model_version"),
@@ -1305,6 +1550,11 @@ def _common_horizon(first: datetime | None, second: datetime | None) -> datetime
 
 def _coverage_snapshot(value: PriceCoverage) -> dict[str, Any]:
     return {
+        "complete": value.complete,
+        "represented_seconds": value.represented_seconds,
+        "tolerated_boundary_seconds": value.tolerated_boundary_seconds,
+        "uncovered_seconds": value.uncovered_seconds,
+        "required_seconds": value.required_seconds,
         "coverage_percent": value.coverage_percent,
         "average_aud_per_kwh": value.weighted_average_aud_per_kwh,
         "horizon_end_utc": _iso(value.horizon_end_utc),

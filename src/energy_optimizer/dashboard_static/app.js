@@ -263,6 +263,12 @@ async function loadForecastActualCard() {
   }
 }
 
+function reserveMarginLabel(candidate, input) {
+  if (candidate?.action !== "HOLD" || input?.calculation_version === "battery-shadow-evidence-v2") return "Reserve margin";
+  return !input?.calculation_version ? "Legacy available energy (clamped)"
+    : "Stored reserve value (unrecognised calculation)";
+}
+
 async function loadDecisions() {
   setState("#decisions-state", "Loading immutable shadow decisions and outcomes...");
   try {
@@ -282,12 +288,12 @@ async function loadDecisions() {
       $("#decision-current").innerHTML = [
         ["Current recommendation", decision.selected_action || "No recommendation", (decision.reason_codes_json || []).join(", ") || "No reason available"],
         ["Expected gross value", money(decision.expected_gross_value_aud), `Energy ${energy(absolute(decision.selected_battery_energy_kwh))}`],
-        ["Reserve margin", energy(selected?.reserve_margin_after_kwh), `Confidence ${decision.confidence_rating || "Unavailable"}`],
+        [reserveMarginLabel(selected, decision.input_snapshot_json), energy(selected?.reserve_margin_after_kwh), `Confidence ${decision.confidence_rating || "Unavailable"}`],
         ["Action window", decision.selected_start_utc ? `${localTime(decision.selected_start_utc)} - ${localTime(decision.selected_end_utc)}` : "Unavailable", "Advisory interval only"],
         ["Data and price", localTime(decision.input_snapshot_json?.observation_collected_at_utc), `Price horizon ${localTime(decision.price_horizon_end_utc)}`],
-        ["Policy", decision.policy_version, `Assumptions ${decision.assumption_set_version}`],
+        ["Policy", decision.policy_version, `Assumptions ${decision.assumption_set_version}; calculation ${decision.input_snapshot_json?.calculation_version || "legacy"}`],
       ].map(([label, value, detail]) => `<article class="panel"><p class="eyebrow">${safeText(label)}</p><div class="quality-metric decision-action">${safeText(value)}</div><p class="muted">${safeText(detail)}</p>${label === "Current recommendation" ? '<div class="no-command-banner">Shadow only &mdash; no command issued</div>' : ""}</article>`).join("");
-      $("#decision-candidates").innerHTML = `<div class="table-wrap"><table><thead><tr><th>Action</th><th>Feasible</th><th>Rank</th><th>Expected gross value</th><th>Battery energy</th><th>Reserve margin</th><th>Blocking reason</th><th>Warnings</th></tr></thead><tbody>${decision.candidates.map(item => `<tr><td>${safeText(item.action)}</td><td class="${item.feasible ? "candidate-feasible" : "candidate-blocked"}">${item.feasible ? "Yes" : "No"}</td><td>${item.candidate_rank ?? "&mdash;"}</td><td>${money(item.gross_incremental_value_aud)}</td><td>${energy(item.battery_energy_delta_kwh)}</td><td>${energy(item.reserve_margin_after_kwh)}</td><td>${safeText((item.blocking_constraints_json || []).join(", ") || item.feasibility_reason)}</td><td>${safeText((item.warning_constraints_json || []).join(", ") || "None")}</td></tr>`).join("")}</tbody></table></div>`;
+      $("#decision-candidates").innerHTML = `<div class="table-wrap"><table><thead><tr><th>Action</th><th>Feasible</th><th>Rank</th><th>Expected gross value</th><th>Battery energy</th><th>Reserve margin</th><th>Blocking reason</th><th>Warnings</th></tr></thead><tbody>${decision.candidates.map(item => `<tr><td>${safeText(item.action)}</td><td class="${item.feasible ? "candidate-feasible" : "candidate-blocked"}">${item.feasible ? "Yes" : "No"}</td><td>${item.candidate_rank ?? "&mdash;"}</td><td>${money(item.gross_incremental_value_aud)}</td><td>${energy(item.battery_energy_delta_kwh)}</td><td>${energy(item.reserve_margin_after_kwh)}${reserveMarginLabel(item, decision.input_snapshot_json).startsWith("Legacy") ? " (legacy clamped available energy)" : item.action === "HOLD" && decision.input_snapshot_json?.calculation_version !== "battery-shadow-evidence-v2" ? " (unrecognised calculation; semantics unavailable)" : ""}</td><td>${safeText((item.blocking_constraints_json || []).join(", ") || item.feasibility_reason)}</td><td>${safeText((item.warning_constraints_json || []).join(", ") || "None")}</td></tr>`).join("")}</tbody></table></div>`;
       const input = decision.input_snapshot_json || {}; const solar = input.solar || {}; const calibration = input.calibration || {};
       $("#decision-provenance").innerHTML = [
         ["Linked records", `Observation ${safeText(input.observation_slot_utc)}`, `Forecast ${decision.forecast_run_id}; reserve ${decision.reserve_run_id}`],

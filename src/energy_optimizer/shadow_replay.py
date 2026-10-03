@@ -116,6 +116,13 @@ def replay_persisted_shadow_decision(
             "synthetic_replay": True,
             "source_decision_run_id": decision_run_id,
             "source_input_hash": stored["input_hash"],
+            "source_calculation_version": input_snapshot.get("calculation_version")
+            or "legacy",
+            "replay_calculation_version": replay.input_snapshot["calculation_version"],
+            "calculation_semantics_match": (
+                input_snapshot.get("calculation_version")
+                == replay.input_snapshot["calculation_version"]
+            ),
             "replay_input_hash": replay.input_hash,
             "database_write_performed": False,
         }
