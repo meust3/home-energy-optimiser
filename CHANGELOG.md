@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.6.6 - candidate
+
+- Show eligible elapsed observations in the live forecast while official scoring is pending.
+- Align History and quality windows to UTC slots, with a 60-second collection grace period.
+- Label aggregate grid and battery flows accurately and explain actual-data gaps.
+- Withhold full-day solar errors for partial or insufficiently covered days.
+- Batch forecast observation reads while preserving immutable score semantics.
+- Add collection incident details, scoring batch timing and an offline held-out uncertainty review.
+- No schema migration; uncertainty candidates remain outside operational forecasting.
+
+
 ## 0.6.5 - release candidate (not published)
 
 - Assembles complete action-window household demand from compatible linked
