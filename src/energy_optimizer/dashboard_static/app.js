@@ -25,7 +25,7 @@ function localTime(value) {
   return value ? new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short", timeZone: "Australia/Brisbane" }).format(new Date(value)) : "Unavailable";
 }
 
-function number(value, digits = 1) { return value == null ? "Unavailable" : Number(value).toLocaleString(undefined, { maximumFractionDigits: digits }); }
+function number(value, digits = 1) { return value == null ? "Unavailable" : (Math.abs(Number(value)) < 0.5 * 10 ** -digits ? 0 : Number(value)).toLocaleString(undefined, { maximumFractionDigits: digits }); }
 function power(value) { return value == null ? "Unavailable" : `${number(value / 1000, 2)} kW`; }
 function energy(value) { return value == null ? "Unavailable" : `${number(value, 2)} kWh`; }
 function price(value) { return value == null ? "Unavailable" : `${number(value, 3)} AUD/kWh`; }
@@ -243,20 +243,27 @@ async function loadForecastActualCard() {
       ["Forecast run created", localTime(data.created_at_utc)],
       ["Forecast horizon", `${localTime(data.period_start_utc)} - ${localTime(data.period_end_utc)}`],
       ["Model version", identity.model_version], ["Alignment version", identity.alignment_version], ["Training policy", identity.training_policy],
-      ["Elapsed actual coverage", percent(coverage.matured_actual_coverage_percent)],
+      ["Elapsed actual coverage", `${coverage.eligible_actual_intervals} of ${coverage.matured_intervals} completed intervals (${percent(coverage.matured_actual_coverage_percent)})`],
       ["Forecast energy", energy(metric.forecast_energy_kwh)], ["Actual energy", energy(metric.actual_energy_kwh)],
       ["Signed energy error", energy(metric.signed_energy_error_kwh)], ["Error sign", "Actual minus forecast"],
       ["MAE", power(metric.mae_w)], ["Bias", power(metric.bias_w)], ["WAPE", percent(metric.wape_percent)], ["Calibration", data.calibration_status],
     ])}<p class="muted">${safeText(metric.period_label)}. Future actuals remain missing.</p>`);
+    if (coverage.observed_pending_score_intervals > 0) {
+      target.insertAdjacentHTML("beforeend", '<p class="muted">Observed comparison; official scoring pending. Calibration uses stored scores.</p>');
+    }
+    if (data.uncertainty_status !== "stored_bounds") {
+      target.insertAdjacentHTML("beforeend", '<p class="muted">Uncertainty bounds are not available for this model.</p>');
+    }
     const points = data.points.map(point => ({
       timestamp_utc: point.period_start_utc, has_observation: true,
       expected: point.forecast_w, actual: point.actual_w, lower: point.lower_w, upper: point.upper_w,
-      actual_missing_reason: point.actual_missing_reason,
+      actual_missing_reason: point.exclusion_reason || point.actual_missing_reason,
+      actual_source: point.actual_source,
       series_available: { expected: true, actual: point.actual_eligible, lower: point.lower_w != null, upper: point.upper_w != null },
     }));
     const start = new Date(data.period_start_utc).getTime(); const end = new Date(data.period_end_utc).getTime(); const now = new Date(data.now_utc).getTime();
     const nowPercent = end > start ? (now - start) / (end - start) * 100 : null;
-    const chart = makeChart("Forecast expected and actual household demand", "kW", [["Forecast expected", "expected"], ["Actual household demand", "actual"], ["Forecast lower", "lower"], ["Forecast upper", "upper"]], points, value => value / 1000, "No comparable forecast and actual intervals are available.", { band: ["lower", "upper"], nowPercent: mode === "live" ? nowPercent : null });
+    const chart = makeChart("Forecast expected and actual household demand", "kW", [["Forecast expected", "expected"], ["Actual household demand", "actual"], ...(data.uncertainty_status === "stored_bounds" ? [["Forecast lower", "lower"], ["Forecast upper", "upper"]] : [])], points, value => value / 1000, "No comparable forecast and actual intervals are available.", { band: ["lower", "upper"], nowPercent: mode === "live" ? nowPercent : null });
     target.append(chart);
   } catch (error) {
     target.className = "error-state"; target.textContent = error.message;
@@ -325,6 +332,14 @@ function chartAxisTime(value, includeDate = false) {
   return value ? new Intl.DateTimeFormat(undefined, { ...(includeDate ? { day: "numeric", month: "short" } : {}), hour: "2-digit", minute: "2-digit", timeZone: "Australia/Brisbane" }).format(new Date(value)) : "";
 }
 
+function actualReason(reason) {
+  return ({future_interval: "Future interval", no_observation: "Awaiting observation", actual_value_missing: "Value unavailable", actual_unhealthy_or_ineligible: "Unhealthy telemetry or excluded baseline", not_scored_or_ineligible: "Awaiting official scoring or excluded baseline", known_charging_without_power: "Excluded: EV charging without charger AC power", known_ev_session_without_ac_power: "Excluded: EV charging without charger AC power", known_ev_session_without_ev_power: "Excluded: EV charging without measured power", ev_active_power_unknown: "Excluded: EV charging power unavailable", invalid_actual_negative_household_demand: "Invalid negative household demand"})[reason] || (reason ? String(reason).replaceAll("_", " ") : "Value unavailable");
+}
+
+function missingChartValue(point, field) {
+  return field === "actual" ? actualReason(point.actual_missing_reason) : "Missing";
+}
+
 function makeChart(title, unit, series, points, transform = value => value, emptyMessage = "No chartable data is available for this period.", options = {}) {
   const article = document.createElement("article"); article.className = "panel chart-panel";
   const plottedValue = (point, field) => {
@@ -333,7 +348,7 @@ function makeChart(title, unit, series, points, transform = value => value, empt
   };
   const chartableSeries = series.map(([name, field], index) => ({ name, field, index })).filter(item => points.some(point => isNumeric(plottedValue(point, item.field))));
   article.innerHTML = `<h3>${safeText(title)}</h3><p class="muted">${safeText(unit)} · gaps are not interpolated</p>`;
-  const details = document.createElement("details"); details.className = "table-fallback"; details.innerHTML = `<summary>Accessible data table</summary><div class="table-wrap"><table><thead><tr><th>Time</th>${series.map(([name]) => `<th>${safeText(name)}</th>`).join("")}</tr></thead><tbody>${points.length ? points.map(point => `<tr><td>${localTime(point.timestamp_utc)}</td>${series.map(([, field]) => `<td>${plottedValue(point, field) == null ? "Missing" : number(transform(point[field]), 3)}</td>`).join("")}</tr>`).join("") : `<tr><td colspan="${series.length + 1}">No stored rows for this period</td></tr>`}</tbody></table></div>`;
+  const details = document.createElement("details"); details.className = "table-fallback"; details.innerHTML = `<summary>Accessible data table</summary><div class="table-wrap"><table><thead><tr><th>Time</th>${series.map(([name]) => `<th>${safeText(name)}</th>`).join("")}</tr></thead><tbody>${points.length ? points.map(point => `<tr><td>${localTime(point.timestamp_utc)}</td>${series.map(([, field]) => `<td>${plottedValue(point, field) == null ? safeText(missingChartValue(point, field)) : number(transform(point[field]), 3)}</td>`).join("")}</tr>`).join("") : `<tr><td colspan="${series.length + 1}">No stored rows for this period</td></tr>`}</tbody></table></div>`;
   if (!chartableSeries.length) {
     article.classList.add("chart-panel-empty");
     article.insertAdjacentHTML("beforeend", `<div class="empty-state chart-empty" role="status"><strong>${safeText(emptyMessage)}</strong><span>Historical collection gaps and unavailable normalized flow values are shown as missing.</span></div>`);
@@ -396,7 +411,7 @@ function makeChart(title, unit, series, points, transform = value => value, empt
   const showTooltip = (index, left, top) => {
     keyboardIndex = index;
     const point = points[index];
-    tooltip.innerHTML = `<strong>${localTime(point.timestamp_utc)}</strong><br>${chartableSeries.map(({ name, field }) => `${safeText(name)}: ${plottedValue(point, field) == null ? "Missing" : `${number(plottedValue(point, field), 3)} ${safeText(unit)}`}`).join("<br>")}${point.actual_missing_reason ? `<br>Actual eligibility: ${safeText(point.actual_missing_reason)}` : ""}`;
+    tooltip.innerHTML = `<strong>${localTime(point.timestamp_utc)}</strong><br>${chartableSeries.map(({ name, field }) => `${safeText(name)}: ${plottedValue(point, field) == null ? safeText(missingChartValue(point, field)) : `${number(plottedValue(point, field), 3)} ${safeText(unit)}`}`).join("<br>")}${point.actual_missing_reason ? `<br>Actual eligibility: ${safeText(actualReason(point.actual_missing_reason))}` : ""}`;
     tooltip.style.display = "block"; tooltip.style.left = `${left}px`; tooltip.style.top = `${top}px`;
   };
   svg.addEventListener("pointermove", event => {
@@ -432,7 +447,7 @@ async function loadHistory() {
   const range = $("#history-range").value; setState("#history-state", "Loading bounded history…"); $("#history-charts").innerHTML = "";
   try {
     const data = await request("history", "timeseries", { range, resolution: "auto" });
-    setState("#history-state", `Stored observations from ${localTime(data.requested_start_utc)} to ${localTime(data.requested_end_utc)}.`);
+    setState("#history-state", `Stored observations from ${localTime(data.effective_start_utc || data.requested_start_utc)} to ${localTime(data.effective_end_utc || data.requested_end_utc)}.`);
     $("#history-summary").innerHTML = `<span>${data.actual_resolution} resolution</span><span>${data.point_count} chart points</span><span>${number(data.coverage_percent, 1)}% coverage</span><span>${data.missing_slot_count} missing five-minute slots</span>`;
     const root = $("#history-charts"); chartDefinitions.forEach(def => {
       const normalizedFlowChart = def[0] === "Grid import / export" || def[0] === "Battery charge / discharge";
@@ -493,7 +508,9 @@ async function loadForecastOperations() {
     runSelect.innerHTML = `<option value="">All scheduled runs</option>${runs.runs.map(run => `<option value="${run.forecast_run_id}">${localTime(run.created_at_utc)} | ${safeText(run.model_version)}</option>`).join("")}`;
     runSelect.value = selectedRun || "";
     const last = operations.last_attempt;
+    const scoring = last?.metadata_json || {};
     $("#operations-status").innerHTML = [
+      ["Scoring batch", scoring.scored_point_count ?? "Unavailable", `${scoring.scoring_duration_seconds == null ? "Timing unavailable" : number(scoring.scoring_duration_seconds, 2) + " sec"}; ${scoring.scoring_batch_limit == null ? "batch details unavailable" : scoring.scoring_batch_saturated ? "batch limit reached; backlog may remain" : "bounded batch"}`],
       ["Coordinator", operations.enabled ? operations.scheduler_status : "Disabled", operations.enabled ? "One in-process coordinator" : "Opt-in option is off"],
       ["Last attempt", last ? localTime(last.started_at_utc) : "No attempts", last ? `${last.status} - ${number(last.duration_seconds, 1)} sec` : "Waiting for first aligned boundary"],
       ["Last success", operations.last_successful_run ? localTime(operations.last_successful_run.finished_at_utc) : "None", operations.last_successful_run ? `${operations.last_successful_run.forecast_point_count} points` : "No successful scheduled run"],
@@ -543,14 +560,16 @@ async function loadQuality() {
       ["Charger AC power", data.independent_ac_charger_power_available ? "Available" : "No", `${data.known_charging_rows_excluded} known charging rows excluded`],
       ["Power signs", `${data.configured_grid_power_sign} / ${data.configured_battery_power_sign}`, `${data.configured_sign_confidence} confidence; ${data.configured_sign_supporting_samples} samples; ${number(data.configured_balance_tolerance_w, 1)} W tolerance`],
       ["Balance residual", `P95 ${power(data.residual_p95_w)}`, `Median ${power(data.residual_median_w)}; max ${power(data.residual_max_w)}; ${data.rows_above_tolerance} above tolerance`],
-      ["Weather features", data.weather_features, "Temperature model adjustment disabled / not implemented"],
+      ["Weather measurements", data.weather_measurements_present ? "Present" : "Unavailable", "Optional weather health does not indicate measurement availability. Temperature adjustment is unavailable."],
       ["Forecast storage", `${storage.tables.reduce((sum, item) => sum + item.row_count, 0)} rows`, `${storage.retention_health}; detail ${storage.point_retention_days}d, runs ${storage.run_retention_days}d`],
       ["Training history", `${percent(data.verified_share * 100)} EV-verified`, `${percent(data.unverified_share * 100)} unverified; policy ${data.training_policy}`],
       ["Tier 1 readiness", `${data.exact_slots_currently_qualified} / ${data.exact_slots_total}`, `${number(data.exact_slot_coverage_percent, 2)}% exact weekday/five-minute buckets qualified`],
     ];
-    const domains = Object.entries(data.domain_health).map(([name, value]) => `<article class="panel"><h3>${safeText(name[0].toUpperCase()+name.slice(1))}</h3>${definition([["Healthy", value.healthy_count], ["Unhealthy", value.unhealthy_count], ["Average score", percent(value.average_score)], ["Warnings", value.warning_count], ["Errors", value.error_count]])}<ul class="issue-list">${value.most_common_issues.slice(0,3).map(issue => `<li>${safeText(issue.code)} · ${issue.count}</li>`).join("") || "<li>No persisted issues</li>"}</ul></article>`).join("");
+    const domains = Object.entries(data.domain_health).map(([name, value]) => `<article class="panel"><h3>${safeText(name[0].toUpperCase()+name.slice(1))}</h3>${definition([["Healthy", value.healthy_count], ["Unhealthy", value.unhealthy_count], ["Average score", percent(value.average_score)], ["Warnings", value.warning_count], ["Errors", value.error_count]])}<ul class="issue-list">${value.most_common_issues.slice(0,3).map(issue => `<li>${safeText(issue.code)} · ${safeText(issue.entity_id || "domain")} · ${issue.count}</li>`).join("") || "<li>No persisted issues</li>"}</ul></article>`).join("");
     const evWarning = data.ev_contamination_warning ? '<aside class="panel schema-notice" role="note"><strong>EV contamination warning</strong><p>Confirmed fresh charging rows are excluded, but EV energy separation is incomplete until independent charger AC power is measured and validated.</p></aside>' : "";
-    $("#quality-content").innerHTML = `<div class="quality-grid">${cards.map(([label,value,detail]) => `<article class="panel"><p class="eyebrow">${safeText(label)}</p><div class="quality-metric">${safeText(value)}</div><p class="muted">${safeText(detail)}</p></article>`).join("")}${evWarning}</div><h3>Domain health</h3><div class="quality-grid">${domains}</div>`;
+    const incidents = data.incidents || {};
+    const incidentDetails = `<article class="panel"><h3>Collection gaps and telemetry incidents</h3><p>${incidents.collection_gap_period_count || 0} collection gaps; ${incidents.telemetry_incident_count || 0} telemetry incidents. ${incidents.incident_details_truncated ? "Showing the latest 20 of each type." : ""}</p><ul>${(incidents.collection_gap_periods || []).map(item => `<li>Absent collection: ${localTime(item.start_utc)} to ${localTime(item.end_utc)}; ${item.slots * 5} min</li>`).join("")}${(incidents.telemetry_incidents || []).map(item => `<li>Stored unhealthy telemetry: ${localTime(item.start_utc)} to ${localTime(item.end_utc)}; ${item.slots * 5} min; ${safeText(item.reasons.join(", "))}; ${safeText(item.entities.join(", "))}; recovery ${localTime(item.recovered_at_utc)}</li>`).join("")}</ul><p>Training exclusions are reported separately above. Missing values are retained.</p></article>`;
+    $("#quality-content").innerHTML = `<div class="quality-grid">${cards.map(([label,value,detail]) => `<article class="panel"><p class="eyebrow">${safeText(label)}</p><div class="quality-metric">${safeText(value)}</div><p class="muted">${safeText(detail)}</p></article>`).join("")}${evWarning}</div><h3>Domain health</h3><div class="quality-grid">${domains}</div>${incidentDetails}`;
   } catch (error) { setState("#quality-state", error.message, "error-state"); }
 }
 
@@ -585,7 +604,7 @@ async function loadSolarDiagnostics() {
   try {
     const data = await request("solar", "solar-forecast-diagnostics", { range: "30d" });
     setState("#solar-state", data.truncated ? "The bounded result was explicitly truncated." : "Daily diagnostics loaded; no automatic derating is applied.");
-    $("#solar-content").innerHTML = data.days.map(day => `<article class="panel"><h3>${safeText(day.local_date)}</h3>${definition([["Evidence label", day.classification], ["Coverage", percent(day.coverage_percent)], ["Actual PV", energy(day.actual_pv_kwh)], ["Solcast P10 / P50 / P90", `${energy(day.solcast_p10_kwh)} / ${energy(day.solcast_p50_kwh)} / ${energy(day.solcast_p90_kwh)}`], ["Actual minus P50", energy(day.actual_minus_p50_kwh)], ["P50 percentage error", percent(day.p50_percentage_error)], ["Inside Solcast range", day.actual_in_solcast_range == null ? "Unavailable" : (day.actual_in_solcast_range ? "Yes" : "No")], ["Minimum battery headroom", percent(day.minimum_battery_headroom_percent)], ["Battery charge / discharge", `${number(day.battery_charge_minutes, 0)} / ${number(day.battery_discharge_minutes, 0)} min`], ["Near-full battery", `${number(day.near_full_battery_minutes, 0)} min`], ["Possible clipping context", `${number(day.possible_inverter_clipping_minutes, 0)} min`], ["Export context", `${number(day.export_minutes, 0)} min`], ["Observed work modes", (day.observed_work_modes || []).join(", ") || "Unavailable"]])}<p class="muted">${safeText(day.interpretation)}</p></article>`).join("") || '<article class="panel"><p>No sufficiently bounded daily data is available.</p></article>';
+    $("#solar-content").innerHTML = data.days.map(day => `<article class="panel"><h3>${safeText(day.local_date)}</h3>${definition([["Evidence label", day.classification], ["Comparison", ({complete_day:"Completed day with sufficient coverage",incomplete_day:"Day still in progress",insufficient_coverage_or_forecast:"Insufficient daily coverage or forecast"})[day.comparison_status] || "Unavailable"], ["First stored forecast snapshot", localTime(day.forecast_snapshot_observed_at)], ["Coverage", percent(day.coverage_percent)], [day.day_complete ? "Recorded PV energy" : "Generation so far", energy(day.actual_pv_kwh)], ["Full-day Solcast P10 / P50 / P90", `${energy(day.solcast_p10_kwh)} / ${energy(day.solcast_p50_kwh)} / ${energy(day.solcast_p90_kwh)}`], ["Actual minus P50", energy(day.actual_minus_p50_kwh)], ["Actual minus P50 (% of actual)", percent(day.signed_percentage_error_percent)], ["Inside Solcast range", day.actual_in_solcast_range == null ? "Unavailable" : (day.actual_in_solcast_range ? "Yes" : "No")], ["Minimum battery headroom", percent(day.minimum_battery_headroom_percent)], ["Battery charge / discharge", `${number(day.battery_charge_minutes, 0)} / ${number(day.battery_discharge_minutes, 0)} min`], ["Near-full battery", `${number(day.near_full_battery_minutes, 0)} min`], ["Possible clipping context", `${number(day.possible_inverter_clipping_minutes, 0)} min`], ["Export context", `${number(day.export_minutes, 0)} min`], ["Observed work modes", (day.observed_work_modes || []).join(", ") || "Unavailable"]])}<p class="muted">${safeText(day.interpretation)} The snapshot is the first forecast stored that day; its original issue time is unverified.</p></article>`).join("") || '<article class="panel"><p>No sufficiently bounded daily data is available.</p></article>';
   } catch (error) { setState("#solar-state", error.message, "error-state"); }
 }
 

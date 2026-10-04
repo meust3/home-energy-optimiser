@@ -208,11 +208,13 @@ class ForecastCoordinator:
             forecast_point_count = len(forecast_run.points)
             self._check_deadline(started_monotonic)
             phase = "score_forecast_points"
+            scoring_started = self.monotonic()
             scored = repository.score_completed_forecast_points(
                 now=started_at,
                 delay_minutes=self.config.scoring_delay_minutes,
                 runtime_guard=lambda: self._check_deadline(started_monotonic),
             )
+            scoring_duration = self.monotonic() - scoring_started
             self._check_deadline(started_monotonic)
             rollup_result: dict[str, Any] | None = None
             rollup_status: dict[str, Any] | None = None
@@ -428,6 +430,9 @@ class ForecastCoordinator:
                 forecast_point_count=len(forecast_run.points),
                 metadata={
                     "scored_point_count": scored,
+                    "scoring_duration_seconds": scoring_duration,
+                    "scoring_batch_limit": 2500,
+                    "scoring_batch_saturated": scored == 2500,
                     "calibration_rollup": rollup_result,
                     "shadow_decision_run_id": decision_run_id,
                     "shadow_outcomes_scored": outcome_count,

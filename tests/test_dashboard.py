@@ -521,7 +521,7 @@ def test_web_shell_static_nested_ingress_api_and_security_headers():
         assert status == 200
         html = body.decode()
         assert f'<base href="{prefix}">' in html
-        assert 'href="static/app.css?v=0.6.0"' in html
+        assert 'href="static/app.css?v=0.6.6"' in html
         assert "Advisory only. No command was issued." in html
         assert 'id="decisions"' in html
         assert "Shadow only &mdash; no command issued" in html
@@ -530,7 +530,7 @@ def test_web_shell_static_nested_ingress_api_and_security_headers():
         status, _, css = _request(
             server,
             "GET",
-            prefix + "static/app.css?v=0.6.0",
+            prefix + "static/app.css?v=0.6.6",
             {"X-Ingress-Path": prefix},
         )
         assert status == 200
@@ -790,3 +790,218 @@ def test_baseline_comparison_uses_eligible_actuals_without_writes(
     assert repository.table_counts() == counts
     assert repository.forecast_run(run_id) == before
     repository.close()
+
+
+@pytest.mark.parametrize("dashboard_database", ["sqlite", "postgresql"], indirect=True)
+def test_live_card_reads_elapsed_observations_without_scoring_or_rewriting(
+    dashboard_database,
+):
+    from sqlalchemy import update
+
+    from energy_optimizer.db.models import Observation
+
+    url, first, _ = dashboard_database
+    start = first.slot_utc
+    repository = open_repository(url)
+    run_id = repository.save_forecast_run(
+        ForecastRun(
+            created_at_utc=start - timedelta(seconds=20),
+            forecast_type="baseline_household_load",
+            source="scheduled_forecast_operations",
+            horizon_start_utc=start,
+            horizon_end_utc=start + timedelta(minutes=20),
+            model_version="household-demand-hierarchy-v1-cohort-v1",
+            metadata={
+                "alignment_version": "full_5m_v1",
+                "training_policy": "verified_preferred",
+            },
+            points=[
+                ForecastPoint(
+                    period_start_utc=start + timedelta(minutes=5 * i),
+                    period_end_utc=start + timedelta(minutes=5 * (i + 1)),
+                    expected_value=1000,
+                    unit="W",
+                )
+                for i in range(4)
+            ],
+        )
+    )
+    with repository.engine.begin() as connection:
+        connection.execute(
+            update(Observation)
+            .where(Observation.slot_utc == start + timedelta(minutes=10))
+            .values(
+                baseline_training_eligible=False,
+                baseline_exclusion_reason="known_ev_session_without_ac_power",
+            )
+        )
+    before = repository.table_counts()
+    repository.close()
+    health = AppHealth(900)
+    health.demand_training_policy = "verified_preferred"
+    service = DashboardService(url, health)
+    card = service.forecast_comparison_card(now=start + timedelta(minutes=15))
+    assert card.run_id == run_id
+    assert card.points[0].actual_w == 1800
+    assert card.points[0].actual_source == "observations_pending_score"
+    assert card.points[1].actual_w is None
+    assert card.points[1].actual_missing_reason == "no_observation"
+    assert card.points[2].actual_w is None
+    assert card.points[2].exclusion_reason == "known_ev_session_without_ac_power"
+    assert card.points[3].future and card.points[3].actual_w is None
+    assert card.coverage["eligible_actual_intervals"] == 1
+    assert card.coverage["matured_intervals"] == 3
+    assert card.metrics["forecast_energy_kwh"] == pytest.approx(1 / 12)
+    assert card.metrics["actual_energy_kwh"] == pytest.approx(0.15)
+    assert card.uncertainty_status == "not_available_for_model"
+    repository = open_repository(url)
+    assert repository.table_counts() == before
+    assert (
+        repository.score_completed_forecast_points(
+            now=start + timedelta(hours=1), delay_minutes=10
+        )
+        == 4
+    )
+    scored = service.forecast_comparison_card(now=start + timedelta(minutes=15))
+    assert scored.points[0].actual_source == "stored_score"
+    assert scored.points[0].actual_w == card.points[0].actual_w
+    # A later observation edit must not replace immutable official evidence.
+    with repository.engine.begin() as connection:
+        connection.execute(
+            update(Observation)
+            .where(Observation.slot_utc == start)
+            .values(baseline_house_consumption_w=9000)
+        )
+    assert (
+        service.forecast_comparison_card(now=start + timedelta(minutes=15))
+        .points[0]
+        .actual_w
+        == 1800
+    )
+    repository.close()
+
+
+def test_observation_windows_use_identical_slot_selection_and_utc_bucket_origins(now):
+    from energy_optimizer.dashboard_api import observation_window
+
+    current = now.replace(minute=0, second=20)
+    start, end = resolve_window(range_name="24h", start=None, end=None, now=current)
+    effective_start, effective_end = observation_window(
+        start, end, preset=True, range_name="24h"
+    )
+    assert effective_end == current.replace(minute=0, second=0) - timedelta(minutes=5)
+    assert (effective_end - effective_start) / timedelta(minutes=5) + 1 == 288
+    assert (current - effective_end).total_seconds() < 360
+    custom_start, custom_end = observation_window(
+        now, now + timedelta(minutes=20), preset=False, range_name="24h"
+    )
+    assert custom_start.minute == 10 and custom_end.minute == 25
+    service_rows = [
+        {"slot_utc": custom_start, "is_healthy": True, "house_consumption_w": 1234}
+    ]
+    points = aggregate_timeseries(
+        service_rows, start=custom_start, end=custom_end, resolution="15m"
+    )
+    assert points[0].timestamp_utc.minute == 0
+    assert points[0].house_consumption_w == 1234
+    assert points[1].timestamp_utc.minute == 15 and not points[1].has_observation
+
+
+@pytest.mark.parametrize("dashboard_database", ["sqlite", "postgresql"], indirect=True)
+def test_scoring_batches_overlapping_intervals_and_preserves_legacy_alignment(
+    dashboard_database,
+):
+    from sqlalchemy import event
+    from sqlalchemy.orm import Session
+
+    from energy_optimizer.db.models import ForecastPointScore
+
+    url, first, _ = dashboard_database
+    repository = open_repository(url)
+    start = first.slot_utc
+    run_id = repository.save_forecast_run(
+        ForecastRun(
+            created_at_utc=start - timedelta(minutes=30),
+            forecast_type="baseline_household_load",
+            source="test",
+            horizon_start_utc=start - timedelta(minutes=1),
+            horizon_end_utc=start + timedelta(minutes=14),
+            model_version="legacy",
+            metadata={},
+            points=[
+                ForecastPoint(
+                    period_start_utc=start - timedelta(minutes=1),
+                    period_end_utc=start + timedelta(minutes=14),
+                    expected_value=1200,
+                    unit="W",
+                )
+                for _ in range(20)
+            ],
+        )
+    )
+    queries = []
+
+    def record(_connection, _cursor, query, _parameters, _context, _many):
+        if "FROM observations" in query:
+            queries.append(query)
+
+    event.listen(repository.engine, "before_cursor_execute", record)
+    assert (
+        repository.score_completed_forecast_points(
+            now=start + timedelta(hours=1), delay_minutes=10
+        )
+        == 20
+    )
+    event.remove(repository.engine, "before_cursor_execute", record)
+    assert len(queries) == 1
+    with Session(repository.engine) as session:
+        scores = list(session.query(ForecastPointScore).all())
+        assert all(s.actual_value == 1800 and s.signed_error == 600 for s in scores)
+        assert all(s.metadata_json["eligible_sample_count"] == 2 for s in scores)
+    assert (
+        repository.score_completed_forecast_points(
+            now=start + timedelta(hours=1), delay_minutes=10
+        )
+        == 0
+    )
+    assert (
+        repository.scoring_backlog_read_only(
+            now=start + timedelta(hours=1), delay_minutes=10
+        )["pending_count_at_least"]
+        == 0
+    )
+    assert repository.forecast_run(run_id)["points"][0]["actual_value"] is None
+    repository.close()
+
+
+def test_collection_incidents_separate_absent_and_unhealthy_evidence():
+    from datetime import UTC
+
+    from energy_optimizer.collection_diagnostics import collection_incidents
+
+    start = datetime(2026, 10, 5, tzinfo=UTC)
+    rows = [
+        {
+            "slot_utc": start,
+            "telemetry_is_healthy": False,
+            "health_domains_json": {
+                "telemetry": {
+                    "issues": [
+                        {"entity_id": "sensor.test_pv", "code": "unavailable_state"}
+                    ]
+                }
+            },
+        },
+        {"slot_utc": start + timedelta(minutes=5), "telemetry_is_healthy": True},
+        {"slot_utc": start + timedelta(minutes=15), "telemetry_is_healthy": False},
+    ]
+    result = collection_incidents(rows, start, start + timedelta(minutes=15))
+    assert result["collection_gap_period_count"] == 1
+    assert result["collection_gap_periods"][0]["slots"] == 1
+    assert result["telemetry_incident_count"] == 2
+    assert result["telemetry_incidents"][0]["entities"] == ["sensor.test_pv"]
+    assert result["telemetry_incidents"][0]["recovered_at_utc"] == start + timedelta(
+        minutes=5
+    )
+    assert result["telemetry_incidents"][1]["recovered_at_utc"] is None
+    assert result["missing_value_counts"]["ev_power_w"] == 3

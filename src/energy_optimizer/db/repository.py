@@ -3,8 +3,9 @@
 from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from enum import StrEnum
+from types import SimpleNamespace
 from typing import Any
 
 from sqlalchemy import Engine, String, case, cast, func, insert, select, text, update
@@ -14,10 +15,8 @@ from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session
 
 from energy_optimizer.data_validation import (
-    INVALID_ACTUAL_NEGATIVE_HOUSEHOLD_DEMAND,
     INVALID_NEGATIVE_HOUSEHOLD_DEMAND,
     MATERIAL_NEGATIVE_HOUSEHOLD_DEMAND_W,
-    materially_negative_household_demand,
 )
 from energy_optimizer.db.engine import translate_database_error
 from energy_optimizer.db.models import (
@@ -37,6 +36,11 @@ from energy_optimizer.db.models import (
     ShadowDecisionCandidate,
     ShadowDecisionOutcome,
     ShadowDecisionRun,
+)
+from energy_optimizer.forecast_actuals import (
+    ActualEvidence,
+    evaluate_actual_rows,
+    interval_rows,
 )
 from energy_optimizer.forecast_alignment import (
     FULL_FIVE_MINUTE_ALIGNMENT,
@@ -699,6 +703,41 @@ class DatabaseRepository:
             )
             return dict(row) if row else None
 
+    def scoring_backlog_read_only(
+        self, *, now: datetime, delay_minutes: int, limit: int = 2500
+    ) -> dict[str, Any]:
+        """Explicit diagnostic; count a capped pending sample without score writes."""
+        _require_aware(now)
+        if not 1 <= limit <= 2500 or delay_minutes < 0:
+            raise ValueError("invalid scoring backlog diagnostic bounds")
+        cutoff = now.astimezone(UTC) - timedelta(minutes=delay_minutes)
+        query = (
+            select(ForecastPoint.period_end_utc)
+            .join(ForecastRun, ForecastRun.id == ForecastPoint.forecast_run_id)
+            .outerjoin(
+                ForecastPointScore,
+                ForecastPointScore.forecast_point_id == ForecastPoint.id,
+            )
+            .where(
+                ForecastPoint.period_end_utc <= cutoff,
+                ForecastPointScore.forecast_point_id.is_(None),
+                ForecastRun.forecast_type == "baseline_household_load",
+            )
+            .order_by(ForecastPoint.period_end_utc, ForecastPoint.id)
+            .limit(limit + 1)
+        )
+        with Session(self.engine) as session:
+            pending = list(session.scalars(query))
+        return {
+            "cutoff_utc": cutoff,
+            "pending_count_at_least": min(len(pending), limit),
+            "count_truncated": len(pending) > limit,
+            "oldest_pending_interval_end_utc": pending[0] if pending else None,
+            "oldest_pending_age_seconds": (
+                max((now - pending[0]).total_seconds(), 0) if pending else None
+            ),
+        }
+
     def score_completed_forecast_points(
         self,
         *,
@@ -741,77 +780,30 @@ class DatabaseRepository:
                     .order_by(pending.c.period_end_utc, pending.c.id)
                 )
             )
-            for point, run_metadata in points:
+            evidence_by_id = _batch_actual_evidence(session, points, runtime_guard)
+            for point, _run_metadata in points:
                 if runtime_guard is not None:
                     runtime_guard()
-                rows = list(
-                    session.execute(
-                        select(
-                            Observation.baseline_house_consumption_w,
-                            Observation.house_consumption_w,
-                            Observation.telemetry_is_healthy,
-                            Observation.baseline_training_eligible,
-                            Observation.baseline_exclusion_reason,
-                        ).where(*_actual_slot_conditions(point, run_metadata))
-                    )
-                )
-                available = [float(row[0]) for row in rows if row[0] is not None]
-                invalid_negative = any(
-                    materially_negative_household_demand(row[1])
-                    or row[4] == INVALID_NEGATIVE_HOUSEHOLD_DEMAND
-                    for row in rows
-                )
-                eligible = [
-                    float(row[0])
-                    for row in rows
-                    if row[0] is not None
-                    and not materially_negative_household_demand(row[1])
-                    and bool(row[2])
-                    and bool(row[3])
-                ]
-                invalid_actuals = [
-                    float(row[1])
-                    for row in rows
-                    if materially_negative_household_demand(row[1])
-                ]
-                actual = (
-                    sum(invalid_actuals) / len(invalid_actuals)
-                    if invalid_negative and invalid_actuals
-                    else (sum(available) / len(available) if available else None)
-                )
-                health_eligible = bool(eligible)
-                scored_actual = sum(eligible) / len(eligible) if eligible else None
+                evidence = evidence_by_id[point.id]
                 signed = (
-                    scored_actual - point.expected_value
-                    if scored_actual is not None
+                    evidence.actual_value - point.expected_value
+                    if evidence.health_eligible and evidence.actual_value is not None
                     else None
                 )
-                missing_reason = None
-                if not rows:
-                    missing_reason = "no_observation"
-                elif invalid_negative:
-                    missing_reason = INVALID_ACTUAL_NEGATIVE_HOUSEHOLD_DEMAND
-                    health_eligible = False
-                    scored_actual = None
-                    signed = None
-                elif not available:
-                    missing_reason = "actual_value_missing"
-                elif not health_eligible:
-                    missing_reason = "actual_unhealthy_or_ineligible"
                 session.add(
                     ForecastPointScore(
                         forecast_point_id=point.id,
                         scored_at_utc=now.astimezone(UTC),
-                        actual_value=(
-                            scored_actual if scored_actual is not None else actual
-                        ),
+                        actual_value=(evidence.actual_value),
                         absolute_error=abs(signed) if signed is not None else None,
                         signed_error=signed,
                         squared_error=signed * signed if signed is not None else None,
-                        actual_available=actual is not None,
-                        health_eligible=health_eligible,
-                        missing_reason=missing_reason,
-                        metadata_json={"eligible_sample_count": len(eligible)},
+                        actual_available=evidence.actual_available,
+                        health_eligible=evidence.health_eligible,
+                        missing_reason=evidence.missing_reason,
+                        metadata_json={
+                            "eligible_sample_count": evidence.eligible_sample_count
+                        },
                     )
                 )
         return len(points)
@@ -1337,6 +1329,8 @@ class DatabaseRepository:
                         ForecastPoint.lower_value,
                         ForecastPoint.upper_value,
                         ForecastPoint.unit,
+                        ForecastPointScore.forecast_point_id.label("score_id"),
+                        ForecastPointScore.scored_at_utc,
                         ForecastPointScore.actual_value,
                         ForecastPointScore.actual_available,
                         ForecastPointScore.health_eligible,
@@ -1351,7 +1345,29 @@ class DatabaseRepository:
                     .limit(288)
                 ).mappings()
             )
-        return {**dict(run), "points": [dict(point) for point in points]}
+            values = [dict(point) for point in points]
+            if mode == "live":
+                # Read observations without changing forecasts or official scores.
+                pending = [
+                    (SimpleNamespace(id=i, **value), run["metadata_json"])
+                    for i, value in enumerate(values)
+                    if value["score_id"] is None and value["period_end_utc"] <= now
+                ]
+                for i, evidence in _batch_actual_evidence(session, pending).items():
+                    values[i].update(
+                        actual_value=evidence.actual_value,
+                        actual_available=evidence.actual_available,
+                        health_eligible=evidence.health_eligible,
+                        missing_reason=evidence.missing_reason,
+                        exclusion_reason=evidence.exclusion_reason,
+                        actual_source="observations_pending_score",
+                    )
+            for value in values:
+                value.setdefault(
+                    "actual_source",
+                    "stored_score" if value["score_id"] is not None else None,
+                )
+        return {**dict(run), "points": values}
 
     def forecast_run(self, run_id: int) -> dict[str, Any] | None:
         with Session(self.engine) as session:
@@ -2278,6 +2294,58 @@ def _eligibility_counts(
             else bool(row["baseline_training_eligible"])
         )
         result["eligible" if eligible else "ineligible"] += 1
+    return result
+
+
+def _batch_actual_evidence(
+    session: Session,
+    points: list[tuple[Any, Any]],
+    runtime_guard: Callable[[], None] | None = None,
+) -> dict[int, ActualEvidence]:
+    """Bound observation reads and reuse them across overlapping forecast points."""
+    groups: dict[date, list[tuple[Any, Any]]] = {}
+    for point, metadata in points:
+        key = point.period_start_utc.astimezone(UTC).date()
+        groups.setdefault(key, []).append((point, metadata))
+    result: dict[int, ActualEvidence] = {}
+    for group in groups.values():
+        if runtime_guard is not None:
+            runtime_guard()
+        start = min(p.period_start_utc for p, _ in group)
+        end = max(p.period_end_utc for p, _ in group)
+        if end - start > timedelta(days=2):
+            raise ValueError("Forecast scoring observation window exceeds two days")
+        rows = list(
+            session.execute(
+                select(
+                    Observation.slot_utc,
+                    Observation.baseline_house_consumption_w,
+                    Observation.house_consumption_w,
+                    Observation.telemetry_is_healthy,
+                    Observation.baseline_training_eligible,
+                    Observation.baseline_exclusion_reason,
+                )
+                .where(Observation.slot_utc >= start, Observation.slot_utc < end)
+                .order_by(Observation.slot_utc)
+                .limit(577)
+            ).mappings()
+        )
+        if len(rows) > 576:
+            raise ValueError("Forecast scoring observation batch exceeds 576 slots")
+        slots = [r["slot_utc"] for r in rows]
+        for point, metadata in group:
+            result[point.id] = evaluate_actual_rows(
+                interval_rows(
+                    rows,
+                    slots,
+                    point.period_start_utc,
+                    point.period_end_utc,
+                    full_five_minute=(
+                        forecast_alignment_version(metadata)
+                        == FULL_FIVE_MINUTE_ALIGNMENT
+                    ),
+                )
+            )
     return result
 
 

@@ -22,3 +22,10 @@ to make every constraint claim, so unavailable evidence remains unavailable.
 Private Solcast attributes, identifiers, coordinates, and credentials are not
 returned. No automatic Solcast derating is calculated or applied, and no forecast,
 reserve, or device-control arithmetic changes.
+
+
+The v0.6.6 presentation suppresses daily errors and forecast-range judgments until
+the local day has finished with sufficient coverage. Recorded generation so far
+and full-day forecasts remain separate. Errors use actual minus forecast; the
+percentage denominator is actual energy. The first stored snapshot time is shown
+without claiming its original issue time is verified.

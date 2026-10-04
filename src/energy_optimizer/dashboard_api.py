@@ -11,6 +11,7 @@ from zoneinfo import ZoneInfo
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from energy_optimizer.collection_diagnostics import collection_incidents
 from energy_optimizer.db.migrations import current_revision, expected_revision
 from energy_optimizer.forecast_calibration import (
     CURRENT_FORECAST_MODEL_VERSION,
@@ -235,6 +236,8 @@ class TimeseriesPoint(ApiModel):
 class TimeseriesResponse(ApiModel):
     requested_start_utc: datetime
     requested_end_utc: datetime
+    effective_start_utc: datetime | None = None
+    effective_end_utc: datetime | None = None
     requested_resolution: str
     actual_resolution: str
     point_count: int
@@ -342,6 +345,8 @@ class ReserveResponse(ApiModel):
 
 
 class DataQualityResponse(ApiModel):
+    incidents: dict[str, Any] = Field(default_factory=dict)
+    weather_measurements_present: bool = False
     range_start_utc: datetime
     range_end_utc: datetime
     total_observations: int
@@ -430,6 +435,8 @@ class ForecastComparisonCardPoint(ApiModel):
     actual_eligible: bool
     actual_missing_reason: str | None = None
     future: bool
+    actual_source: str | None = None
+    exclusion_reason: str | None = None
 
 
 class ForecastComparisonCardResponse(ApiModel):
@@ -444,6 +451,7 @@ class ForecastComparisonCardResponse(ApiModel):
     coverage: dict[str, Any] = Field(default_factory=dict)
     calibration_status: str = "insufficient_data"
     now_utc: datetime
+    uncertainty_status: str = "not_available_for_model"
     empty_state: dict[str, str] | None = None
 
 
@@ -731,7 +739,7 @@ class DashboardService:
             range_end_utc=end,
             requested_range=range_name,
             truncated=truncated,
-            days=calculate_solar_diagnostics(rows),
+            days=calculate_solar_diagnostics(rows, now=now or datetime.now(UTC)),
         )
         self.health.solar_diagnostics = (
             "warning" if truncated else ("available" if response.days else "optional")
@@ -859,6 +867,10 @@ class DashboardService:
         start_utc, end_utc = resolve_window(
             range_name=range_name, start=start, end=end, now=now
         )
+        requested_start, requested_end = start_utc, end_utc
+        start_utc, end_utc = observation_window(
+            start_utc, end_utc, preset=start is None, range_name=range_name
+        )
         actual_resolution = resolve_resolution(start_utc, end_utc, resolution)
         with self._repository() as repository:
             rows = repository.dashboard_observation_rows_read_only(
@@ -885,8 +897,10 @@ class DashboardService:
             for row in rows
         )
         return TimeseriesResponse(
-            requested_start_utc=start_utc,
-            requested_end_utc=end_utc,
+            requested_start_utc=requested_start,
+            requested_end_utc=requested_end,
+            effective_start_utc=start_utc,
+            effective_end_utc=end_utc,
             requested_resolution=resolution,
             actual_resolution=actual_resolution,
             point_count=len(points),
@@ -1045,16 +1059,25 @@ class DashboardService:
         points: list[ForecastComparisonCardPoint] = []
         compared: list[tuple[float, float, float]] = []
         matured_count = 0
+        pending_count = 0
+        observed_pending_count = 0
+        scored_count = 0
         for row in run["points"][:288]:
             start = _utc(row["period_start_utc"])
             end = _utc(row["period_end_utc"])
             future = end > current
             if not future:
                 matured_count += 1
+            source = row.get("actual_source")
+            if not future:
+                pending_count += int(source == "observations_pending_score")
+                scored_count += int(source == "stored_score")
             actual = _number(row.get("actual_value"))
             eligible = bool(
                 not future and row.get("health_eligible") is True and actual is not None
             )
+            if eligible and source == "observations_pending_score":
+                observed_pending_count += 1
             reason = None
             if future:
                 actual = None
@@ -1078,6 +1101,8 @@ class DashboardService:
                     actual_eligible=eligible,
                     actual_missing_reason=reason,
                     future=future,
+                    actual_source=None if future else source,
+                    exclusion_reason=row.get("exclusion_reason"),
                 )
             )
         errors = [actual - expected for expected, actual, _ in compared]
@@ -1105,11 +1130,16 @@ class DashboardService:
                 ),
             },
             points=points,
+            uncertainty_status=(
+                "stored_bounds"
+                if any(p.lower_w is not None and p.upper_w is not None for p in points)
+                else "not_available_for_model"
+            ),
             metrics={
                 "period_label": (
                     "Compared elapsed period"
                     if mode == "live"
-                    else "Compared full forecast"
+                    else "Compared eligible intervals of completed forecast"
                 ),
                 "forecast_energy_kwh": forecast_energy if compared else None,
                 "actual_energy_kwh": actual_energy if compared else None,
@@ -1132,6 +1162,9 @@ class DashboardService:
             coverage={
                 "total_intervals": total_points,
                 "matured_intervals": matured_count,
+                "officially_scored_intervals": scored_count,
+                "observed_pending_score_intervals": observed_pending_count,
+                "pending_official_score_intervals": pending_count,
                 "eligible_actual_intervals": eligible_count,
                 "elapsed_proportion_percent": (
                     matured_count / total_points * 100 if total_points else 0
@@ -1424,6 +1457,9 @@ class DashboardService:
         start_utc, end_utc = resolve_window(
             range_name=range_name, start=start, end=end, now=now
         )
+        start_utc, end_utc = observation_window(
+            start_utc, end_utc, preset=start is None, range_name=range_name
+        )
         with self._repository() as repository:
             rows = repository.dashboard_observation_rows_read_only(
                 start=start_utc,
@@ -1436,7 +1472,9 @@ class DashboardService:
         slots = [_utc(row["slot_utc"]) for row in rows]
         gap = calculate_gap_report(slots, start=start_utc, end=end_utc)
         recent_gap = calculate_gap_report(
-            slots, start=max(start_utc, end_utc - timedelta(hours=24)), end=end_utc
+            slots,
+            start=max(start_utc, end_utc - timedelta(hours=24) + timedelta(minutes=5)),
+            end=end_utc,
         )
         health_rows = []
         for row in rows:
@@ -1555,6 +1593,10 @@ class DashboardService:
             item for item in residual_rows if abs(float(item["residual_w"])) > tolerance
         ]
         return DataQualityResponse(
+            incidents=collection_incidents(rows, start_utc, end_utc),
+            weather_measurements_present=any(
+                row.get("temperature_c") is not None for row in rows
+            ),
             range_start_utc=start_utc,
             range_end_utc=end_utc,
             total_observations=len(rows),
@@ -1696,6 +1738,27 @@ def resolve_window(
     return start_utc, end_utc
 
 
+def observation_window(
+    start: datetime, end: datetime, *, preset: bool, range_name: str
+) -> tuple[datetime, datetime]:
+    """Inclusive canonical slots; preset windows allow 60s for collection to finish."""
+    interval = timedelta(minutes=5)
+    if preset:
+        latest = end - timedelta(seconds=60)
+        effective_end = latest.replace(
+            minute=latest.minute // 5 * 5, second=0, microsecond=0
+        )
+        return effective_end - RANGE_DURATIONS[range_name] + interval, effective_end
+    floor_start = start.replace(minute=start.minute // 5 * 5, second=0, microsecond=0)
+    effective_start = floor_start + interval if floor_start < start else floor_start
+    effective_end = end.replace(minute=end.minute // 5 * 5, second=0, microsecond=0)
+    if effective_end < effective_start:
+        raise DashboardQueryError(
+            "empty_slot_range", "Range contains no five-minute slots."
+        )
+    return effective_start, effective_end
+
+
 def resolve_resolution(start: datetime, end: datetime, requested: str) -> str:
     """Choose or validate a resolution that cannot exceed the response cap."""
     if requested == "auto":
@@ -1724,14 +1787,19 @@ def aggregate_timeseries(
     """Aggregate power/prices by mean, SOC by last value, and preserve empty gaps."""
     minutes = RESOLUTION_MINUTES[resolution]
     interval = timedelta(minutes=minutes)
+    origin = start.replace(
+        minute=(start.minute // minutes) * minutes, second=0, microsecond=0
+    )
     buckets: dict[datetime, list[dict[str, Any]]] = defaultdict(list)
     for row in rows:
         slot = _utc(row["slot_utc"])
-        index = int((slot - start).total_seconds() // interval.total_seconds())
+        if slot < start or slot > end:
+            continue
+        index = int((slot - origin).total_seconds() // interval.total_seconds())
         if index >= 0:
-            buckets[start + interval * index].append(row)
+            buckets[origin + interval * index].append(row)
     result = []
-    cursor = start
+    cursor = origin
     while cursor <= end:
         values = buckets.get(cursor, [])
         result.append(
@@ -1805,7 +1873,10 @@ def _last_text(rows: list[dict[str, Any]], name: str) -> str | None:
 
 
 def _bucket_count(start: datetime, end: datetime, minutes: int) -> int:
-    return int((end - start).total_seconds() // (minutes * 60)) + 1
+    origin = start.replace(
+        minute=(start.minute // minutes) * minutes, second=0, microsecond=0
+    )
+    return int((end - origin).total_seconds() // (minutes * 60)) + 1
 
 
 def _complete_periods(rows: list[dict[str, Any]]) -> tuple[int, int]:
