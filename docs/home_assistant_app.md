@@ -76,7 +76,8 @@ It then verifies:
 
 1. the URL is PostgreSQL, never SQLite;
 2. PostgreSQL connectivity and authentication;
-3. the exact expected Alembic revision (`20260811_01` since v0.4.0);
+3. the exact expected Alembic revision (`20261005_01` for v0.7.0; older release
+   sections are historical);
 4. tables needed for collection and analytical consumers;
 5. the Core API through the Supervisor proxy;
 6. all required collector entities through GET requests.

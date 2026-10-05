@@ -35,6 +35,33 @@ class Base(DeclarativeBase):
     metadata = MetaData(naming_convention=NAMING_CONVENTION)
 
 
+class ContextObservation(Base):
+    __tablename__ = "context_observations"
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    slot_utc: Mapped[datetime] = mapped_column(
+        AwareDateTime(), ForeignKey("observations.slot_utc"), nullable=False
+    )
+    received_at_utc: Mapped[datetime] = mapped_column(AwareDateTime(), nullable=False)
+    recorded_at_utc: Mapped[datetime] = mapped_column(
+        AwareDateTime(), nullable=False, index=True
+    )
+    mapping_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    body: Mapped[Any] = mapped_column(JSON_TYPE, nullable=False)
+
+
+class WeatherContextSnapshot(Base):
+    __tablename__ = "weather_context_snapshots"
+    __table_args__ = (
+        Index("idx_weather_context_asof", "source_key", "recorded_at_utc"),
+    )
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    source_key: Mapped[str] = mapped_column(String(64), nullable=False)
+    semantic_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    received_at_utc: Mapped[datetime] = mapped_column(AwareDateTime(), nullable=False)
+    recorded_at_utc: Mapped[datetime] = mapped_column(AwareDateTime(), nullable=False)
+    body: Mapped[Any] = mapped_column(JSON_TYPE, nullable=False)
+
+
 class Observation(Base):
     __tablename__ = "observations"
     __table_args__ = (

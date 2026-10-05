@@ -34,6 +34,7 @@ def create_database_engine(
     echo: bool = False,
     connect_timeout_seconds: int | None = None,
     statement_timeout_ms: int | None = None,
+    sqlite_timeout_seconds: float = 30,
 ) -> Engine:
     url = safe_url(database_url)
     is_read_only_sqlite_uri = (
@@ -48,7 +49,10 @@ def create_database_engine(
         Path(url.database).expanduser().parent.mkdir(parents=True, exist_ok=True)
     kwargs: dict[str, object] = {"pool_pre_ping": True, "echo": echo}
     if url.get_backend_name() == "sqlite":
-        kwargs["connect_args"] = {"check_same_thread": False, "timeout": 30}
+        kwargs["connect_args"] = {
+            "check_same_thread": False,
+            "timeout": sqlite_timeout_seconds,
+        }
     elif url.get_backend_name() == "postgresql" and (
         connect_timeout_seconds is not None or statement_timeout_ms is not None
     ):

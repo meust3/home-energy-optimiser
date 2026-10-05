@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.7.0 - release candidate (not published)
+
+- Adds optional mapped indoor/current-weather context collection and immutable
+  archived weather snapshots. Collection is disabled by default and the mapping
+  is empty until separately approved activation.
+- Reuses Met.no through existing Home Assistant states. The corrected hourly HA
+  cache is a separate HA-side setup; Energy remains GET-only. Failed/restored or
+  oversized cache payloads stay unavailable and retain prior attributes honestly.
+- Requires manual migration 20260927_01 -> 20261005_01 even with context disabled.
+  Adds only context_observations and weather_context_snapshots; startup never
+  migrates. Original records/calculations are not rewritten and forecasts do not
+  consume the new context yet.
+- v0.6.5 rejects the new schema. Tested compatible code with context disabled is
+  the non-destructive recovery path for the supported scenario; physical downgrade
+  deletes context/weather history and requires separate explicit approval. See
+  docs/forecast_context_collection.md and the final local runtime report.
+- No physical outdoor sensor or metered HVAC power is implied by the initial
+  mapping. Forecast models, calibration, reserves, shadow policy, non-HOLD gates,
+  AI routing, retention and outcome-v2 comparative nulls remain unchanged.
+
 ## 0.6.5 - release candidate (not published)
 
 - Assembles complete action-window household demand from compatible linked

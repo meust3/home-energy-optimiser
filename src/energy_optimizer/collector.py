@@ -6,6 +6,7 @@ from zoneinfo import ZoneInfo
 from energy_optimizer import entity_ids as ids
 from energy_optimizer.energy_flow import derive_energy_flow, derive_event_labels
 from energy_optimizer.ev import calculate_baseline_load, parse_vehicle_telemetry
+from energy_optimizer.forecast_context import ContextMapping
 from energy_optimizer.health import evaluate_data_health
 from energy_optimizer.home_assistant import HomeAssistantClient
 from energy_optimizer.models import (
@@ -229,11 +230,26 @@ def build_observation(
 
 
 class Collector:
-    def __init__(self, client: HomeAssistantClient, config: CollectorConfig) -> None:
+    def __init__(
+        self,
+        client: HomeAssistantClient,
+        config: CollectorConfig,
+        *,
+        context_mapping: ContextMapping | None = None,
+    ) -> None:
         self._client = client
         self._config = config
+        self._context_mapping = (
+            context_mapping if config.context_collection_enabled else None
+        )
 
     def collect(self, *, observed_at: datetime | None = None) -> EnergyObservation:
+        return self.collect_with_states(observed_at=observed_at)[0]
+
+    def collect_with_states(
+        self, *, observed_at: datetime | None = None
+    ) -> tuple[EnergyObservation, dict[str, HomeAssistantState]]:
+        """One normal cached-state GET; context parsing happens after core commit."""
         optional_entities = tuple(
             entity_id
             for entity_id in (
@@ -254,8 +270,16 @@ class Collector:
             )
             if entity_id
         )
-        states = self._client.get_states(ids.ALL_ENTITY_IDS + optional_entities)
-        return build_observation(states, self._config, observed_at=observed_at)
+        core_ids = ids.ALL_ENTITY_IDS + optional_entities
+        context_ids = self._context_mapping.entity_ids if self._context_mapping else ()
+        if context_ids:
+            states = self._client.get_states(
+                core_ids + context_ids,
+                optional_entity_ids=set(context_ids) - set(core_ids),
+            )
+        else:
+            states = self._client.get_states(core_ids)
+        return build_observation(states, self._config, observed_at=observed_at), states
 
 
 def _parse_local_datetime(value: str | None, timezone_name: str) -> datetime | None:

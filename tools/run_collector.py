@@ -7,8 +7,16 @@ from collections.abc import Callable
 from datetime import UTC, datetime
 
 from energy_optimizer.collector import Collector
-from energy_optimizer.config import load_config
-from energy_optimizer.db.engine import DatabaseConnectionError, DatabaseTransactionError
+from energy_optimizer.config import load_config, load_database_url
+from energy_optimizer.context_collection import (
+    collect_and_store_context,
+    open_bounded_context_repository,
+)
+from energy_optimizer.db.engine import (
+    DatabaseConnectionError,
+    DatabaseTransactionError,
+)
+from energy_optimizer.forecast_context import parse_mapping
 from energy_optimizer.home_assistant import HomeAssistantClient, HomeAssistantError
 from energy_optimizer.logging_config import configure_logging
 from energy_optimizer.persistence import ObservationStore
@@ -86,10 +94,25 @@ def main(
     stop_event: threading.Event | None = None,
     on_success: Callable[[object], None] | None = None,
     on_failure: Callable[[str], None] | None = None,
+    on_context: Callable[[dict], None] | None = None,
 ) -> int:
     configure_logging()
     config = load_config()
     store = ObservationStore()
+    mapping = None
+    if config.context_collection_enabled:
+        try:
+            mapping = parse_mapping(config.context_mapping_json)
+        except (ValueError, TypeError):
+            LOGGER.warning(
+                "Optional context mapping invalid; core collection continues"
+            )
+        if on_context is not None:
+            on_context(
+                {"status": "pending_collection" if mapping else "invalid_mapping"}
+            )
+
+    context_database_url = load_database_url() if mapping is not None else None
 
     def collect_once() -> object:
         with HomeAssistantClient(
@@ -97,10 +120,23 @@ def main(
             config.ha_token,
             timeout_seconds=config.request_timeout_seconds,
         ) as client:
-            observation = Collector(client, config).collect(
-                observed_at=datetime.now(UTC)
-            )
+            observation, states = Collector(
+                client, config, context_mapping=mapping
+            ).collect_with_states(observed_at=datetime.now(UTC))
+            receipt = datetime.now(UTC)
         result = save_with_retry(lambda: store.save(observation))
+        if mapping is not None:
+            context = collect_and_store_context(
+                states,
+                mapping,
+                slot=observation.slot_utc,
+                receipt=receipt,
+                repository_factory=lambda: open_bounded_context_repository(
+                    context_database_url
+                ),
+            )
+            if on_context is not None:
+                on_context(context)
         LOGGER.info(
             "Saved slot %s (telemetry %s, price %s, solar %s, weather %s, "
             "flow %s, overall %s, duplicate result %s). No command was issued.",

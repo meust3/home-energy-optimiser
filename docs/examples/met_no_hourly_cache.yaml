@@ -1,0 +1,104 @@
+# REVIEW DRAFT ONLY. Do not apply/reload/start this task's configuration.
+# Fictional weather ID: substitute the verified private ID before HA validation.
+# weather.get_forecasts runs inside HA only after separate setup approval.
+# It reads the integration's cache; no update_entity, hardware or external call.
+template:
+  - triggers:
+      - trigger: time_pattern
+        minutes: "17"
+        id: hourly
+      - trigger: homeassistant
+        event: start
+        id: startup
+    variables:
+      weather_source: weather.example
+    actions:
+      - variables:
+          hourly_response: {}
+      - choose:
+          - conditions: >
+              {{ trigger.id == 'hourly' and
+                 states(weather_source) not in ['unknown', 'unavailable'] }}
+            sequence:
+              - action: weather.get_forecasts
+                target:
+                  entity_id: "{{ weather_source }}"
+                data:
+                  type: hourly
+                response_variable: hourly_response
+                continue_on_error: true
+      - variables:
+          cache_time: "{{ utcnow().isoformat() }}"
+          raw_forecast: >
+            {{ hourly_response.get(weather_source, {}).get('forecast', [])
+               if hourly_response is mapping else [] }}
+      - variables:
+          bounded_forecast: >
+            {% set ns = namespace(points=[]) %}
+            {% set start = as_timestamp(cache_time) %}
+            {% if raw_forecast is sequence and raw_forecast is not string %}
+              {% for row in raw_forecast[:96] %}
+                {% if row is mapping %}
+                  {% set target = as_timestamp(row.get('datetime'), default=none) %}
+                  {% if target is not none and start <= target < start + 172800 %}
+                    {% set keep = namespace(fields={}) %}
+                    {% for field in ['datetime', 'temperature', 'humidity',
+                        'condition', 'precipitation', 'cloud_coverage',
+                        'precipitation_probability'] %}
+                      {% if field in row %}
+                        {% set keep.fields = dict(keep.fields, **{field: row[field]}) %}
+                      {% endif %}
+                    {% endfor %}
+                    {% set ns.points = ns.points + [keep.fields] %}
+                  {% endif %}
+                {% endif %}
+              {% endfor %}
+            {% endif %}
+            {{ ns.points }}
+      - variables:
+          cache_ok: >
+            {% set ns = namespace(valid=true) %}
+            {% for row in bounded_forecast %}
+              {% for value in row.values() %}
+                {% if not (value is none or
+                    (value is string and value | length <= 64) or
+                    (value is number and value is not boolean)) %}
+                  {% set ns.valid = false %}
+                {% endif %}
+              {% endfor %}
+            {% endfor %}
+            {{ ns.valid and bounded_forecast | length > 0 and
+               bounded_forecast | to_json(ensure_ascii=true) | length <= 65536 }}
+    sensor:
+      - name: Energy weather hourly Met no
+        unique_id: energy_weather_hourly_met_no_v1
+        # Keep attributes rendered on failure; availability:false discards them.
+        # The unavailable state still prevents Energy from consuming old payloads.
+        state: "{{ cache_time if cache_ok else 'unavailable' }}"
+        attributes:
+          provider: met_no
+          integration: met
+          weather_entity_id: "{{ weather_source }}"
+          forecast_type: hourly
+          cache_success_utc: >
+            {{ cache_time if cache_ok else this.attributes.get('cache_success_utc') }}
+          last_attempt_utc: "{{ cache_time }}"
+          cache_status: "{{ 'ready' if cache_ok else 'startup_or_failed_or_empty' }}"
+          restored: "{{ trigger.id == 'startup' }}"
+          # HA Met does not expose issue/model/version through this response.
+          provider_issue_utc: "{{ none }}"
+          provider_version: "{{ none }}"
+          model_version: "{{ none }}"
+          attribution: Weather forecast from Met.no
+          units: >
+            {{ {'temperature': state_attr(weather_source, 'temperature_unit'),
+                'humidity': '%', 'cloud_coverage': '%',
+                'precipitation_probability': '%',
+                'precipitation': state_attr(weather_source, 'precipitation_unit')} }}
+          received_entries: "{{ raw_forecast | length if cache_ok else this.attributes.get('received_entries') }}"
+          truncated: >
+            {{ (raw_forecast | length > bounded_forecast | length)
+               if cache_ok else this.attributes.get('truncated') }}
+          forecast: >
+            {{ bounded_forecast if cache_ok else this.attributes.get('forecast', []) }}
+

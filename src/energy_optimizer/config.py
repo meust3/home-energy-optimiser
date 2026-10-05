@@ -100,6 +100,8 @@ def load_config(env_file: Path | None = Path(".env")) -> CollectorConfig:
         solcast_forecast_freshness_minutes=int(
             os.getenv("SOLCAST_FORECAST_FRESHNESS_MINUTES", "360")
         ),
+        context_collection_enabled=_env_bool("CONTEXT_COLLECTION_ENABLED"),
+        context_mapping_json=os.getenv("CONTEXT_MAPPING_JSON", ""),
         weather_freshness_minutes=int(os.getenv("WEATHER_FRESHNESS_MINUTES", "60")),
         weather_temperature_entity_id=_optional_env("WEATHER_TEMPERATURE_ENTITY_ID"),
         weather_condition_entity_id=_optional_env("WEATHER_CONDITION_ENTITY_ID"),

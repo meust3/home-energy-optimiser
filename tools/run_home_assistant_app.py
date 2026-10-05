@@ -159,6 +159,7 @@ def _run(options) -> int:
             stop_event=stop_event,
             on_success=health.record_success,
             on_failure=health.record_failure,
+            on_context=health.record_context,
         )
     finally:
         stop_event.set()

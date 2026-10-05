@@ -100,13 +100,17 @@ class HomeAssistantClient:
             ) from exc
 
     def get_states(
-        self, entity_ids: Iterable[str] | None = None
+        self,
+        entity_ids: Iterable[str] | None = None,
+        *,
+        optional_entity_ids: Iterable[str] = (),
     ) -> dict[str, HomeAssistantState]:
         """Fetch all states once, then filter locally for efficient bulk collection."""
         payload = self._get_json("/api/states")
         if not isinstance(payload, list):
             raise HomeAssistantResponseError("Expected a list from /api/states")
         wanted = set(entity_ids) if entity_ids is not None else None
+        optional = set(optional_entity_ids)
         result: dict[str, HomeAssistantState] = {}
         for item in payload:
             if not isinstance(item, dict) or not isinstance(item.get("entity_id"), str):
@@ -115,6 +119,9 @@ class HomeAssistantClient:
                 try:
                     state = HomeAssistantState.model_validate(item)
                 except ValueError as exc:
+                    if item["entity_id"] in optional:
+                        # Optional context reports missing/invalid, never raw data.
+                        continue
                     raise HomeAssistantResponseError(
                         f"Invalid state payload for {item['entity_id']}"
                     ) from exc

@@ -1,5 +1,21 @@
 # Home Energy Optimiser
 
+Version 0.7.0 is a local release candidate for optional forecast-context
+collection. Collection defaults to disabled and the mapping defaults to empty.
+It requires manual migration to `20261005_01` even while disabled. Forecasts do
+not consume this context yet; existing data/calculations and HOLD-only boundaries
+remain unchanged. Met.no hourly cache setup is separate from Energy's GET-only
+client. The initial mapping establishes neither a physical outdoor sensor nor
+metered HVAC power.
+
+v0.6.5 rejects this schema. Compatible v0.7.0 code with context disabled is the
+tested non-destructive recovery path for the supported context-specific scenario.
+Physical downgrade deletes context/weather history and requires separate approval.
+See [the maintained context migration/recovery runbook](../docs/forecast_context_collection.md).
+Publication, live cache setup, migration, installation and activation each remain
+separate approval steps. Older release sections below apply only to their named
+code/schema transitions.
+
 Version 0.6.5 is a release candidate, not yet published or deployed. It corrects
 shadow evidence with compatible partial-window household-demand assembly, signed
 HOLD reserve margin separately from clamped available energy, and per-boundary

@@ -1,5 +1,20 @@
 # Home Assistant App installation
 
+## v0.7.0 context migration and recovery
+
+v0.7.0 requires manual schema `20261005_01`, including when optional context
+collection is disabled. Collection defaults to disabled and the mapping to empty.
+Follow the [maintained context migration/recovery runbook](forecast_context_collection.md)
+and its separate publication, backup/cutover and activation gates. Older sections
+below apply only to their named releases.
+
+**v0.6.5 rejects `20261005_01`.** Reinstalling the old App while keeping that schema
+is not recovery. Tested compatible code with context disabled is the preferred
+non-destructive recovery path for the supported context-specific scenario.
+Physical downgrade deletes all context/weather history and requires separate
+explicit approval; restoring an old backup also loses all writes after its cutoff.
+No downgrade, stamp, migration or live lifecycle change is authorised here.
+
 > Status update, 2026-09-13: v0.6.2 is installed and running with shadow enabled,
 > non-HOLD disabled and retention disabled. The live schema is `20260905_01`;
 > no migration was required. Exact-tag validation, Home Assistant discovery,

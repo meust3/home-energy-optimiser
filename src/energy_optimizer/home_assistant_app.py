@@ -26,7 +26,7 @@ from energy_optimizer.models import (
 from energy_optimizer.persistence import ApplicationRepository, open_repository
 
 SUPERVISOR_CORE_API_URL = "http://supervisor/core/api"
-APP_VERSION = "0.6.5"
+APP_VERSION = "0.7.0"
 HEALTH_PORT = 8099
 OPTIONS_PATH_ENV = "HOME_ENERGY_APP_OPTIONS_PATH"
 SUPERVISOR_OPTIONS_PATH = Path("/data/options.json")
@@ -50,6 +50,8 @@ class HomeAssistantAppOptions(BaseModel):
     balance_tolerance_w: float = Field(default=250.0, gt=0)
     maximum_plausible_pv_power_w: float = Field(default=20000.0, gt=0)
     goodwe_soc_timestamp_enabled: bool = False
+    context_collection_enabled: bool = False
+    context_mapping_json: str = ""
     ev_vehicle_enabled: bool = False
     ev_charging_entity: str = ""
     ev_plugged_entity: str = ""
@@ -221,6 +223,8 @@ def app_environment(
             options.goodwe_soc_timestamp_enabled
         ).lower(),
         "EV_VEHICLE_ENABLED": str(options.ev_vehicle_enabled).lower(),
+        "CONTEXT_COLLECTION_ENABLED": str(options.context_collection_enabled).lower(),
+        "CONTEXT_MAPPING_JSON": options.context_mapping_json,
         "EV_CHARGING_ENTITY": options.ev_charging_entity.strip(),
         "EV_PLUGGED_ENTITY": options.ev_plugged_entity.strip(),
         "EV_ONLINE_ENTITY": options.ev_online_entity.strip(),
@@ -331,6 +335,9 @@ class AppHealth:
     database: str = "healthy"
     home_assistant: str = "healthy"
     collector: str = "healthy"
+    context_collection: dict[str, Any] = field(
+        default_factory=lambda: {"status": "disabled"}
+    )
     dashboard: str = "healthy"
     forecast_scheduler: str = "disabled"
     reserve_scheduler: str = "disabled"
@@ -374,6 +381,23 @@ class AppHealth:
                 == INVALID_NEGATIVE_HOUSEHOLD_DEMAND
                 else "none_current"
             )
+
+    def record_context(self, result: dict[str, Any]) -> None:
+        from energy_optimizer.timestamps import json_safe
+
+        with self._lock:
+            previous = self.context_collection
+            current = json_safe(result)
+            for key in ("last_useful_receipt_utc", "weather_snapshot_id"):
+                if current.get(key) is None and previous.get(key) is not None:
+                    current[key] = previous[key]
+            if result.get("weather_snapshot_id"):
+                current["last_weather_coverage"] = current.get("diagnostic", {}).get(
+                    "weather"
+                )
+            elif previous.get("last_weather_coverage"):
+                current["last_weather_coverage"] = previous["last_weather_coverage"]
+            self.context_collection = current
 
     def record_failure(self, component: str) -> None:
         with self._lock:
@@ -488,6 +512,7 @@ class AppHealth:
                 "database": self.database,
                 "home_assistant": self.home_assistant,
                 "collector": collector,
+                "context_collection": self.context_collection,
                 "dashboard": self.dashboard,
                 "forecast_scheduler": self.forecast_scheduler,
                 "last_forecast_success_utc": _iso(self.last_forecast_success_utc),

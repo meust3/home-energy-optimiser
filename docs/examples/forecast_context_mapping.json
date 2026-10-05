@@ -1,0 +1,86 @@
+{
+  "version": "example-v1",
+  "effective_from_utc": "2099-01-01T00:00:00Z",
+  "physical_outdoor_sensor": "absent",
+  "sources": [
+    {
+      "source_id": "zone_a_temperature",
+      "entity_id": "sensor.zone_a_temperature",
+      "zone": "zone_a",
+      "scope": "indoor",
+      "integration": "zha",
+      "quantity": "temperature",
+      "evidence": "sensor_measured",
+      "duplicate_group": "zone_a_air"
+    },
+    {
+      "source_id": "zone_a_humidity",
+      "entity_id": "sensor.zone_a_humidity",
+      "zone": "zone_a",
+      "scope": "indoor",
+      "integration": "zha",
+      "quantity": "humidity",
+      "evidence": "sensor_measured",
+      "duplicate_group": "zone_a_air"
+    },
+    {
+      "source_id": "zone_a_controller_temperature",
+      "entity_id": "climate.example",
+      "zone": "zone_a",
+      "scope": "indoor",
+      "integration": "sensibo",
+      "quantity": "temperature",
+      "attribute": "current_temperature",
+      "source_unit": "°C",
+      "evidence": "sensor_measured",
+      "duplicate_group": "zone_a_air"
+    },
+    {
+      "source_id": "zone_a_requested_setpoint",
+      "entity_id": "climate.example",
+      "zone": "zone_a",
+      "scope": "indoor",
+      "integration": "sensibo",
+      "quantity": "setpoint",
+      "attribute": "temperature",
+      "source_unit": "°C",
+      "evidence": "commanded_assumed"
+    },
+    {
+      "source_id": "zone_a_requested_mode",
+      "entity_id": "climate.example",
+      "zone": "zone_a",
+      "scope": "indoor",
+      "integration": "sensibo",
+      "quantity": "mode",
+      "evidence": "commanded_assumed"
+    },
+    {
+      "source_id": "zone_a_reported_activity",
+      "entity_id": "climate.example",
+      "zone": "zone_a",
+      "scope": "indoor",
+      "integration": "sensibo",
+      "quantity": "activity",
+      "attribute": "hvac_action",
+      "evidence": "integration_reported"
+    },
+    {
+      "source_id": "remote_temperature",
+      "entity_id": "weather.example",
+      "zone": "remote_weather",
+      "scope": "remote_weather",
+      "integration": "met",
+      "quantity": "temperature",
+      "attribute": "temperature",
+      "unit_attribute": "temperature_unit",
+      "evidence": "remote_modelled"
+    }
+  ],
+  "weather_cache": {
+    "entity_id": "sensor.energy_weather_hourly_met_no",
+    "weather_entity_id": "weather.example",
+    "provider": "met_no",
+    "integration": "met"
+  }
+}

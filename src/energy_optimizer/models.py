@@ -13,6 +13,18 @@ class HomeAssistantState(BaseModel):
     attributes: dict[str, Any] = Field(default_factory=dict)
     last_changed: datetime
     last_updated: datetime
+    last_reported: datetime | None = None
+
+    @field_validator("last_reported", mode="before")
+    @classmethod
+    def optional_report_time(cls, value: Any) -> datetime | None:
+        # Optional timing evidence must not invalidate core telemetry.
+        from energy_optimizer.timestamps import aware_datetime
+
+        try:
+            return aware_datetime(value) if value is not None else None
+        except (ValueError, TypeError, OverflowError):
+            return None
 
     @field_validator("last_changed", "last_updated")
     @classmethod
@@ -301,6 +313,8 @@ class CollectorConfig(BaseModel):
     amber_current_price_freshness_minutes: int = Field(default=10, gt=0)
     amber_forecast_freshness_minutes: int = Field(default=60, gt=0)
     solcast_forecast_freshness_minutes: int = Field(default=360, gt=0)
+    context_collection_enabled: bool = False
+    context_mapping_json: str = ""
     weather_freshness_minutes: int = Field(default=60, gt=0)
     weather_temperature_entity_id: str | None = None
     weather_condition_entity_id: str | None = None
