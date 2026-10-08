@@ -8,6 +8,23 @@ from energy_optimizer.arbitrage.core_bridge import CORE_SHA
 from energy_optimizer.arbitrage.decision_types import canonical
 
 
+def integration_source_sha():
+    """Content identity of this installed wrapper bundle plus the pinned kernel.
+
+    Works identically from canonical-LF source or the installed package; no Git,
+    network, environment/private paths or mutable external manifest are consulted.
+    """
+    package = Path(__file__).parent
+    files = {
+        "arbitrage/" + p.name: hashlib.sha256(p.read_bytes()).hexdigest()
+        for p in sorted(package.glob("*.py"))
+    }
+    files["offline_paired_synthetic.py"] = hashlib.sha256(
+        Path(core.__file__).read_bytes()
+    ).hexdigest()
+    return hashlib.sha256(canonical(files).encode()).hexdigest()
+
+
 def load_core(root=None, manifest=None):
     if hashlib.sha256(Path(core.__file__).read_bytes()).hexdigest() != CORE_SHA:
         raise ValueError("reviewed_core_source_mismatch")

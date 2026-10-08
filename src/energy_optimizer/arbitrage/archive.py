@@ -14,7 +14,11 @@ from energy_optimizer.arbitrage.decision_types import (
     timestamp,
 )
 from energy_optimizer.arbitrage.outcomes import evaluate_outcome, outcome_from_dict
-from energy_optimizer.arbitrage.research_io import append_receipt, load_core
+from energy_optimizer.arbitrage.research_io import (
+    append_receipt,
+    integration_source_sha,
+    load_core,
+)
 from energy_optimizer.arbitrage.selector import POLICY_SHA, select
 
 INTEGRATION = "arbitrage-integration-v1"
@@ -92,7 +96,7 @@ def context_from_capture(inputs, source, declared_context):
 
 
 def freeze_context(context, output):
-    receipt = select(load_core(), context, digest(INTEGRATION))
+    receipt = select(load_core(), context, integration_source_sha())
     output = Path(output)
     output.mkdir(parents=True, exist_ok=False)
     (output / "decision.json").write_text(canonical(context) + "\n", encoding="utf-8")
@@ -109,6 +113,8 @@ def evaluate_files(decision_path, receipt_path, outcome_path):
     receipt = SelectionReceipt(**raw)
     if receipt.input_sha256 != digest(c) or receipt.policy_sha256 != POLICY_SHA:
         raise ValueError("frozen_receipt_input_mismatch")
+    if receipt.source_sha256 != integration_source_sha():
+        raise ValueError("frozen_source_identity_mismatch")
     # Recompute only from immutable decision inputs, before opening later data.
     if select(load_core(), c, receipt.source_sha256) != receipt:
         raise ValueError("frozen_selection_mismatch")

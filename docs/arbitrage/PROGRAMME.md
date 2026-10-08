@@ -90,6 +90,10 @@ The separate offline-only `tools/arbitrage_research.py` supports `select`,
 subprocesses and secret-file reads. Explicit decision and outcome files are
 separate; the evaluator verifies/recomputes frozen decision identity before
 opening the later outcome. Outputs are exclusive-created private files.
+New receipts hash the installed wrapper Python files and pinned kernel bytes.
+Evaluation rejects a changed source identity before opening the outcome. Earlier
+local version-name receipts are preserved as evidence and are not silently
+relabelled or admitted under this corrected provenance contract.
 
 Example:
 

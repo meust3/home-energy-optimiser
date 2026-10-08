@@ -4,7 +4,7 @@ import json
 from datetime import timedelta
 
 from energy_optimizer import offline_paired_synthetic as core
-from energy_optimizer.arbitrage.archive import INTEGRATION, context_from_capture
+from energy_optimizer.arbitrage.archive import context_from_capture
 from energy_optimizer.arbitrage.capture import CaptureRepository
 from energy_optimizer.arbitrage.decision_types import (
     Assumptions,
@@ -19,6 +19,7 @@ from energy_optimizer.arbitrage.decision_types import (
     primitive,
     timestamp,
 )
+from energy_optimizer.arbitrage.research_io import integration_source_sha
 from energy_optimizer.arbitrage.selector import select
 
 
@@ -211,7 +212,7 @@ def save_opportunity(repository, *, profile_json=""):
             raise ValueError("source_capture_missing")
         c = declared_context(inputs, source, json.loads(profile_json))
         c = context_from_capture(inputs, source, primitive(c))
-        receipt = select(core, c, digest(INTEGRATION))
+        receipt = select(core, c, integration_source_sha())
         estimates = json.loads(receipt.estimates_json)
         # The immutable receipt retains complete ledgers. The public projection
         # must not duplicate those same bytes inside the bounded capture body.
