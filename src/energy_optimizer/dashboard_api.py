@@ -97,6 +97,14 @@ class ApiModel(BaseModel):
     model_config = ConfigDict(allow_inf_nan=False)
 
 
+class ArbitrageResponse(ApiModel):
+    status: str
+    execution: str
+    no_command_issued: bool
+    reasons: list[str] = []
+    items: list[dict[str, Any]] = []
+
+
 class StatusResponse(ApiModel):
     app_version: str
     overall_status: str
@@ -489,6 +497,13 @@ class DashboardService:
             yield repository
         finally:
             repository.close()
+
+    def arbitrage(self) -> ApiModel:
+        from energy_optimizer.arbitrage.opportunity import board
+
+        with self._repository() as repository:
+            body = board(repository, now=datetime.now(UTC))
+        return ArbitrageResponse(**body)
 
     def status(self) -> StatusResponse:
         _, health = self.health.response()

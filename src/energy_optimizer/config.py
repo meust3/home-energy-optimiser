@@ -100,6 +100,10 @@ def load_config(env_file: Path | None = Path(".env")) -> CollectorConfig:
         solcast_forecast_freshness_minutes=int(
             os.getenv("SOLCAST_FORECAST_FRESHNESS_MINUTES", "360")
         ),
+        arbitrage_research_profile_json=os.getenv(
+            "ARBITRAGE_RESEARCH_PROFILE_JSON", ""
+        ),
+        arbitrage_capture_enabled=_env_bool("ARBITRAGE_CAPTURE_ENABLED"),
         context_collection_enabled=_env_bool("CONTEXT_COLLECTION_ENABLED"),
         context_mapping_json=os.getenv("CONTEXT_MAPPING_JSON", ""),
         weather_freshness_minutes=int(os.getenv("WEATHER_FRESHNESS_MINUTES", "60")),

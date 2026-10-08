@@ -316,3 +316,9 @@ database contents.
 ## License
 
 Licensed under the [MIT License](LICENSE).
+
+
+Local arbitrage programme candidate: see [programme](docs/arbitrage/PROGRAMME.md),
+[risk-to-test map](docs/arbitrage/risk-to-test.md), and
+[Gate A / compatible recovery](docs/arbitrage/recovery-and-gates.md).
+Capture defaults off and execution remains unavailable.

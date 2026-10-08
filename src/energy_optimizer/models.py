@@ -313,6 +313,8 @@ class CollectorConfig(BaseModel):
     amber_current_price_freshness_minutes: int = Field(default=10, gt=0)
     amber_forecast_freshness_minutes: int = Field(default=60, gt=0)
     solcast_forecast_freshness_minutes: int = Field(default=360, gt=0)
+    arbitrage_capture_enabled: bool = False
+    arbitrage_research_profile_json: str = ""
     context_collection_enabled: bool = False
     context_mapping_json: str = ""
     weather_freshness_minutes: int = Field(default=60, gt=0)

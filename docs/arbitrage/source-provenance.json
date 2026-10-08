@@ -1,0 +1,31 @@
+{
+  "integration_version": "arbitrage-integration-v1",
+  "base_commit": "c2f51838ad050e1ebfd3c843f1919206a89eb203",
+  "frozen_policy_sha256": "b35068a95f1c11bf5ee98777ef98b03ff0aae640a37dce13abd44c923746da3f",
+  "frozen_implementation_bundle_sha256": "91eca72a2cbf0a543c86f3c7903dbcd172e6357839b7134bfcaff904fbd351cc",
+  "original_source_sha256": {
+    "docs/Testing/offline_paired_synthetic_v1.md": "e22e2a0a94ad9d0ac9b889b55e4a9e89dfe4bc71e0ab92d266af37a7168830b0",
+    "src/energy_optimizer/offline_paired_fixtures.py": "bdf63bcca52beacb205ff140bc5450d7226b9592b0a7dec0f3d6f00a1ee364c8",
+    "src/energy_optimizer/offline_paired_synthetic.py": "e0c3236868079a04f4358cc0441304fc3db06bfeb4090a7326ebc920a967fe2f",
+    "tests/fixtures/offline_paired_synthetic/day_charge_A_extension.json": "33e7a695777c399544cdd5a793cfe332c31881e6a8822468ac7b2e45f7734d3b",
+    "tests/fixtures/offline_paired_synthetic/day_charge_import_headroom.json": "cffe6d0804fef32e55a0111a4604846ee1473ee0adc4949ed188e08c8d8823fa",
+    "tests/fixtures/offline_paired_synthetic/day_hold_identity.json": "e6887cae1551418e83ce98ce6411b513352468f3a3d49da847c96484e519278b",
+    "tests/fixtures/offline_paired_synthetic/day_initial_policy_shortfall.json": "4acb1b92393474a875a5d2f441eb0fd812c1ad9900ce9af21c170243c7082f58",
+    "tests/fixtures/offline_paired_synthetic/day_preserve_C_extension.json": "dd819711cc8a0f1bbedd4b503eb1db9431e38e54ea57c5997a62153b6bc70d85",
+    "tests/fixtures/offline_paired_synthetic/day_solar_curtailment.json": "e0e7056d1f42fe35ecc116e509afef7246c2e43831f32144f0139d30d787d4eb",
+    "tests/fixtures/offline_paired_synthetic/day_unserved_load.json": "08352d3d99576c661c23e954c9f795aa360a45a17a4ebc08f9cb29c2e6850971",
+    "tests/fixtures/offline_paired_synthetic/native_A_two_hours.json": "904e53053276d94181a4fc59b5bed3b33eb12a50702c1f2edd62a9ecd0e6acae",
+    "tests/fixtures/offline_paired_synthetic/native_B_supplied_export_ledger.json": "e38b39089c9bba21fa8ad8047799620bdf9814f2b99a997e4c601bce17661f5d",
+    "tests/fixtures/offline_paired_synthetic/native_C_one_hour.json": "1419f54aa2819ee2fe7fff12d17570e76359d14c1d3e0c97bcdece948c95994d",
+    "tests/test_offline_paired_synthetic.py": "8ae8f4cf9c2463c5a247ddcba69b26ac4d58b50aa458dace8fc9b3f3eae4a35a",
+    "tools/evaluate_paired_synthetic.py": "0831eb58e08bec80d89127727e8c2a639edc8c5b0656794e5c3d9e8f23a99cce",
+    "selector/core_bridge.py": "313b46bf720a257922b44b73b230cf177b6f3cbdb8011eff1e2fbb81e6160889",
+    "selector/decision_types.py": "f8509f54c0cb360223985038d43cd9cbe87feaed4c3c7b02f18da7100cca0773",
+    "selector/selector.py": "2185c55009cc482a3cff8d42e89c62274acc40b9dd9211bbc9ad15ebddcecef7",
+    "selector/outcomes.py": "8bb4c425472839b85e077f229df09cf4f105d8ef2fb1961308ba2bdf0a7ff9fb",
+    "selector/synthetic_cases.py": "d5e68fae83c31587edaa4899486baf00fa8d0bd8e73d646d68d1288ad44860b5",
+    "conditional/conditional_adapter.py": "38d7440810a6b72ef79d4e7d22eb4e756cc85a95995d908a930f6e7b024561ae",
+    "conditional/independent_reconciler.py": "763612dfce054301c0cdf968490ec54616072865f585246ce5c23836be834e34"
+  },
+  "provenance": "Owner-provided same-project prototype and frozen research, under repository MIT licence (LICENSE, copyright meust3). Imports and formatting adapted; core bytes and frozen policy unchanged. No household datasets promoted."
+}

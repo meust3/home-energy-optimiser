@@ -589,9 +589,41 @@ async function loadSolarDiagnostics() {
   } catch (error) { setState("#solar-state", error.message, "error-state"); }
 }
 
+async function loadArbitrage() {
+  setState("#arbitrage-state", "Loading immutable capture and advice…");
+  try {
+    const data = await request("arbitrage", "arbitrage");
+    setState("#arbitrage-state", `${data.status} · execution ${data.execution}`);
+    $("#arbitrage-content").innerHTML = data.items.map(item => {
+      const e = item.expected_candidate_value;
+      const p = item.provenance || {};
+      const pairs = e?.comparisons || {};
+      const paths = e?.paths || {};
+      const reserve = item.reserve_summary || {};
+      const values = [["Reserve floor / branch energy", `${energy(reserve.floor_stored_kwh)} / ${energy(reserve.branch_stored_kwh)}`], ["Conditional capacity", energy(reserve.capacity_stored_kwh)], ["Reserve scope", reserve.scope], ["Minimum R / P / G reserve margins", `${energy(paths.R?.minimum_policy_margin_kwh)} / ${energy(paths.P?.minimum_policy_margin_kwh)} / ${energy(paths.G?.minimum_policy_margin_kwh)}`], ["Terminal R / P / G energy", `${energy(paths.R?.terminal_energy_kwh)} / ${energy(paths.P?.terminal_energy_kwh)} / ${energy(paths.G?.terminal_energy_kwh)}`], ["Charging clipping reasons", (item.action_clipping_reasons?.G || []).join(", ") || (e ? "None in modelled action window" : "Unavailable")], ["Status", item.status], ["Research selection", item.selected], ["Created", localTime(item.created_at)], ["Expires", localTime(item.expires_at)], ["Profile", item.profile_id], ["Model", p.model], ["Forecast / reserve IDs", `${p.forecast_id} / ${p.reserve_id}`], ["Commit witness", localTime(p.commit_witness)], ["Provider issue time", p.provider_issue], ["Physical applicability", p.physical_applicability], ["Total-load basis", item.load_basis], ["Expected R / P / G cost", e ? `${money(e.costs_aud.R)} / ${money(e.costs_aud.P)} / ${money(e.costs_aud.G)}` : "Unavailable"], ["Preservation benefit", money(pairs.preservation?.primary_comparative_gross_value_aud)], ["Additional charging benefit", money(pairs.charging_increment?.primary_comparative_gross_value_aud)], ["Combined benefit before wear", money(pairs.combined?.primary_comparative_gross_value_aud)], ["Requested / delivered charging", `${energy(paths.G?.requested_action_ac_kwh)} / ${energy(paths.G?.delivered_action_ac_kwh)}`], ["Observed accounting", item.observed_accounting == null ? "Unavailable here; actual operation remains separate" : money(item.observed_accounting)], ["Later simulated comparison", item.simulated_comparative_value == null ? "Awaiting admitted outcome" : money(item.simulated_comparative_value)], ["Export", "Experimental offline model only; physical export locked"], ["Wear / uncertainty", "Not included in frozen gross value; use declared sensitivity scenarios"]];
+      const sourceRows = Object.entries(item.sources || {}).filter(([key]) => key.endsWith("forecast")).map(([key, source]) => `<article class="panel"><h3>${safeText(key.replaceAll("_", " "))}</h3><p class="muted">HA cached per_kwh (${safeText(source?.attributes?.unit_of_measurement)}) · first 288 intervals; source report age ${age(item.source_ages_seconds?.[key])}; provider issue unknown.</p><details><summary>Captured interval table (bounded to 288 rows)</summary><div class="table-scroll"><table><thead><tr><th>Interval start</th><th>Interval end</th><th>Price (reported domain)</th></tr></thead><tbody>${(source?.forecasts || []).slice(0, 288).map(row => `<tr><td>${safeText(localTime(row.start_time))}</td><td>${safeText(localTime(row.end_time))}</td><td>${safeText(price(row.per_kwh))}</td></tr>`).join("")}</tbody></table></div></details></article>`).join("");
+      return `<article class="panel overview-wide"><h3>Current opportunity evidence</h3>${definition(values)}<ul class="issue-list">${(item.reasons || []).map(r => `<li>${safeText(r)}</li>`).join("") || "<li>No research admission errors; execution prerequisites still unverified</li>"}</ul><p class="muted">Capture hash: ${safeText(p.capture_hash)}. Missing values remain unavailable; overlapping comparisons must not be aggregated as household benefit.</p></article>${sourceRows}`;
+    }).join("") || `<article class="panel"><h3>Awaiting approved capture deployment</h3><p>No arbitrage receipt has been persisted. Existing Forecast vs Actual and shadow accounting remain available.</p></article>`;
+    data.items.forEach(item => {
+      Object.entries(item.sources || {}).filter(([key]) => key.endsWith("forecast")).forEach(([key, source]) => {
+        const points = [];
+        (source?.forecasts || []).slice(0, 288).forEach(row => {
+          if (points.length && Date.parse(points.at(-1).timestamp_utc) < Date.parse(row.start_time)) {
+            points.push({timestamp_utc: points.at(-1).timestamp_utc, quote: null, series_available: {quote: false}});
+          }
+          points.push({timestamp_utc: row.start_time, quote: row.per_kwh, series_available: {quote: true}});
+          points.push({timestamp_utc: row.end_time, quote: row.per_kwh, series_available: {quote: true}});
+        });
+        if (points.length) $("#arbitrage-content").append(makeChart(`${key.replaceAll("_", " ")} — captured interval quotes`, source?.attributes?.unit_of_measurement || "unknown price domain", [["Cached per_kwh", "quote"]], points));
+      });
+    });
+  } catch (error) { setState("#arbitrage-state", error.message, "error-state"); }
+}
+
 function activateTab() {
   const name = location.hash.slice(1) || "overview"; const valid = $("#" + CSS.escape(name)) ? name : "overview";
   $$(".page").forEach(page => page.hidden = page.id !== valid); $$(".tabs a").forEach(link => link.setAttribute("aria-current", link.dataset.tab === valid ? "page" : "false"));
+  if (valid === "arbitrage" && !state.loaded.has("arbitrage")) { state.loaded.add("arbitrage"); loadArbitrage(); }
   if (valid === "history" && !state.loaded.has("history")) { state.loaded.add("history"); loadHistory(); }
   if (valid === "forecasts" && !state.loaded.has("forecasts")) { state.loaded.add("forecasts"); loadForecastRuns(); }
   if (valid === "forecast-operations" && !state.loaded.has("operations")) { state.loaded.add("operations"); loadForecastOperations(); }
@@ -618,4 +650,4 @@ $("#forecast-card-mode").addEventListener("change", () => {
 
 loadStatus(); loadLive(); loadShadowOverview(); loadForecastActualCard(); loadReserve(); loadReserveHistory(); state.loaded.add("reserve"); activateTab();
 schedule("status", loadStatus, 30000); schedule("live", loadLive, 30000);
-schedule("slow", () => { if (!document.hidden) { loadShadowOverview(); loadForecastActualCard(); if (state.loaded.has("history")) loadHistory(); if (state.loaded.has("forecasts")) loadForecastRuns(); if (state.loaded.has("operations")) loadForecastOperations(); if (state.loaded.has("calibration")) loadCalibration(); if (state.loaded.has("solar")) loadSolarDiagnostics(); if (state.loaded.has("reserve")) { loadReserve(); loadReserveHistory(); } if (state.loaded.has("decisions")) loadDecisions(); if (state.loaded.has("quality")) loadQuality(); } }, 300000);
+schedule("slow", () => { if (!document.hidden) { loadShadowOverview(); loadForecastActualCard(); if (state.loaded.has("history")) loadHistory(); if (state.loaded.has("forecasts")) loadForecastRuns(); if (state.loaded.has("operations")) loadForecastOperations(); if (state.loaded.has("calibration")) loadCalibration(); if (state.loaded.has("solar")) loadSolarDiagnostics(); if (state.loaded.has("reserve")) { loadReserve(); loadReserveHistory(); } if (state.loaded.has("decisions")) loadDecisions(); if (state.loaded.has("quality")) loadQuality(); if (state.loaded.has("arbitrage")) loadArbitrage(); } }, 300000);

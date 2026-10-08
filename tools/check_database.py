@@ -37,6 +37,8 @@ COUNTED_TABLES = (
     "shadow_decision_runs",
     "shadow_decision_candidates",
     "shadow_decision_outcomes",
+    "arbitrage_input_captures",
+    "arbitrage_commit_witnesses",
 )
 
 
@@ -246,6 +248,8 @@ def _application_readiness(engine) -> dict[str, dict[str, object]]:
                 "shadow_decision_runs",
                 "shadow_decision_candidates",
                 "shadow_decision_outcomes",
+                "arbitrage_input_captures",
+                "arbitrage_commit_witnesses",
             },
             set(),
         ),

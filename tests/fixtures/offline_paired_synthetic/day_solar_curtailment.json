@@ -1,0 +1,88 @@
+{
+  "case_id": "day_solar_curtailment",
+  "source_kind": "deliberately_authored_synthetic",
+  "profile": "public_24h",
+  "assumption_note": "SEPARATE 24h available-PV abstraction. Capacity 2, floor 1, initial 1, eta 1/1, charge limit 1, export .5, other ports 2. First hour PV3/load1, second PV3/load0, rest zero. Prices .2/.1, explicit curtailment allowed.",
+  "source_design_sha256": "68cc021a9bd55fed8f21a555687475bfbcf62b3dc3a35d9ef2630e2bbb5b041c",
+  "source_erratum_sha256": "6e6c6d81fc446f51e2528626a605a3e94212c92e1d43f874b68c24bc58c14060",
+  "decision_ready_at_utc": "2026-01-01T00:00:00+00:00",
+  "comparison_start_utc": "2026-01-01T00:00:00+00:00",
+  "comparison_end_utc": "2026-01-02T00:00:00+00:00",
+  "initial_state_at_utc": "2026-01-01T00:00:00+00:00",
+  "initial_energy_kwh": 1,
+  "parameters": {
+    "capacity_kwh": 2,
+    "physical_min_kwh": 0,
+    "policy_floor_kwh": 1,
+    "terminal_reserve_kwh": 1,
+    "charge_efficiency": 1,
+    "discharge_efficiency": 1,
+    "charge_limit_kw": 1,
+    "discharge_limit_kw": 2,
+    "import_limit_kw": 2,
+    "export_limit_kw": 0.5,
+    "topology": "synthetic_ac_bus_independent_ports",
+    "flow_domain": "AC_bus_kWh",
+    "stored_energy_domain": "DC_stored_kWh",
+    "pv_abstraction": "available_exogenous_synthetic",
+    "curtailment_permitted": true,
+    "interval_interpretation": "piecewise_constant_interval_average_kw"
+  },
+  "schedule": {
+    "action": "HOLD",
+    "supplied_at_utc": "2026-01-01T00:00:00+00:00",
+    "start_utc": "2026-01-01T00:00:00+00:00",
+    "end_utc": "2026-01-01T01:00:00+00:00",
+    "power_limit_kw": 0,
+    "energy_limit_ac_kwh": 0
+  },
+  "load_kind": "total_including_fixed_ev",
+  "household_load_kw": [
+    {
+      "start_utc": "2026-01-01T00:00:00+00:00",
+      "end_utc": "2026-01-01T01:00:00+00:00",
+      "value": 1
+    },
+    {
+      "start_utc": "2026-01-01T01:00:00+00:00",
+      "end_utc": "2026-01-02T00:00:00+00:00",
+      "value": 0
+    }
+  ],
+  "fixed_ev_load_kw": [],
+  "available_pv_kw": [
+    {
+      "start_utc": "2026-01-01T00:00:00+00:00",
+      "end_utc": "2026-01-01T01:00:00+00:00",
+      "value": 3
+    },
+    {
+      "start_utc": "2026-01-01T01:00:00+00:00",
+      "end_utc": "2026-01-01T02:00:00+00:00",
+      "value": 3
+    },
+    {
+      "start_utc": "2026-01-01T02:00:00+00:00",
+      "end_utc": "2026-01-02T00:00:00+00:00",
+      "value": 0
+    }
+  ],
+  "import_price_aud_per_kwh": [
+    {
+      "start_utc": "2026-01-01T00:00:00+00:00",
+      "end_utc": "2026-01-02T00:00:00+00:00",
+      "value": 0.2
+    }
+  ],
+  "export_price_aud_per_kwh": [
+    {
+      "start_utc": "2026-01-01T00:00:00+00:00",
+      "end_utc": "2026-01-02T00:00:00+00:00",
+      "value": 0.1
+    }
+  ],
+  "sensitivities": {
+    "terminal_lambda_aud_per_dc_kwh": null,
+    "wear_aud_per_discharged_dc_kwh": null
+  }
+}

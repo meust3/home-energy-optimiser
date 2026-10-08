@@ -26,7 +26,7 @@ from energy_optimizer.models import (
 from energy_optimizer.persistence import ApplicationRepository, open_repository
 
 SUPERVISOR_CORE_API_URL = "http://supervisor/core/api"
-APP_VERSION = "0.7.0"
+APP_VERSION = "0.8.0"
 HEALTH_PORT = 8099
 OPTIONS_PATH_ENV = "HOME_ENERGY_APP_OPTIONS_PATH"
 SUPERVISOR_OPTIONS_PATH = Path("/data/options.json")
@@ -50,6 +50,8 @@ class HomeAssistantAppOptions(BaseModel):
     balance_tolerance_w: float = Field(default=250.0, gt=0)
     maximum_plausible_pv_power_w: float = Field(default=20000.0, gt=0)
     goodwe_soc_timestamp_enabled: bool = False
+    arbitrage_capture_enabled: bool = False
+    arbitrage_research_profile_json: str = ""
     context_collection_enabled: bool = False
     context_mapping_json: str = ""
     ev_vehicle_enabled: bool = False
@@ -223,6 +225,8 @@ def app_environment(
             options.goodwe_soc_timestamp_enabled
         ).lower(),
         "EV_VEHICLE_ENABLED": str(options.ev_vehicle_enabled).lower(),
+        "ARBITRAGE_RESEARCH_PROFILE_JSON": options.arbitrage_research_profile_json,
+        "ARBITRAGE_CAPTURE_ENABLED": str(options.arbitrage_capture_enabled).lower(),
         "CONTEXT_COLLECTION_ENABLED": str(options.context_collection_enabled).lower(),
         "CONTEXT_MAPPING_JSON": options.context_mapping_json,
         "EV_CHARGING_ENTITY": options.ev_charging_entity.strip(),

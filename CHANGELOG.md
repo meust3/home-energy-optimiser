@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.8.0 - local arbitrage programme candidate (not published)
+
+- Adds immutable, optional already-fetched input capture and commit witnesses,
+  a portable frozen R/P/G research pipeline and GET-only Arbitrage dashboard.
+- Adds separately versioned operational/terminal/sequential/export diagnostics
+  and a durable fake-only disabled executor; no physical transport or API.
+- Requires manual additive schema 20261008_01; compatible disabled recovery
+  preserves evidence. Older code rejects the new head; downgrade deletes it.
+- Capture defaults off, profile empty; installed limits/EV/PV/price availability
+  are not invented. Original studies and outcome-v2 semantics remain unchanged.
+- Local source-only preparation; publication/deployment and all hardware
+  action families need their separately named gates. See docs/arbitrage/PROGRAMME.md.
+
 ## 0.7.0 - release candidate (not published)
 
 - Adds optional mapped indoor/current-weather context collection and immutable

@@ -213,3 +213,6 @@ htmlcov/
 #  refer to https://docs.cursor.com/context/ignore-files
 .cursorignore
 .cursorindexingignore
+
+# Private programme evidence and inputs
+.local/

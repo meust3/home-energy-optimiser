@@ -1,7 +1,9 @@
 FROM python:3.12.11-slim-bookworm
 
-ARG BUILD_VERSION=0.7.0
-ARG APP_SOURCE_REF=v0.7.0
+ARG BUILD_VERSION=0.8.0
+ARG APP_SOURCE_REF=v0.8.0
+# Optional local release rehearsal: immutable git archive, never household data.
+ARG APP_SOURCE_ARCHIVE_SHA256=""
 
 LABEL io.hass.name="Home Energy Optimiser" \
       io.hass.description="Read-only Home Assistant energy dashboard and collector" \
@@ -19,9 +21,16 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /opt/home-energy-optimiser
-RUN curl --fail --location --silent --show-error \
-      "https://github.com/meust3/home-energy-optimiser/archive/${APP_SOURCE_REF}.tar.gz" \
-      | tar --extract --gzip --strip-components=1 \
+RUN --mount=type=secret,id=local_source_archive \
+    if [ -s /run/secrets/local_source_archive ]; then \
+      test -n "$APP_SOURCE_ARCHIVE_SHA256" \
+      && printf '%s  %s\n' "$APP_SOURCE_ARCHIVE_SHA256" /run/secrets/local_source_archive | sha256sum --check - \
+      && tar --extract --gzip --strip-components=1 --file /run/secrets/local_source_archive; \
+    else \
+      curl --fail --location --silent --show-error \
+        "https://github.com/meust3/home-energy-optimiser/archive/${APP_SOURCE_REF}.tar.gz" \
+        | tar --extract --gzip --strip-components=1; \
+    fi \
     && python -m pip install . \
     && chmod 0755 home_energy_optimiser/run.sh \
     && rm -rf .git .env .venv data logs captures exports secrets credentials \

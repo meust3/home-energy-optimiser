@@ -1,0 +1,94 @@
+{
+  "case_id": "day_preserve_C_extension",
+  "source_kind": "deliberately_authored_synthetic",
+  "profile": "public_24h",
+  "assumption_note": "Fictional fixture only; physical minimum 0, independent port limits exactly 2 kW, export price 0.10 and curtailment permission are author choices. No equipment claims. Native D section 10 C, one hour. Charge efficiency 1 is an explicit added fixture value, irrelevant to this zero-charge witness. SEPARATE new 24h fixture: added hours 1\u201324 zero baseline/EV/PV, import 0.20/export 0.10; not native C inputs.",
+  "source_design_sha256": "68cc021a9bd55fed8f21a555687475bfbcf62b3dc3a35d9ef2630e2bbb5b041c",
+  "source_erratum_sha256": "6e6c6d81fc446f51e2528626a605a3e94212c92e1d43f874b68c24bc58c14060",
+  "decision_ready_at_utc": "2026-01-01T00:00:00+00:00",
+  "comparison_start_utc": "2026-01-01T00:00:00+00:00",
+  "comparison_end_utc": "2026-01-02T00:00:00+00:00",
+  "initial_state_at_utc": "2026-01-01T00:00:00+00:00",
+  "initial_energy_kwh": 2,
+  "parameters": {
+    "capacity_kwh": 20,
+    "physical_min_kwh": 0,
+    "policy_floor_kwh": 0,
+    "terminal_reserve_kwh": 0,
+    "charge_efficiency": 1,
+    "discharge_efficiency": 1,
+    "charge_limit_kw": 2,
+    "discharge_limit_kw": 2,
+    "import_limit_kw": 2,
+    "export_limit_kw": 2,
+    "topology": "synthetic_ac_bus_independent_ports",
+    "flow_domain": "AC_bus_kWh",
+    "stored_energy_domain": "DC_stored_kWh",
+    "pv_abstraction": "available_exogenous_synthetic",
+    "curtailment_permitted": true,
+    "interval_interpretation": "piecewise_constant_interval_average_kw"
+  },
+  "schedule": {
+    "action": "PRESERVE_BATTERY",
+    "supplied_at_utc": "2026-01-01T00:00:00+00:00",
+    "start_utc": "2026-01-01T00:00:00+00:00",
+    "end_utc": "2026-01-01T01:00:00+00:00",
+    "power_limit_kw": 0,
+    "energy_limit_ac_kwh": 0
+  },
+  "load_kind": "baseline_plus_fixed_ev",
+  "household_load_kw": [
+    {
+      "start_utc": "2026-01-01T00:00:00+00:00",
+      "end_utc": "2026-01-01T01:00:00+00:00",
+      "value": 1
+    },
+    {
+      "start_utc": "2026-01-01T01:00:00+00:00",
+      "end_utc": "2026-01-02T00:00:00+00:00",
+      "value": 0
+    }
+  ],
+  "fixed_ev_load_kw": [
+    {
+      "start_utc": "2026-01-01T00:00:00+00:00",
+      "end_utc": "2026-01-01T01:00:00+00:00",
+      "value": 1
+    },
+    {
+      "start_utc": "2026-01-01T01:00:00+00:00",
+      "end_utc": "2026-01-02T00:00:00+00:00",
+      "value": 0
+    }
+  ],
+  "available_pv_kw": [
+    {
+      "start_utc": "2026-01-01T00:00:00+00:00",
+      "end_utc": "2026-01-02T00:00:00+00:00",
+      "value": 0
+    }
+  ],
+  "import_price_aud_per_kwh": [
+    {
+      "start_utc": "2026-01-01T00:00:00+00:00",
+      "end_utc": "2026-01-01T01:00:00+00:00",
+      "value": 0.5
+    },
+    {
+      "start_utc": "2026-01-01T01:00:00+00:00",
+      "end_utc": "2026-01-02T00:00:00+00:00",
+      "value": 0.2
+    }
+  ],
+  "export_price_aud_per_kwh": [
+    {
+      "start_utc": "2026-01-01T00:00:00+00:00",
+      "end_utc": "2026-01-02T00:00:00+00:00",
+      "value": 0.1
+    }
+  ],
+  "sensitivities": {
+    "terminal_lambda_aud_per_dc_kwh": 0.5,
+    "wear_aud_per_discharged_dc_kwh": null
+  }
+}

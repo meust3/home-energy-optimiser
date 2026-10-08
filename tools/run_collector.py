@@ -112,7 +112,11 @@ def main(
                 {"status": "pending_collection" if mapping else "invalid_mapping"}
             )
 
-    context_database_url = load_database_url() if mapping is not None else None
+    context_database_url = (
+        load_database_url()
+        if mapping is not None or config.arbitrage_capture_enabled
+        else None
+    )
 
     def collect_once() -> object:
         with HomeAssistantClient(
@@ -137,6 +141,17 @@ def main(
             )
             if on_context is not None:
                 on_context(context)
+        if config.arbitrage_capture_enabled:
+            from energy_optimizer.arbitrage.capture import capture_source
+
+            capture_source(
+                states,
+                slot=observation.slot_utc,
+                receipt=receipt,
+                repository_factory=lambda: open_bounded_context_repository(
+                    context_database_url
+                ),
+            )
         LOGGER.info(
             "Saved slot %s (telemetry %s, price %s, solar %s, weather %s, "
             "flow %s, overall %s, duplicate result %s). No command was issued.",

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "home-energy-optimiser"
-version = "0.7.0"
+version = "0.8.0"
 description = "Read-only home energy data collection and optimisation for Home Assistant, Amber Electric, Solcast, and GoodWe."
 readme = "README.md"
 requires-python = ">=3.12"
@@ -53,3 +53,8 @@ select = [
     "B",
     "SIM",
 ]
+
+[tool.ruff.lint.per-file-ignores]
+# Frozen research explanations/policy strings retain their original meaning.
+"src/energy_optimizer/arbitrage/selector.py" = ["E501"]
+"src/energy_optimizer/arbitrage/outcomes.py" = ["E501"]

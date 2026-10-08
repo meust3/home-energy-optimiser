@@ -433,6 +433,42 @@ class ForecastCoordinator:
                     "shadow_outcomes_scored": outcome_count,
                 },
             )
+            if self.collector_config.arbitrage_capture_enabled:
+                optional_repository = None
+                try:
+                    self._check_deadline(started_monotonic)
+                    from energy_optimizer.arbitrage.capture import capture_forecast
+                    from energy_optimizer.context_collection import (
+                        open_bounded_context_repository,
+                    )
+
+                    optional_repository = open_bounded_context_repository(
+                        repository.engine.url.render_as_string(hide_password=False)
+                    )
+
+                    capture_forecast(
+                        optional_repository,
+                        forecast=forecast_run,
+                        forecast_id=forecast_run_id,
+                        reserve_id=reserve_run_id,
+                        operation_id=attempt_id,
+                        ready_at=self.clock(),
+                    )
+                    from energy_optimizer.arbitrage.opportunity import save_opportunity
+
+                    self._check_deadline(started_monotonic)
+                    save_opportunity(
+                        optional_repository,
+                        profile_json=self.collector_config.arbitrage_research_profile_json,
+                    )
+                except Exception as exc:
+                    LOGGER.warning(
+                        "Optional arbitrage forecast capture failed (%s)",
+                        type(exc).__name__,
+                    )
+                finally:
+                    if optional_repository is not None:
+                        optional_repository.close()
             repository.release_forecast_operation_lock(durable_lock)
             durable_lock = None
             if self.collector_config.retention_enabled:

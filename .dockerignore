@@ -1,0 +1,11 @@
+.git
+.local
+.env
+.env.*
+data
+logs
+captures
+exports
+secrets
+credentials
+.venv

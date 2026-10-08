@@ -103,6 +103,61 @@ def test_single_claim_prevents_restart_duplicate(tmp_path, config):
         repository.close()
 
 
+def test_optional_capture_after_operation_commit_and_failure_isolation(
+    tmp_path, config, monkeypatch
+):
+    import energy_optimizer.arbitrage.capture as capture
+    from energy_optimizer.arbitrage.capture import CaptureRepository
+
+    path = tmp_path / "captured-operations.db"
+    factory = _repository_factory(path)
+    enabled = config.model_copy(update={"arbitrage_capture_enabled": True})
+    boundary = datetime(2026, 8, 11, 2, 30, tzinfo=UTC)
+    coordinator = ForecastCoordinator(
+        repository_factory=factory,
+        collector_config=enabled,
+        operations_config=ForecastOperationsConfig(
+            enabled=True, reserve_snapshot_enabled=False
+        ),
+        health=AppHealth(900),
+        clock=lambda: boundary,
+    )
+    assert coordinator.run_boundary(boundary)
+    repository = factory()
+    try:
+        inputs = CaptureRepository(repository).latest("decision_inputs")
+        assert len(inputs["body"]["demand_points"]) == 288
+        assert inputs["body"]["model"]
+        assert inputs["confirmed_at"] >= inputs["captured_at"]
+        assert inputs["body"]["source_capture_id"] is None
+        opportunity = CaptureRepository(repository).latest("opportunity")
+        assert opportunity["body"]["status"] == "blocked"
+        assert opportunity["body"]["reasons"] == [
+            "explicit_physical_and_total_load_profile_missing"
+        ]
+        assert (
+            repository.forecast_operations_status_read_only()["last_attempt"]["status"]
+            == "success"
+        )
+    finally:
+        repository.close()
+
+    def failure(*args, **kwargs):
+        raise RuntimeError("private-input-must-not-be-logged")
+
+    monkeypatch.setattr(capture, "capture_forecast", failure)
+    assert coordinator.run_boundary(boundary + timedelta(minutes=30))
+    repository = factory()
+    try:
+        assert (
+            repository.forecast_operations_status_read_only()["last_attempt"]["status"]
+            == "success"
+        )
+        assert len(repository.forecast_run_summaries_read_only()) == 2
+    finally:
+        repository.close()
+
+
 def test_durable_lock_records_overlapping_boundary_as_skipped(config):
     values = {}
 
@@ -415,7 +470,7 @@ def test_migration_upgrade_downgrade_reupgrade_preserves_observations(tmp_path):
         column["name"] for column in inspect(engine).get_columns("observations")
     }
     command.upgrade(config, "head")
-    assert current_revision(engine) == "20261005_01"
+    assert current_revision(engine) == "20261008_01"
     assert set(inspect(engine).get_table_names()) >= {
         "forecast_point_scores",
         "forecast_operation_attempts",
@@ -434,7 +489,7 @@ def test_migration_upgrade_downgrade_reupgrade_preserves_observations(tmp_path):
     } == legacy_columns
     assert "reserve_runs" not in inspect(engine).get_table_names()
     command.upgrade(config, "head")
-    assert current_revision(engine) == "20261005_01"
+    assert current_revision(engine) == "20261008_01"
 
 
 def test_migration_compiles_reversible_postgresql_ddl():

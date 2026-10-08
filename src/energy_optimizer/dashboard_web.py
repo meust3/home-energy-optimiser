@@ -34,6 +34,7 @@ SHELL_ROUTES = {
     "/reserve",
     "/decisions",
     "/data-quality",
+    "/arbitrage",
 }
 
 
@@ -202,7 +203,10 @@ def make_handler(
 
         def _api(self, route: str) -> None:
             params = parse_qs(urlsplit(self.path).query, keep_blank_values=True)
-            if route == "/api/v1/status":
+            if route == "/api/v1/arbitrage":
+                self._require_params(params, set())
+                response = service.arbitrage()
+            elif route == "/api/v1/status":
                 self._require_params(params, set())
                 response = service.status()
             elif route == "/api/v1/live":

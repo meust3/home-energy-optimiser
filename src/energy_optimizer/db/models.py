@@ -693,3 +693,22 @@ class MigrationProgress(Base):
     last_business_key: Mapped[str | None] = mapped_column(Text)
     rows_copied: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     updated_at_utc: Mapped[datetime] = mapped_column(AwareDateTime(), nullable=False)
+
+
+class ArbitrageCapture(Base):
+    __tablename__ = "arbitrage_input_captures"
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    origin: Mapped[str] = mapped_column(String(80), nullable=False)
+    kind: Mapped[str] = mapped_column(String(32), nullable=False)
+    captured_at_utc: Mapped[datetime] = mapped_column(AwareDateTime(), nullable=False)
+    body_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    body: Mapped[Any] = mapped_column(JSON_TYPE, nullable=False)
+    __table_args__ = (Index("idx_arbitrage_capture_asof", "kind", "captured_at_utc"),)
+
+
+class ArbitrageCommitWitness(Base):
+    __tablename__ = "arbitrage_commit_witnesses"
+    capture_id: Mapped[str] = mapped_column(
+        String(64), ForeignKey("arbitrage_input_captures.id"), primary_key=True
+    )
+    confirmed_at_utc: Mapped[datetime] = mapped_column(AwareDateTime(), nullable=False)
