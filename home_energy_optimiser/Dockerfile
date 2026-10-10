@@ -1,7 +1,7 @@
 FROM python:3.12.11-slim-bookworm
 
-ARG BUILD_VERSION=0.8.0
-ARG APP_SOURCE_REF=v0.8.0
+ARG BUILD_VERSION=0.8.1
+ARG APP_SOURCE_REF=v0.8.1
 # Optional local release rehearsal: immutable git archive, never household data.
 ARG APP_SOURCE_ARCHIVE_SHA256=""
 

@@ -4,6 +4,15 @@ import json
 from datetime import timedelta
 
 from energy_optimizer import offline_paired_synthetic as core
+from energy_optimizer.arbitrage.advisory_inputs import (
+    FIXED_RESERVE,
+    AdvisoryInputError,
+    input_semantics,
+    interpret_prices,
+    linked_reserve,
+    profile_modes,
+    validate_price_times,
+)
 from energy_optimizer.arbitrage.archive import context_from_capture
 from energy_optimizer.arbitrage.capture import CaptureRepository
 from energy_optimizer.arbitrage.decision_types import (
@@ -30,20 +39,8 @@ def declared_context(inputs, source, profile):
     issuance. Provider issuance and physical measurement timing remain unknown.
     Profile report-age limits are declared conditional research freshness rules.
     """
-    required = {
-        "assumptions",
-        "evidence",
-        "floor_kwh",
-        "state_bridge",
-        "soc_report_age_seconds",
-        "forecast_report_age_seconds",
-        "uncontrolled_load_kw",
-        "uncontrolled_load_basis",
-    }
-    if (
-        set(profile) != required
-        or profile["state_bridge"] != "constant_soc_capacity_proxy_until_branch"
-    ):
+    _, reserve_mode = profile_modes(profile)
+    if profile["state_bridge"] != "constant_soc_capacity_proxy_until_branch":
         raise ValueError("complete_explicit_research_profile_required")
     ready = inputs["confirmed_at"]
     if ready is None:
@@ -56,6 +53,22 @@ def declared_context(inputs, source, profile):
     raw_a["omitted_effects"] = tuple(raw_a["omitted_effects"])
     raw_a["uncertainty"] = tuple(raw_a["uncertainty"])
     assumptions = Assumptions(**raw_a)
+    floor = (
+        profile["floor_kwh"] if reserve_mode is None else reserve_mode.get("floor_kwh")
+    )
+    reserve_basis = (
+        "explicit conditional floor, distinct from installed/backup settings"
+    )
+    reserve_evidence = evidence
+    if reserve_mode is not None:
+        if reserve_mode["mode"] == FIXED_RESERVE:
+            reserve_basis = json.dumps(
+                reserve_mode, sort_keys=True, separators=(",", ":")
+            )
+        else:
+            floor, reserve_basis, reserve_evidence = linked_reserve(
+                inputs, assumptions, ready, start
+            )
     raw = source["body"]["sources"]
     soc = raw["soc"]
     if soc is None or soc["attributes"].get("unit_of_measurement") != "%":
@@ -167,9 +180,9 @@ def declared_context(inputs, source, profile):
         ),
         Reserve(
             start,
-            profile["floor_kwh"],
-            "explicit conditional floor, distinct from installed/backup settings",
-            evidence,
+            floor,
+            reserve_basis,
+            reserve_evidence,
         ),
         assumptions,
         start,
@@ -210,8 +223,11 @@ def save_opportunity(repository, *, profile_json=""):
             raise ValueError("explicit_physical_and_total_load_profile_missing")
         if source is None:
             raise ValueError("source_capture_missing")
-        c = declared_context(inputs, source, json.loads(profile_json))
+        profile = json.loads(profile_json)
+        c = declared_context(inputs, source, profile)
+        validate_price_times(source, profile_modes(profile)[0])
         c = context_from_capture(inputs, source, primitive(c))
+        c = interpret_prices(c, source, profile_modes(profile)[0])
         receipt = select(core, c, integration_source_sha())
         estimates = json.loads(receipt.estimates_json)
         # The immutable receipt retains complete ledgers. The public projection
@@ -258,30 +274,41 @@ def save_opportunity(repository, *, profile_json=""):
                 ),
             },
         )
+        semantics = input_semantics(c, profile)
+        if semantics is not None:
+            result["input_semantics"] = semantics
+            result["research_load_basis"] = (
+                inputs["body"]["load_basis"]
+                + "; "
+                + semantics["uncontrolled_load_basis"]
+            )
     except (ValueError, TypeError, KeyError) as exc:
         # Never echo arbitrary profile/input contents in public error messages.
         result["reasons"] = [
             (
                 str(exc)
-                if type(exc) is ValueError
-                and str(exc)
-                in {
-                    "unconfirmed_capture",
-                    "explicit_physical_and_total_load_profile_missing",
-                    "source_capture_missing",
-                    "complete_explicit_research_profile_required",
-                    "soc_domain_missing",
-                    "soc_report_stale_or_future",
-                    "explicit_positive_report_age_required",
-                    "explicit_total_load_scenario_required",
-                    "price_unit_or_source_missing",
-                    "capture_unavailable_or_corrupt",
-                    "source_link_mismatch",
-                    "total_load_scenario_required",
-                    "missing_or_unpinned_source_contract",
-                    "unsupported_demand_unit",
-                    "conflicting_pv_overlap",
-                }
+                if isinstance(exc, AdvisoryInputError)
+                or (
+                    type(exc) is ValueError
+                    and str(exc)
+                    in {
+                        "unconfirmed_capture",
+                        "explicit_physical_and_total_load_profile_missing",
+                        "source_capture_missing",
+                        "complete_explicit_research_profile_required",
+                        "soc_domain_missing",
+                        "soc_report_stale_or_future",
+                        "explicit_positive_report_age_required",
+                        "explicit_total_load_scenario_required",
+                        "price_unit_or_source_missing",
+                        "capture_unavailable_or_corrupt",
+                        "source_link_mismatch",
+                        "total_load_scenario_required",
+                        "missing_or_unpinned_source_contract",
+                        "unsupported_demand_unit",
+                        "conflicting_pv_overlap",
+                    }
+                )
                 else "invalid_declared_research_profile"
             )
         ]

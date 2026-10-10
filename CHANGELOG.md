@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.8.1 - local advisory input compatibility candidate (not published)
+
+- Adds an opt-in versioned conditional interpretation of attributable Amber
+  boundary-plus-one-second decision prices; original captures and strict generic
+  coverage/outcome rules remain unchanged.
+- Adds explicit fixed-floor and exact linked capacity-capped reserve modes. Each
+  linked floor is frozen from its witnessed input snapshot, with no fallback.
+- Exposes conditional price, reserve and zero-additional-EV assumptions in the
+  GET-only research display. A full-capacity floor permits no model discharge.
+- No migration, dependency/default, reserve-engine, selector, hardware or
+  retention change. Profile remains empty and capture defaults off.
+
 ## 0.8.0 - local arbitrage programme candidate (not published)
 
 - Adds immutable, optional already-fetched input capture and commit witnesses,

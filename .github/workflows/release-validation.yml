@@ -45,21 +45,22 @@ jobs:
           ruff check .
           black --check .
           git diff --check
+          node --test tests/*.test.cjs
           python -m pytest -q
       - name: Build frozen amd64 App
         run: >-
           docker build --platform linux/amd64
           --build-arg APP_SOURCE_REF="$SOURCE_SHA"
-          --build-arg BUILD_VERSION=0.8.0
-          --tag home-energy-release:0.8.0
+          --build-arg BUILD_VERSION=0.8.1
+          --tag home-energy-release:0.8.1
           --file home_energy_optimiser/Dockerfile .
       - name: Validate image-baked App bootstrap
-        run: python tools/test_home_assistant_app_container.py --image home-energy-release:0.8.0 --use-image-files
+        run: python tools/test_home_assistant_app_container.py --image home-energy-release:0.8.1 --use-image-files
       - name: Verify installed source and record image identity
         run: |
-          docker run --rm --entrypoint python home-energy-release:0.8.0 -c 'import hashlib,json,pathlib; root=pathlib.Path("/usr/local/lib/python3.12/site-packages/energy_optimizer"); print(json.dumps({str(p.relative_to(root)):hashlib.sha256(p.read_bytes()).hexdigest() for p in root.rglob("*.py")},sort_keys=True))' > image-source-hashes.json
+          docker run --rm --entrypoint python home-energy-release:0.8.1 -c 'import hashlib,json,pathlib; root=pathlib.Path("/usr/local/lib/python3.12/site-packages/energy_optimizer"); print(json.dumps({str(p.relative_to(root)):hashlib.sha256(p.read_bytes()).hexdigest() for p in root.rglob("*.py")},sort_keys=True))' > image-source-hashes.json
           python -c 'import hashlib,json,pathlib; expected={str(p.relative_to(pathlib.Path("src/energy_optimizer"))):hashlib.sha256(p.read_bytes()).hexdigest() for p in pathlib.Path("src/energy_optimizer").rglob("*.py")}; actual=json.loads(pathlib.Path("image-source-hashes.json").read_text()); assert actual==expected, "image source differs from frozen checkout"; print(f"Matched {len(actual)} installed Python source files")'
-          docker image inspect home-energy-release:0.8.0 --format '{{.Id}} {{.Architecture}} {{index .Config.Labels "org.opencontainers.image.revision"}}' > image-identity.txt
+          docker image inspect home-energy-release:0.8.1 --format '{{.Id}} {{.Architecture}} {{index .Config.Labels "org.opencontainers.image.revision"}}' > image-identity.txt
           cat image-identity.txt
       - uses: actions/upload-artifact@v4
         with:

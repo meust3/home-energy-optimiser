@@ -1,0 +1,277 @@
+{
+  "$comment": "Declaration structure only; source attribution, units, causal admission, health, physics and numerical eligibility require actual context validation.",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "assumptions": {
+      "additionalProperties": false,
+      "properties": {
+        "capacity_kwh": {
+          "type": "number"
+        },
+        "charge_efficiency": {
+          "type": "number"
+        },
+        "charge_limit_kw": {
+          "type": "number"
+        },
+        "curtailment_permitted": {
+          "type": "boolean"
+        },
+        "discharge_efficiency": {
+          "type": "number"
+        },
+        "discharge_limit_kw": {
+          "type": "number"
+        },
+        "export_limit_kw": {
+          "type": "number"
+        },
+        "flow_domain": {
+          "type": "string"
+        },
+        "import_limit_kw": {
+          "type": "number"
+        },
+        "interval_interpretation": {
+          "type": "string"
+        },
+        "omitted_effects": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "physical_min_kwh": {
+          "type": "number"
+        },
+        "profile_id": {
+          "type": "string"
+        },
+        "pv_abstraction": {
+          "type": "string"
+        },
+        "stored_energy_domain": {
+          "type": "string"
+        },
+        "topology": {
+          "type": "string"
+        },
+        "uncertainty": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "capacity_kwh",
+        "charge_efficiency",
+        "charge_limit_kw",
+        "curtailment_permitted",
+        "discharge_efficiency",
+        "discharge_limit_kw",
+        "export_limit_kw",
+        "flow_domain",
+        "import_limit_kw",
+        "interval_interpretation",
+        "omitted_effects",
+        "physical_min_kwh",
+        "profile_id",
+        "pv_abstraction",
+        "stored_energy_domain",
+        "topology",
+        "uncertainty"
+      ],
+      "type": "object"
+    },
+    "evidence": {
+      "additionalProperties": false,
+      "properties": {
+        "availability_basis": {
+          "type": "string"
+        },
+        "availability_kind": {
+          "type": "string"
+        },
+        "available_at": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "fresh_until": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "freshness_basis": {
+          "type": "string"
+        },
+        "healthy": {
+          "type": "boolean"
+        },
+        "issued_at": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "issues": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "source_id": {
+          "type": "string"
+        },
+        "source_sha256": {
+          "type": "string"
+        },
+        "version": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "availability_basis",
+        "availability_kind",
+        "available_at",
+        "fresh_until",
+        "freshness_basis",
+        "healthy",
+        "issued_at",
+        "issues",
+        "source_id",
+        "source_sha256",
+        "version"
+      ],
+      "type": "object"
+    },
+    "forecast_report_age_seconds": {
+      "additionalProperties": false,
+      "properties": {
+        "demand": {
+          "exclusiveMinimum": 0,
+          "type": "number"
+        },
+        "export_price": {
+          "exclusiveMinimum": 0,
+          "type": "number"
+        },
+        "import_price": {
+          "exclusiveMinimum": 0,
+          "type": "number"
+        },
+        "pv": {
+          "exclusiveMinimum": 0,
+          "type": "number"
+        }
+      },
+      "required": [
+        "demand",
+        "export_price",
+        "import_price",
+        "pv"
+      ],
+      "type": "object"
+    },
+    "price_interpretation": {
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "mode": {
+              "const": "strict_raw_v1"
+            }
+          },
+          "required": [
+            "mode"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "mode": {
+              "const": "conditional_amber_boundary_start_plus_one_v1"
+            },
+            "source": {
+              "const": "recorded_amber_forecasts_v1"
+            }
+          },
+          "required": [
+            "mode",
+            "source"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "reserve_binding": {
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "floor_kwh": {
+              "type": "number"
+            },
+            "mode": {
+              "const": "fixed_research_floor_v1"
+            }
+          },
+          "required": [
+            "floor_kwh",
+            "mode"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "mode": {
+              "const": "linked_capacity_capped_reserve_v1"
+            },
+            "quantity": {
+              "const": "capacity_capped_reserve_kwh"
+            },
+            "unit": {
+              "const": "stored_kWh"
+            }
+          },
+          "required": [
+            "mode",
+            "quantity",
+            "unit"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "schema_version": {
+      "const": "conditional-research-profile-v2"
+    },
+    "soc_report_age_seconds": {
+      "exclusiveMinimum": 0,
+      "type": "number"
+    },
+    "state_bridge": {
+      "const": "constant_soc_capacity_proxy_until_branch"
+    },
+    "uncontrolled_load_basis": {
+      "type": "string"
+    },
+    "uncontrolled_load_kw": {
+      "type": "number"
+    }
+  },
+  "required": [
+    "assumptions",
+    "evidence",
+    "forecast_report_age_seconds",
+    "price_interpretation",
+    "reserve_binding",
+    "schema_version",
+    "soc_report_age_seconds",
+    "state_bridge",
+    "uncontrolled_load_basis",
+    "uncontrolled_load_kw"
+  ],
+  "title": "Conditional research profile v2",
+  "type": "object"
+}
