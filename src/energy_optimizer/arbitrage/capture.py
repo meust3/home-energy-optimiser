@@ -1,5 +1,6 @@
 """Bounded capture of already fetched inputs; never polls or controls a device."""
 
+import json
 import logging
 from datetime import UTC, datetime
 
@@ -13,6 +14,7 @@ from energy_optimizer.db.models import ArbitrageCapture, ArbitrageCommitWitness
 
 LOGGER = logging.getLogger(__name__)
 VERSION = "arbitrage-capture-v1"
+STORAGE_VERSION = "canonical-capture-body-v1"
 MAX_BYTES = 2097152
 MAX_POINTS = 4096
 SOURCES = {
@@ -52,6 +54,52 @@ PV_KEYS = {
     "pv_estimate10",
     "pv_estimate90",
 }
+
+
+def encode_capture_body(body: dict) -> dict:
+    """Preserve canonical numeric spellings inside the existing JSON column.
+
+    PostgreSQL JSONB normalizes numeric -0.0 to 0.0. Store canonical body JSON
+    as a string, not as JSONB numbers; logical capture identity/hash stays v1.
+    Both the logical payload and its storage envelope retain the byte bound.
+    """
+    encoded = canonical(body)
+    storage = {
+        "storage_format": STORAGE_VERSION,
+        "canonical_body_json": encoded,
+    }
+    if (
+        len(encoded.encode()) > MAX_BYTES
+        or len(canonical(storage).encode()) > MAX_BYTES
+    ):
+        raise ValueError("capture_byte_bound")
+    return storage
+
+
+def decode_capture_body(storage: dict) -> dict:
+    """Read new lossless envelopes and old objects without repairing old data."""
+    if not isinstance(storage, dict):
+        raise ValueError("capture_storage_invalid")
+    if "storage_format" not in storage:
+        return storage
+    if (
+        set(storage) != {"storage_format", "canonical_body_json"}
+        or storage["storage_format"] != STORAGE_VERSION
+        or not isinstance(storage["canonical_body_json"], str)
+        or len(canonical(storage).encode()) > MAX_BYTES
+    ):
+        raise ValueError("capture_storage_invalid")
+    encoded = storage["canonical_body_json"]
+    if len(encoded.encode()) > MAX_BYTES:
+        raise ValueError("capture_storage_invalid")
+    try:
+        body = json.loads(encoded)
+        valid = isinstance(body, dict) and canonical(body) == encoded
+    except (ValueError, TypeError, RecursionError):
+        valid = False
+    if not valid:
+        raise ValueError("capture_storage_invalid")
+    return body
 
 
 def _small(value):
@@ -126,9 +174,7 @@ class CaptureRepository:
         self.repository = repository
 
     def save(self, *, origin, kind, at, body, clock=lambda: datetime.now(UTC)):
-        encoded = canonical(body)
-        if len(encoded.encode()) > MAX_BYTES:
-            raise ValueError("capture_byte_bound")
+        stored_body = encode_capture_body(body)
         key = digest({"origin": origin, "kind": kind, "version": VERSION})
         content = digest(body)
         insert = pg_insert if self.repository.backend == "postgresql" else sqlite_insert
@@ -141,13 +187,15 @@ class CaptureRepository:
                     kind=kind,
                     captured_at_utc=at,
                     body_sha256=content,
-                    body=body,
+                    body=stored_body,
                 )
                 .on_conflict_do_nothing(index_elements=["id"])
             )
             row = session.get(ArbitrageCapture, key)
             if row.body_sha256 != content:
                 raise ValueError("immutable_capture_conflict")
+            if digest(decode_capture_body(row.body)) != content:
+                raise ValueError("capture_persisted_hash_mismatch")
         # This is an upper bound witnessed AFTER the first transaction committed.
         # A crash between commits leaves a visible unconfirmed capture.
         with self.repository.transaction() as session:
@@ -182,7 +230,7 @@ class CaptureRepository:
             return {
                 "id": row.id,
                 "body_sha256": row.body_sha256,
-                "body": row.body,
+                "body": decode_capture_body(row.body),
                 "captured_at": row.captured_at_utc,
                 "confirmed_at": witness,
             }

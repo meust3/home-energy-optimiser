@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.8.2 - candidate
+
+- Preserves canonical capture JSON, including signed zero, in a versioned storage
+  envelope so PostgreSQL JSONB cannot change the body hash on round-trip.
+- Reads existing capture objects without rewriting or relaxing their hashes.
+  Both logical bodies and stored envelopes keep the existing 2 MiB limit.
+- No migration, profile, reserve, selector, outcome or hardware-control change.
+  New storage requires this reader; keep this version for containment.
+
 ## 0.7.0 - release candidate (not published)
 
 - Adds optional mapped indoor/current-weather context collection and immutable
