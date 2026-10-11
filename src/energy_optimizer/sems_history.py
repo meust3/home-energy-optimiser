@@ -1,9 +1,11 @@
 """Offline SEMS session evidence; never changes observations or training flags."""
 
+from copy import deepcopy
 from datetime import UTC, datetime
 from decimal import Decimal, InvalidOperation
 from hashlib import sha256
 from typing import Any
+from zoneinfo import ZoneInfo
 
 
 def prepare_sessions(evidence: dict[str, Any]) -> dict[str, Any]:
@@ -54,6 +56,69 @@ def prepare_sessions(evidence: dict[str, Any]) -> dict[str, Any]:
         "production_consumption_enabled": False,
         "sessions": ordered,
     }
+
+
+def qualify_session_times(
+    ledger: dict[str, Any],
+    *,
+    timezone_name: str,
+    evidence_references: list[str],
+    validated_at: datetime,
+) -> dict[str, Any]:
+    """Apply an evidence-reviewed timezone, without qualifying power or training.
+
+    The caller must independently validate station time and session linkage.
+    The references record that review; this function cannot establish it itself.
+    Ambiguous/nonexistent local timestamps require separate source evidence.
+    """
+    if not evidence_references or any(not ref.strip() for ref in evidence_references):
+        raise ValueError("Timezone qualification requires evidence references")
+    if validated_at.tzinfo is None or validated_at.utcoffset() is None:
+        raise ValueError("Validation time must be timezone-aware")
+    acquired = datetime.fromisoformat(ledger["observed_at_utc"].replace("Z", "+00:00"))
+    if acquired.tzinfo is None or acquired.utcoffset() is None:
+        raise ValueError("Acquisition time must be timezone-aware")
+    if validated_at < acquired:
+        raise ValueError("Validation cannot precede evidence acquisition")
+    zone = ZoneInfo(timezone_name)
+    result = deepcopy(ledger)
+    for row in result["sessions"]:
+        for source, target in (
+            ("start_source_local", "start_utc"),
+            ("end_source_local", "end_utc"),
+        ):
+            local = datetime.fromisoformat(row[source])
+            if local.tzinfo is not None:
+                raise ValueError("Expected unqualified local source time")
+            candidates = {
+                candidate.astimezone(UTC)
+                for fold in (0, 1)
+                if (candidate := local.replace(tzinfo=zone, fold=fold))
+                .astimezone(UTC)
+                .astimezone(zone)
+                .replace(tzinfo=None)
+                == local
+            }
+            if len(candidates) != 1:
+                raise ValueError("Ambiguous or nonexistent source local time")
+            row[target] = candidates.pop().isoformat()
+        if row["end_utc"] <= row["start_utc"]:
+            raise ValueError("Qualified session end must follow start")
+        if datetime.fromisoformat(row["end_utc"]) > acquired:
+            raise ValueError("Completed session ends after evidence acquisition")
+        row["source_timezone"] = timezone_name
+        row["qualification"] = "session_window_context_only"
+        row["timezone_evidence_references"] = list(evidence_references)
+        row["context_known_at_utc"] = validated_at.astimezone(UTC).isoformat()
+        row["continuous_charging_verified"] = False
+    # One charger cannot have overlapping completed session records without review.
+    ordered = sorted(result["sessions"], key=lambda row: row["start_utc"])
+    if any(
+        a["end_utc"] > b["start_utc"]
+        for a, b in zip(ordered, ordered[1:], strict=False)
+    ):
+        raise ValueError("Overlapping session records require source review")
+    return result
 
 
 def preview_join(
