@@ -20,6 +20,11 @@ from energy_optimizer.data_validation import (
     materially_negative_household_demand,
 )
 from energy_optimizer.db.engine import translate_database_error
+from energy_optimizer.db.forecast_scoring import (
+    ScoringDiagnostics,
+    scoring_trace,
+    select_pending_ids,
+)
 from energy_optimizer.db.models import (
     Base,
     EVSessionAnnotation,
@@ -706,44 +711,49 @@ class DatabaseRepository:
         delay_minutes: int,
         limit: int = 2500,
         runtime_guard: Callable[[], None] | None = None,
+        diagnostics: ScoringDiagnostics | None = None,
     ) -> int:
         """Materialize eligible completed-point scores without changing forecasts."""
         _require_aware(now)
         if not 1 <= limit <= 2500:
             raise ValueError("score limit must be 1-2500")
         cutoff = now.astimezone(UTC) - timedelta(minutes=delay_minutes)
-        with self.transaction() as session:
-            # Keep full JSON payloads out of the historical anti-join. The covering
-            # index permits an index-only scan; materialization bounds payload reads
-            # to the selected batch. Include ID for deterministic equal-time batches.
-            pending = (
-                select(ForecastPoint.id, ForecastPoint.period_end_utc)
-                .join(ForecastRun, ForecastRun.id == ForecastPoint.forecast_run_id)
-                .outerjoin(
-                    ForecastPointScore,
-                    ForecastPointScore.forecast_point_id == ForecastPoint.id,
+        diagnostics = diagnostics or ScoringDiagnostics()
+        with scoring_trace(diagnostics), self.transaction() as session:
+            diagnostics.enter("snapshot")
+            if self.backend == "postgresql":
+                session.connection(
+                    execution_options={"isolation_level": "REPEATABLE READ"}
                 )
-                .where(
-                    ForecastPoint.period_end_utc <= cutoff,
-                    ForecastPointScore.forecast_point_id.is_(None),
-                    ForecastRun.forecast_type == "baseline_household_load",
-                )
-                .order_by(ForecastPoint.period_end_utc, ForecastPoint.id)
-                .limit(limit)
-                .cte("pending_forecast_points")
-                .prefix_with("MATERIALIZED", dialect="postgresql")
+            diagnostics.enter("pending_selection")
+            ids = select_pending_ids(
+                session,
+                cutoff=cutoff,
+                limit=limit,
+                runtime_guard=runtime_guard,
+                diagnostics=diagnostics,
             )
-            points = list(
-                session.execute(
-                    select(ForecastPoint, ForecastRun.metadata_json)
-                    .join(pending, pending.c.id == ForecastPoint.id)
-                    .join(ForecastRun, ForecastRun.id == ForecastPoint.forecast_run_id)
-                    .order_by(pending.c.period_end_utc, pending.c.id)
+            diagnostics.enter("payload_fetch")
+            if runtime_guard is not None:
+                runtime_guard()
+            points = (
+                list(
+                    session.execute(
+                        select(ForecastPoint, ForecastRun.metadata_json)
+                        .join(
+                            ForecastRun, ForecastRun.id == ForecastPoint.forecast_run_id
+                        )
+                        .where(ForecastPoint.id.in_(ids))
+                        .order_by(ForecastPoint.period_end_utc, ForecastPoint.id)
+                    )
                 )
+                if ids
+                else []
             )
             for point, run_metadata in points:
                 if runtime_guard is not None:
                     runtime_guard()
+                diagnostics.enter("actual_lookup")
                 rows = list(
                     session.execute(
                         select(
@@ -798,6 +808,7 @@ class DatabaseRepository:
                     missing_reason = "actual_value_missing"
                 elif not health_eligible:
                     missing_reason = "actual_unhealthy_or_ineligible"
+                diagnostics.enter("score_persistence")
                 session.add(
                     ForecastPointScore(
                         forecast_point_id=point.id,
@@ -814,6 +825,11 @@ class DatabaseRepository:
                         metadata_json={"eligible_sample_count": len(eligible)},
                     )
                 )
+                session.flush()
+                diagnostics.processed += 1
+            if runtime_guard is not None:
+                runtime_guard()
+            diagnostics.enter("commit")
         return len(points)
 
     def save_reserve_run(

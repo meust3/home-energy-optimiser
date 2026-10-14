@@ -98,6 +98,9 @@ def test_single_claim_prevents_restart_duplicate(tmp_path, config):
         status = repository.forecast_operations_status_read_only()
         assert status["last_attempt"]["status"] == "success"
         assert status["last_attempt"]["forecast_point_count"] == 288
+        diagnostic = status["last_attempt"]["metadata_json"]["scoring_diagnostics"]
+        assert diagnostic["phase"] == "complete"
+        assert diagnostic["failed"] is False
         assert len(repository.forecast_run_summaries_read_only()) == 1
     finally:
         repository.close()
@@ -547,6 +550,9 @@ def test_query_cancellation_audit_preserves_stage_without_error_details(
     boundary = datetime(2026, 8, 11, 2, 30, tzinfo=UTC)
 
     def cancel(*args, **kwargs):
+        kwargs["diagnostics"].enter("actual_lookup")
+        kwargs["diagnostics"].sqlstate = "57014"
+        kwargs["diagnostics"].failed = True
         raise DatabaseQueryCanceledError("private SQL and credentials must not appear")
 
     monkeypatch.setattr(DatabaseRepository, "score_completed_forecast_points", cancel)
@@ -562,6 +568,10 @@ def test_query_cancellation_audit_preserves_stage_without_error_details(
     try:
         attempt = repository.forecast_operations_status_read_only()["last_attempt"]
         assert attempt["forecast_point_count"] == 288
+        diagnostic = attempt["metadata_json"]["scoring_diagnostics"]
+        assert diagnostic["phase"] == "actual_lookup"
+        assert diagnostic["sqlstate"] == "57014"
+        assert "private" not in str(diagnostic)
         assert (
             attempt["failure_summary"]
             == "DatabaseQueryCanceledError during forecast operation; "

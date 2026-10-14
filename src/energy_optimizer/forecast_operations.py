@@ -11,6 +11,7 @@ from datetime import UTC, date, datetime, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
 
+from energy_optimizer.db.forecast_scoring import ScoringDiagnostics
 from energy_optimizer.demand_forecast import forecast_household_demand
 from energy_optimizer.forecast_alignment import (
     FULL_FIVE_MINUTE_ALIGNMENT,
@@ -176,6 +177,7 @@ class ForecastCoordinator:
             finally:
                 repository.close()
             return False
+        scoring_diagnostics = ScoringDiagnostics()
         started_monotonic = self.monotonic()
         durable_lock: Any = None
         phase = "claim"
@@ -211,6 +213,7 @@ class ForecastCoordinator:
             scored = repository.score_completed_forecast_points(
                 now=started_at,
                 delay_minutes=self.config.scoring_delay_minutes,
+                diagnostics=scoring_diagnostics,
                 runtime_guard=lambda: self._check_deadline(started_monotonic),
             )
             self._check_deadline(started_monotonic)
@@ -428,6 +431,7 @@ class ForecastCoordinator:
                 forecast_point_count=len(forecast_run.points),
                 metadata={
                     "scored_point_count": scored,
+                    "scoring_diagnostics": scoring_diagnostics.snapshot(),
                     "calibration_rollup": rollup_result,
                     "shadow_decision_run_id": decision_run_id,
                     "shadow_outcomes_scored": outcome_count,
@@ -509,6 +513,9 @@ class ForecastCoordinator:
                         forecast_run_id=forecast_run_id,
                         forecast_point_count=forecast_point_count,
                         failure_summary=f"{_safe_failure(exc)}; phase={phase}",
+                        metadata={
+                            "scoring_diagnostics": scoring_diagnostics.snapshot()
+                        },
                     )
                 except Exception:
                     LOGGER.error("Forecast failure audit could not be stored")
