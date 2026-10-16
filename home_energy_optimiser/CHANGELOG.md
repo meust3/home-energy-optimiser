@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.8.3 - scoring reliability candidate (not published)
+
+- Selects pending forecast scores in bounded ID ranges while preserving oldest-first
+  order, existing eligibility rules and transactional rollback.
+- Records safe scoring subphase timings, counts and SQLSTATE without SQL parameters,
+  credentials or household payloads.
+- Uses a consistent PostgreSQL scoring snapshot and a bounded selection budget.
+  Smaller individual queries require more round trips; total work is not eliminated.
+- No forecast-model, solar, reserve, profile, dependency, migration, retention or
+  hardware-control change. Historical scores and captures are not rewritten.
+
 ## 0.8.2 - candidate
 
 - Preserves canonical capture JSON, including signed zero, in a versioned storage
