@@ -31,7 +31,7 @@ RUN --mount=type=secret,id=local_source_archive \
         "https://github.com/meust3/home-energy-optimiser/archive/${APP_SOURCE_REF}.tar.gz" \
         | tar --extract --gzip --strip-components=1; \
     fi \
-    && python -m pip install . \
+    && python -m pip install --constraint requirements-runtime.txt . \
     && chmod 0755 home_energy_optimiser/run.sh \
     && rm -rf .git .env .venv data logs captures exports secrets credentials \
       tests docs .pytest_cache .ruff_cache .mypy_cache htmlcov \

@@ -8,6 +8,7 @@
   credentials or household payloads.
 - Uses a consistent PostgreSQL scoring snapshot and a bounded selection budget.
   Smaller individual queries require more round trips; total work is not eliminated.
+- Constrains runtime dependency resolution to the retained v0.8.2 package baseline.
 - No forecast-model, solar, reserve, profile, dependency, migration, retention or
   hardware-control change. Historical scores and captures are not rewritten.
 
