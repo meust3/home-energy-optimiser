@@ -30,6 +30,7 @@ from energy_optimizer.arbitrage.decision_types import (
 )
 from energy_optimizer.arbitrage.research_io import integration_source_sha
 from energy_optimizer.arbitrage.selector import select
+from energy_optimizer.arbitrage.soc_freshness import validate_soc_evidence
 
 
 def declared_context(inputs, source, profile):
@@ -73,9 +74,17 @@ def declared_context(inputs, source, profile):
     soc = raw["soc"]
     if soc is None or soc["attributes"].get("unit_of_measurement") != "%":
         raise ValueError("soc_domain_missing")
-    reported = timestamp(soc["reported_at"])
-    if not 0 <= (ready - reported).total_seconds() <= profile["soc_report_age_seconds"]:
-        raise ValueError("soc_report_stale_or_future")
+    soc_evidence = validate_soc_evidence(
+        inputs, source, ready=ready, limit=profile["soc_report_age_seconds"]
+    )
+    if soc_evidence is None:
+        reported = timestamp(soc["reported_at"])
+        if (
+            not 0
+            <= (ready - reported).total_seconds()
+            <= profile["soc_report_age_seconds"]
+        ):
+            raise ValueError("soc_report_stale_or_future")
     energy = float(soc["state"]) / 100 * assumptions.capacity_kwh
 
     def forecast(name, target, unit, interpretation, data, reports):
@@ -176,7 +185,7 @@ def declared_context(inputs, source, profile):
             energy,
             "dated_analytical_hypothesis",
             profile["state_bridge"],
-            evidence,
+            soc_evidence or evidence,
         ),
         Reserve(
             start,

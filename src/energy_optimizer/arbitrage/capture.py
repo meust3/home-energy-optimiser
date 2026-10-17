@@ -123,7 +123,7 @@ def _price_value(key, value):
     return _small(value)
 
 
-def snapshot_states(states, *, slot, received_at):
+def snapshot_states(states, *, slot, received_at, soc_runtime_timezone=None):
     """Whitelist fields, never retain all HA attributes or tracker/credential data."""
     sources = {}
     for alias, entity in SOURCES.items():
@@ -153,8 +153,16 @@ def snapshot_states(states, *, slot, received_at):
                 if isinstance(row, dict)
             ]
         sources[alias] = body
+    freshness = {}
+    if soc_runtime_timezone is not None:
+        from energy_optimizer.arbitrage.soc_freshness import captured_soc_evidence
+
+        freshness["soc_freshness"] = captured_soc_evidence(
+            primitive(sources), states, slot=slot, timezone=soc_runtime_timezone
+        )
     result = primitive(
         {
+            **freshness,
             "version": VERSION,
             "kind": "source",
             "slot": slot,
@@ -236,10 +244,17 @@ class CaptureRepository:
             }
 
 
-def capture_source(states, *, slot, receipt, repository_factory):
+def capture_source(
+    states, *, slot, receipt, repository_factory, soc_runtime_timezone=None
+):
     repository = None
     try:
-        body = snapshot_states(states, slot=slot, received_at=receipt)
+        body = snapshot_states(
+            states,
+            slot=slot,
+            received_at=receipt,
+            soc_runtime_timezone=soc_runtime_timezone,
+        )
         repository = repository_factory()
         return CaptureRepository(repository).save(
             origin=slot.isoformat(), kind="source", at=receipt, body=body

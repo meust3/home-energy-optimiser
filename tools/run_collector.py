@@ -146,6 +146,9 @@ def main(
 
             capture_source(
                 states,
+                soc_runtime_timezone=(
+                    config.timezone if config.goodwe_soc_timestamp_enabled else None
+                ),
                 slot=observation.slot_utc,
                 receipt=receipt,
                 repository_factory=lambda: open_bounded_context_repository(
