@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.8.4 - SOC capture freshness candidate (not published)
+
+- New optional captures pin versioned GoodWe runtime clock and HA receipt evidence
+  for unchanged SOC values. Research admission validates both within the existing
+  600-second bound, with source/slot/value binding and fail-closed invalid evidence.
+- Preserves historical capture interpretation and hashes, existing research profile,
+  forecasts, reserve and terminal rules. Adds no requests, workers or device writes.
+- No migration or option change. Hardware execution remains disabled.
+
 ## 0.8.3 - scoring reliability candidate (not published)
 
 - Selects pending forecast scores in bounded ID ranges while preserving oldest-first
