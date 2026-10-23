@@ -1,29 +1,35 @@
 # Read-only Gate A and compatible recovery
 
-This local candidate has not changed any live option, database or service.
+The 17 October 2026 acceptance evidence records v0.8.4 publication, App update and
+two normal forecast/advisory cycles complete, with schema `20261008_01` unchanged.
+Independent installed-byte attestation remains unverified under the approved
+amendment. See [dated acceptance](../Testing/v084_production_acceptance_20261017.md).
+Gate B is preservation-only planning; physical actions remain unauthorized.
 
 ## Publication/deployment separation
 
-Local version 0.8.0 is an unused minor feature candidate; remote main and released
-v0.7.0 resolve to c2f51838ad050e1ebfd3c843f1919206a89eb203. No tag was created.
-Gate A approval must identify the exact local commit and private release-manifest
-SHA. Publishing uses a reviewed branch/PR, exact-commit remote build and immutable
-tag-resolved validation. The present local artifact is built by the actual
-production Dockerfile with a SHA-checked git archive supplied as a BuildKit secret.
-It is NOT a tag-resolved/remote-download attestation. Remote source download is
-still the default path. Publication is not automatically App installation.
+Accepted v0.8.4 commit: `72a446cf28abb89217d76030004d6829b1c3007e`.
+Retained receipts record real remote-commit and tag-download builds and the public
+release, separately from App update/initial acceptance. Build receipts do not prove
+the installed bytes. App version/source-wrapper metadata does not independently
+attest its image, source or dependency bytes. Publication is not automatically
+installation, and the amendment is not hardware-test approval.
 
 The reviewed workflow triggers only main PR/workflow_dispatch, installs isolated
 CI dependencies, starts its own PostgreSQL, tests/builds/uploads validation artifacts.
 It contains no production access, deployment, model credit or hardware step.
-No workflow was invoked in this initial work package.
+The original v0.8.0 preparation invoked no workflow; later v0.8.4 publication
+receipts record actual CI. These software-only readiness edits invoke no workflow,
+build, publication or deployment.
 
 ## Migration and containment
 
 Startup requires manual schema head 20261008_01 even with capture disabled.
 The additive migration creates arbitrage_input_captures and arbitrage_commit_witnesses,
 including kind/time and ID indexes. It does not repair/reprocess old records.
-Production migration is a Gate A action, not authorised by local preparation.
+The existing production head is already `20261008_01`; v0.8.4 required no migration.
+Do not repeat earlier migration instructions. Any future migration requires its
+own approval and is not authorized by local readiness preparation.
 
 Before any approved installation: verify database identity/old head, current App
 update setting, backup/output sizes and privileges; take an external full backup,
@@ -60,7 +66,8 @@ core observation/forecast. Full-file snapshots contain exact bounds/provenance.
 Maximum theoretical daily payload: 288 source + 48 decision + 48 opportunity
 bodies = 768 MiB/day before database/index/JSON overhead (conservative limit,
 not a measured usage prediction). Measured authored 24h sizes/runtime are in the
-private receipt; installed throughput/storage must be checked at Gate A.
+private receipt; initial installed growth is recorded in the v0.8.4 acceptance
+summary. Day/week acceptance is not implied by two normal cycles.
 Retention does not prune these causal records and remains disabled. Set no new
 retention policy without explicit future version and preservation review.
 

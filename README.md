@@ -1,13 +1,15 @@
 # Home Energy Optimiser
 
-> Operational update (2026-09-13): App v0.6.2 is running with shadow enabled,
-> non-HOLD disabled and retention disabled. The live PostgreSQL revision is
-> `20260905_01`; no migration was required. The fresh backup and local restore
-> test passed. See the [production acceptance record](docs/Testing/v062_production_acceptance_20260913.md).
-> v0.6.2 fixes the forecast comparison time axis and baseline actual eligibility.
-> v0.6.1 corrects observed outcome accounting and withholds unsupported decision
-> comparisons; retained v1 estimates are not validated decision-quality evidence.
-> See [outcome scoring](docs/decision_outcome_scoring.md).
+> Last verified operational update (2026-10-17): App **v0.8.4 Running** at the
+> accepted release `72a446cf28abb89217d76030004d6829b1c3007e`, schema
+> `20261008_01`. Publication, update, protected-option verification and two normal
+> forecast/advisory cycles completed. Independent installed image/source/dependency
+> bytes remain **not independently verified under the approved amendment**.
+> See the [dated acceptance summary](docs/Testing/v084_production_acceptance_20261017.md).
+> This is retained evidence, not a fresh runtime check. Gate B and hardware
+> execution remain disabled. The pilot code is fake-only and uninstalled;
+> source integration does not activate it. Its [offline readiness review](docs/controlled_test_readiness.md)
+> cannot grant execution authority. Historical release descriptions follow.
 
 > v0.6.0 is a strictly advisory battery shadow-decisioning release. It adds
 > deterministic candidate analysis, immutable evidence,
@@ -56,8 +58,8 @@ forecast_max_runtime_seconds: 120
 reserve_snapshot_enabled: true
 ```
 
-The v0.6.0-v0.6.2 schema head is additive revision `20260905_01`, directly
-verified in production on 2026-09-13. App v0.6.2 is running; this patch required no
+The historical v0.6.0-v0.6.2 schema head was additive revision `20260905_01`.
+The accepted v0.8.4 runtime retains schema `20261008_01`; its update required no
 migration. The App never migrates PostgreSQL during startup. For future updates,
 validate the immutable image and Home Assistant discovery, then create and
 restore-test a fresh backup before stopping the sole collector and updating the
@@ -78,9 +80,10 @@ collects and analyses data but does not control Home Assistant or energy hardwar
 ## Current status
 
 - **PostgreSQL production:** working and manually validated end to end
-- **Continuous collector:** App v0.6.2 is installed and collecting successfully on
-  the Home Assistant OS 18.1 NUC
-- **Ingress dashboard:** deployed through App v0.6.2
+- **Continuous collector:** App v0.8.4 reported running on the Home Assistant OS
+  NUC in the 17 October acceptance evidence; no fresh runtime claim here
+- **Ingress dashboard:** accepted through App v0.8.4; intermittent Ingress shell
+  loading remains a recorded limitation with unproven root cause
 - **Reserve forecasting:** working and advisory
 - **Solar and price forecasts:** Solcast and Amber Electric integrated
 - **EV telemetry:** optional read-only vehicle-cloud integration was introduced in
@@ -91,6 +94,9 @@ collects and analyses data but does not control Home Assistant or energy hardwar
 - **Shadow decisioning:** v0.6.0 release, battery-only, opt-in, disabled by
   default, and structurally non-executing
 - **Automated control or trading:** not enabled
+- **Controlled-test preparation:** separate local fake-only rehearsal and offline
+  checklist; independent recovery, controller ownership, limits and credential
+  review are required before any separately approved physical test
 
 PostgreSQL 17 on the Synology NAS is the canonical production source of truth. The
 SQLite-to-PostgreSQL migration and exact validation are complete. Home Assistant
