@@ -140,10 +140,10 @@ class Feedback:
     effect_observed: bool
     ordinary_state_observed: bool
     bms_healthy: bool
-    network_available: bool = True
-    ha_available: bool = True
-    app_available: bool = True
-    database_available: bool = True
+    network_available: bool
+    ha_available: bool
+    app_available: bool
+    database_available: bool
 
 
 class SupervisedPilot:
@@ -644,6 +644,19 @@ class SupervisedPilot:
             )
             return "ABORTED"
         if (
+            intent.action == "PRESERVE_BATTERY" and feedback.import_cost_aud is None
+        ) or (
+            feedback.import_cost_aud is not None
+            and feedback.import_cost_aud > intent.max_import_cost_aud
+        ):
+            self.journal.transition(
+                key,
+                "ABORTED",
+                at=feedback.at,
+                reason="unknown_or_exceeded_import_cost_human_recovery",
+            )
+            return "ABORTED"
+        if (
             type(feedback.effect_observed) is not bool
             or type(feedback.ordinary_state_observed) is not bool
         ):
@@ -684,9 +697,24 @@ class SupervisedPilot:
             )
             return "ABORTED"
         if prior:
-            old = json.loads(prior[0])
+            # Missing samples stay missing, but cannot erase an earlier cumulative
+            # floor. Read the bounded durable history so restart preserves it too.
+            history = self.journal.connection.execute(
+                "SELECT body FROM pilot_evidence WHERE intent_id=? AND kind='FEEDBACK' "
+                "ORDER BY id DESC LIMIT ?",
+                (key, MAX_EVENTS_PER_INTENT),
+            ).fetchall()
+            cumulative = ("energy_ac_kwh", "throughput_stored_kwh", "import_cost_aud")
+            known = {}
+            for (body,) in history:
+                old = json.loads(body)
+                for name in cumulative:
+                    if name not in known and _finite(old[name]):
+                        known[name] = old[name]
+                if len(known) == len(cumulative):
+                    break
             for name in ("energy_ac_kwh", "throughput_stored_kwh", "import_cost_aud"):
-                before, after = old[name], getattr(feedback, name)
+                before, after = known.get(name), getattr(feedback, name)
                 if _finite(before) and _finite(after) and after < before:
                     self.journal.transition(
                         key,

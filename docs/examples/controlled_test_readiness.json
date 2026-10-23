@@ -1,0 +1,81 @@
+{
+  "version": "controlled-test-readiness-v1",
+  "baseline": {
+    "version": "0.8.4",
+    "release_commit": "72a446cf28abb89217d76030004d6829b1c3007e",
+    "schema_revision": "20261008_01",
+    "cutover_evidence": "docs/Testing/v084_production_acceptance_20261017.md",
+    "installed_bytes_independently_verified": false,
+    "approved_attestation_amendment": true
+  },
+  "plan": {
+    "equipment": null,
+    "operator": null,
+    "manual_supervision_confirmed": null,
+    "start_mode": "conserve",
+    "return_mode": "auto",
+    "operation_mode": "general",
+    "max_duration_seconds": 120,
+    "valid_from_utc": null,
+    "valid_until_utc": null,
+    "owner_generation": null
+  },
+  "limits": {
+    "capacity_kwh": null,
+    "min_soc_percent": null,
+    "max_soc_percent": null,
+    "min_stored_energy_kwh": null,
+    "max_battery_power_kw": null,
+    "max_energy_ac_kwh": null,
+    "max_throughput_stored_kwh": null,
+    "max_site_import_kw": null,
+    "max_site_export_kw": null,
+    "max_gross_import_cost_aud": null
+  },
+  "interface": {
+    "device_identity": null,
+    "firmware": null,
+    "source_semantics_evidence": null,
+    "delivery_retry_evidence": null,
+    "ordinary_state_evidence": null,
+    "backup_conditions_evidence": null
+  },
+  "feedback": {
+    "send_freshness_seconds": null,
+    "initial_effect_timeout_seconds": null,
+    "sustained_feedback_period_seconds": null,
+    "battery_discharge_deadband_w": null,
+    "advancing_post_approval_frames_verified": null,
+    "discharge_baseline_verified": null,
+    "limits_supported_by_site_evidence": null,
+    "grid_bms_communications_healthy": null,
+    "stop_and_return_criteria_reviewed": null
+  },
+  "controllers": {
+    "exclusive_window_verified": null,
+    "goodwe_fast_export_excluded": null,
+    "manufacturer_schedules_excluded": null,
+    "cloud_vpp_excluded": null,
+    "other_writers_excluded": null
+  },
+  "recovery": {
+    "independent_route_verified": false,
+    "physical_return_verified": false,
+    "native_expiry_verified": false,
+    "human_procedure_reviewed": null,
+    "reachable_operator_confirmed": null,
+    "newer_owner_wins_confirmed": null,
+    "no_retry_after_ambiguity_confirmed": null,
+    "failed_return_requires_reconciliation": null
+  },
+  "security": {
+    "disposition": "UNRESOLVED",
+    "service_identity_confirmed": null,
+    "consumers_reviewed": null,
+    "remediation_or_expiry_evidence": null
+  },
+  "scope": {
+    "execution_authorized": false,
+    "real_transport_provisioned": false
+  }
+}

@@ -1,16 +1,18 @@
 import sqlite3
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta, timezone
+from pathlib import Path
 
 import pytest
 
-from energy_optimizer.arbitrage.decision_types import digest
+from energy_optimizer.arbitrage.decision_types import canonical, digest
 from energy_optimizer.arbitrage.executor import FakeTransport, Intent, Journal, Precheck
 from energy_optimizer.arbitrage.supervised_pilot import (
     Envelope,
     Feedback,
     PilotState,
     SupervisedPilot,
+    parse_feedback,
 )
 
 T = datetime(2030, 1, 1, tzinfo=UTC)
@@ -165,6 +167,10 @@ def feedback(**changes):
                 effect_observed=True,
                 ordinary_state_observed=False,
                 bms_healthy=True,
+                network_available=True,
+                ha_available=True,
+                app_available=True,
+                database_available=True,
             )
             | changes
         )
@@ -840,4 +846,189 @@ def test_direct_non_utc_intent_fails_closed_before_journal_proposal(tmp_path):
     with pytest.raises(ValueError, match="proposal_clock"):
         pilot.propose(intent, envelope(), at=T, monotonic_seconds=0)
     assert journal.connection.execute("SELECT COUNT(*) FROM intents").fetchone()[0] == 0
+    journal.close()
+
+
+@pytest.mark.parametrize(
+    "field,lower",
+    [
+        ("energy_ac_kwh", 0.00004),
+        ("throughput_stored_kwh", 0.00004),
+        ("import_cost_aud", 0.000004),
+    ],
+)
+@pytest.mark.parametrize("restart", [False, True])
+def test_missing_sample_cannot_erase_known_cumulative_delivery(
+    tmp_path: Path, field: str, lower: float, restart: bool
+) -> None:
+    pilot, journal, transport, key = approved(tmp_path)
+    pilot.dispatch(key, current())
+    assert pilot.observe(key, feedback()) == "EFFECT_OBSERVED"
+    missing = feedback(
+        at=T + timedelta(seconds=4),
+        monotonic_seconds=4,
+        device_at=T + timedelta(seconds=3),
+        received_at=T + timedelta(seconds=3),
+        effect_observed=False,
+        **{field: None},
+    )
+    assert pilot.observe(key, missing) == "EFFECT_OBSERVED"
+    assert pilot.status(key)["evidence"][-1]["body"][field] is None
+    if restart:
+        journal.close()
+        journal = Journal(tmp_path / "pilot.db")
+        pilot = SupervisedPilot(journal, FakeTransport(), fake_rehearsal=True)
+    regressed = replace(
+        missing,
+        at=T + timedelta(seconds=5),
+        monotonic_seconds=5,
+        device_at=T + timedelta(seconds=4),
+        received_at=T + timedelta(seconds=4),
+        **{field: lower},
+    )
+    assert pilot.observe(key, regressed) == "ABORTED"
+    assert pilot.status(key)["events"][-1]["reason"] == "cumulative_feedback_regressed"
+    assert transport.calls == [key]
+    if restart:
+        assert pilot.executor.transport.calls == []
+    journal.close()
+
+
+def test_failed_return_restart_and_stale_witness_never_release_ownership(
+    tmp_path: Path,
+) -> None:
+    pilot, journal, transport, key = approved(tmp_path)
+    pilot.dispatch(key, current())
+    assert pilot.observe(key, feedback()) == "EFFECT_OBSERVED"
+    failed = feedback(
+        at=T + timedelta(seconds=5),
+        monotonic_seconds=5,
+        device_at=T + timedelta(seconds=4),
+        received_at=T + timedelta(seconds=4),
+        energy_ac_kwh=0.0002,
+        throughput_stored_kwh=0.0002,
+    )
+    assert pilot.observe(key, failed) == "RESTORE_FAILED"
+    journal.close()
+    reopened = Journal(tmp_path / "pilot.db")
+    resumed_transport = FakeTransport()
+    resumed = SupervisedPilot(reopened, resumed_transport, fake_rehearsal=True)
+    assert resumed.status(key)["status_meaning"] == "RETURN_FAILED"
+    with pytest.raises(ValueError, match="already_dispatched"):
+        resumed.dispatch(key, current())
+    stale_return = replace(
+        failed,
+        at=T + timedelta(seconds=6),
+        monotonic_seconds=6,
+        ordinary_state_observed=True,
+        battery_power_ac_kw=0,
+    )
+    assert resumed.observe(key, stale_return) == "ABORTED"
+    assert (
+        resumed.observe(
+            key,
+            replace(
+                stale_return,
+                at=T + timedelta(seconds=7),
+                monotonic_seconds=7,
+                device_at=T + timedelta(seconds=6),
+                received_at=T + timedelta(seconds=6),
+            ),
+        )
+        == "ABORTED"
+    )
+    assert reopened.connection.execute(
+        "SELECT active FROM intents WHERE id=?", (key,)
+    ).fetchone() == (1,)
+    assert transport.calls == [key]
+    assert resumed_transport.calls == []
+    reopened.close()
+
+
+@pytest.mark.parametrize(
+    "field",
+    ["network_available", "ha_available", "app_available", "database_available"],
+)
+def test_feedback_requires_explicit_service_health(field: str) -> None:
+    import json
+
+    body = json.loads(canonical(feedback()))
+    body.pop(field)
+    with pytest.raises(TypeError, match=field):
+        parse_feedback(body)
+
+
+@pytest.mark.parametrize("cost", [None, 0.011])
+@pytest.mark.parametrize("at_expiry", [False, True])
+def test_preservation_unknown_or_exceeded_cost_cannot_verify_effect_or_return(
+    tmp_path: Path, cost: float | None, at_expiry: bool
+) -> None:
+    intent = replace(
+        proposal(),
+        action="PRESERVE_BATTERY",
+        permitted_actions=("PRESERVE_BATTERY",),
+        max_power_ac_kw=0,
+    )
+    pilot, journal, transport, key = approved(tmp_path, changed_intent=intent)
+    state = current()
+    pilot.dispatch(
+        key, replace(state, core=replace(state.core, expected_direction="inhibit"))
+    )
+    seconds = 60 if at_expiry else 3
+    observed = feedback(
+        at=T + timedelta(seconds=seconds),
+        monotonic_seconds=seconds,
+        device_at=T + timedelta(seconds=seconds - 1),
+        received_at=T + timedelta(seconds=seconds - 1),
+        direction="inhibit",
+        battery_power_ac_kw=0,
+        energy_ac_kwh=0,
+        throughput_stored_kwh=0,
+        energy_stored_kwh=0.5,
+        import_cost_aud=cost,
+        ordinary_state_observed=at_expiry,
+    )
+    assert pilot.observe(key, observed) == "ABORTED"
+    assert transport.calls == [key]
+    assert journal.connection.execute(
+        "SELECT active FROM intents WHERE id=?", (key,)
+    ).fetchone() == (1,)
+    journal.close()
+
+
+@pytest.mark.parametrize("cost", [0, 0.01])
+@pytest.mark.parametrize("at_expiry", [False, True])
+def test_preservation_within_cost_cap_keeps_witnessed_lifecycle(
+    tmp_path: Path, cost: float, at_expiry: bool
+) -> None:
+    intent = replace(
+        proposal(),
+        action="PRESERVE_BATTERY",
+        permitted_actions=("PRESERVE_BATTERY",),
+        max_power_ac_kw=0,
+    )
+    pilot, journal, transport, key = approved(tmp_path, changed_intent=intent)
+    state = current()
+    pilot.dispatch(
+        key, replace(state, core=replace(state.core, expected_direction="inhibit"))
+    )
+    seconds = 60 if at_expiry else 3
+    result = pilot.observe(
+        key,
+        feedback(
+            at=T + timedelta(seconds=seconds),
+            monotonic_seconds=seconds,
+            device_at=T + timedelta(seconds=seconds - 1),
+            received_at=T + timedelta(seconds=seconds - 1),
+            direction="inhibit",
+            battery_power_ac_kw=0,
+            energy_ac_kwh=0,
+            throughput_stored_kwh=0,
+            energy_stored_kwh=0.5,
+            import_cost_aud=cost,
+            ordinary_state_observed=at_expiry,
+        ),
+    )
+    assert result == ("NEUTRAL_STATE_VERIFIED" if at_expiry else "EFFECT_OBSERVED")
+    assert transport.calls == [key]
     journal.close()

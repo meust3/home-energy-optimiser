@@ -1,6 +1,23 @@
 # Changelog
 
-## 0.8.4 - SOC capture freshness candidate (not published)
+## Unreleased - software-only controlled-test readiness review
+
+- Adds an explicit offline preservation-test checklist and read-only field reviewer.
+  Unknown limits, recovery and credential disposition remain unresolved. A complete
+  input record still grants no hardware authority and provisions no transport.
+- Rejects malformed recovery alternatives even when another route is verified.
+  Review times normalize to UTC once; unrepresentable offset conversions produce
+  structured refusal. Annotated regression tests cover both review findings.
+- Retains known cumulative fake delivery across missing samples and restart; adds
+  regression coverage for this gap and failed-return ownership across restart.
+- Reconciles release documentation with dated v0.8.4 acceptance evidence. These
+  software changes do not deploy an App, change options or activate hardware.
+  CI build validation is distinct from installed runtime evidence.
+- Requires explicit service-health feedback and enforces preservation import-cost
+  bounds, including return verification. Public examples omit private site/task
+  metadata; owner records and sealed evidence remain unchanged.
+
+## 0.8.4 - 2026-10-17 - SOC capture freshness
 
 - New optional captures pin versioned GoodWe runtime clock and HA receipt evidence
   for unchanged SOC values. Research admission validates both within the existing
@@ -8,6 +25,13 @@
 - Preserves historical capture interpretation and hashes, existing research profile,
   forecasts, reserve and terminal rules. Adds no requests, workers or device writes.
 - No migration or option change. Hardware execution remains disabled.
+- Publication/update and initial acceptance completed at exact commit
+  `72a446cf28abb89217d76030004d6829b1c3007e`. Independent installed-byte attestation
+  remains unverified under the approved amendment. See
+  [acceptance summary](docs/Testing/v084_production_acceptance_20261017.md).
+
+Older candidate headings below retain their historical preparation-stage labels;
+they do not describe the current installed release or establish publication status.
 
 ## 0.8.3 - scoring reliability candidate (not published)
 

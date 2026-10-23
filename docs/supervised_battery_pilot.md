@@ -104,3 +104,9 @@ expiry, partial/unknown delivery, duplicate intent, lost ACK, no retry, unexpect
 flow, manual override, network/HA/app/DB outages, clock jumps, restart, optimistic
 ACK with no measured effect, missing feedback and failed/witnessed return. These
 are software rehearsal results, not real protocol or physical certification.
+
+The separate [offline readiness review](controlled_test_readiness.md) packages
+unresolved owner/evidence fields without altering this adapter. Cumulative energy,
+throughput and import cost retain their last known values across missing samples
+and restart for regression detection; missing observations remain missing. No
+readiness record can enable a real transport or replace required native expiry.
