@@ -29,6 +29,7 @@ COUNTED_TABLES = (
     "ev_session_annotations",
     "ev_session_annotation_rows",
     "forecast_point_scores",
+    "forecast_score_pending",
     "forecast_operation_attempts",
     "reserve_runs",
     "reserve_opportunity_evaluations",

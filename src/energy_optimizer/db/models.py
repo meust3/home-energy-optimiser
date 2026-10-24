@@ -7,14 +7,17 @@ from sqlalchemy import (
     JSON,
     Boolean,
     CheckConstraint,
+    Connection,
     Float,
     ForeignKey,
     Index,
     Integer,
     MetaData,
     String,
+    Table,
     Text,
     UniqueConstraint,
+    event,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
@@ -251,6 +254,40 @@ class ForecastPointScore(Base):
     missing_reason: Mapped[str | None] = mapped_column(Text)
     metadata_json: Mapped[Any] = mapped_column(JSON_TYPE, nullable=False, default=dict)
     __table_args__ = (Index("idx_forecast_scores_scored_at", "scored_at_utc"),)
+
+
+class ForecastScorePending(Base):
+    """Derived unscored baseline inventory; maintained by database triggers."""
+
+    __tablename__ = "forecast_score_pending"
+    forecast_point_id: Mapped[int] = mapped_column(
+        ForeignKey("forecast_points.id", ondelete="CASCADE", onupdate="CASCADE"),
+        primary_key=True,
+    )
+    period_end_utc: Mapped[datetime] = mapped_column(AwareDateTime(), nullable=False)
+    __table_args__ = (
+        Index("idx_forecast_score_pending_due", "period_end_utc", "forecast_point_id"),
+    )
+
+
+def _install_pending_inventory(
+    _target: Table, connection: Connection, **_kwargs: Any
+) -> None:
+    from energy_optimizer.db.pending_inventory import install_inventory_triggers
+
+    install_inventory_triggers(connection)
+
+
+def _remove_pending_inventory(
+    _target: Table, connection: Connection, **_kwargs: Any
+) -> None:
+    from energy_optimizer.db.pending_inventory import remove_inventory_triggers
+
+    remove_inventory_triggers(connection)
+
+
+event.listen(ForecastScorePending.__table__, "after_create", _install_pending_inventory)
+event.listen(ForecastScorePending.__table__, "before_drop", _remove_pending_inventory)
 
 
 class ForecastAccuracyRollup(Base):
