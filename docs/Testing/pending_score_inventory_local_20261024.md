@@ -90,8 +90,9 @@ if independent checks fail.
 restart, concurrency, query-count, migration rollback/lock-contention and
 downgrade/re-upgrade coverage. `tests/test_bounded_forecast_scoring.py` retains the
 independent full-history selection oracle and existing scoring regressions. The
-PostgreSQL fixture accepts only the explicitly owned local test endpoint and
-database; it must never be pointed at production.
+PostgreSQL fixture accepts only the named local test endpoint/database or the
+checked-in release workflow's exact localhost `release_test` service with its
+explicit ownership marker. Neither path accepts a production target.
 
 The accompanying local evidence bundle records exact commands, passed/failed/
 unrun checks, source identity and reproducible performance results. It is stored

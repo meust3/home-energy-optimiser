@@ -25,21 +25,42 @@ from energy_optimizer.db.repository import DatabaseRepository
 NOW = datetime(2026, 10, 15, tzinfo=UTC)
 
 
+def owned_postgres_url() -> str | None:
+    """Accept only the two named disposable test endpoints, before connecting."""
+    url = os.environ.get("SCORING_OWNED_TEST_URL")
+    expected_target = ("127.0.0.1", 55439, "scoring_fix_test", "scoring_test")
+    if not url:
+        # The checked-in release workflow owns this disposable service.
+        url = os.environ.get("TEST_POSTGRES_URL")
+        expected_target = ("127.0.0.1", 5432, "release_test", "release_test")
+        if url:
+            assert os.environ.get("F1_F3_OWNED_TEST_DATABASE") == "release_test"
+    if url:
+        parsed = make_url(url)
+        # Dialect/query/libpq settings must not redirect a destructive test reset.
+        assert parsed.drivername == "postgresql+psycopg"
+        assert not parsed.query
+        assert not any(
+            os.environ.get(key)
+            for key in ("PGHOSTADDR", "PGSERVICE", "PGSERVICEFILE", "PGOPTIONS")
+        )
+        assert (
+            parsed.host,
+            parsed.port,
+            parsed.database,
+            parsed.username,
+        ) == expected_target
+    return url
+
+
 @pytest.fixture(params=["sqlite", "postgresql"])
 def repo(request, tmp_path):
     if request.param == "sqlite":
         url = "sqlite:///" + str(tmp_path / "scoring.db")
     else:
-        url = os.environ.get("SCORING_OWNED_TEST_URL")
+        url = owned_postgres_url()
         if not url:
             pytest.skip("Explicit isolated PostgreSQL URL not supplied")
-        parsed = make_url(url)
-        assert (parsed.host, parsed.port, parsed.database, parsed.username) == (
-            "127.0.0.1",
-            55439,
-            "scoring_fix_test",
-            "scoring_test",
-        )
     engine = create_engine(url)
     Base.metadata.drop_all(engine)
     Base.metadata.create_all(engine)
@@ -59,6 +80,108 @@ def repo(request, tmp_path):
             )
     yield DatabaseRepository(engine)
     engine.dispose()
+
+
+@pytest.mark.parametrize(
+    "url,owner,accepted",
+    [
+        (
+            "postgresql+psycopg://release_test@127.0.0.1:5432/release_test",
+            "release_test",
+            True,
+        ),
+        ("postgresql+psycopg://release_test@127.0.0.1:5432/release_test", None, False),
+        (
+            "postgresql+psycopg://release_test@127.0.0.1:5432/release_test",
+            "other",
+            False,
+        ),
+        (
+            "postgresql+psycopg://release_test@example.invalid:5432/release_test",
+            "release_test",
+            False,
+        ),
+        (
+            "postgresql+psycopg://release_test@127.0.0.1:5432/home_energy",
+            "release_test",
+            False,
+        ),
+        (
+            "postgresql+psycopg://owner@127.0.0.1:5432/release_test",
+            "release_test",
+            False,
+        ),
+        (
+            "postgresql+psycopg://release_test@127.0.0.1:5433/release_test",
+            "release_test",
+            False,
+        ),
+    ],
+)
+def test_ci_scoring_target_requires_exact_disposable_endpoint(
+    monkeypatch, url, owner, accepted
+):
+    monkeypatch.delenv("SCORING_OWNED_TEST_URL", raising=False)
+    monkeypatch.setenv("TEST_POSTGRES_URL", url)
+    monkeypatch.delenv("F1_F3_OWNED_TEST_DATABASE", raising=False)
+    if owner is not None:
+        monkeypatch.setenv("F1_F3_OWNED_TEST_DATABASE", owner)
+    if accepted:
+        assert owned_postgres_url() == url
+    else:
+        with pytest.raises(AssertionError):
+            owned_postgres_url()
+
+
+@pytest.mark.parametrize(
+    "suffix",
+    [
+        "?host=example.invalid",
+        "?port=55432",
+        "?dbname=other_database",
+        "?user=other_role",
+        "?hostaddr=192.0.2.1",
+        "?service=other",
+        "?options=-csearch_path=other",
+        "?host=example.invalid&port=55432&dbname=other_database&user=other_role",
+    ],
+)
+@pytest.mark.parametrize("source", ["SCORING_OWNED_TEST_URL", "TEST_POSTGRES_URL"])
+def test_scoring_target_rejects_query_redirection(monkeypatch, suffix, source):
+    monkeypatch.delenv("SCORING_OWNED_TEST_URL", raising=False)
+    monkeypatch.delenv("TEST_POSTGRES_URL", raising=False)
+    monkeypatch.setenv("F1_F3_OWNED_TEST_DATABASE", "release_test")
+    target = (
+        "scoring_test@127.0.0.1:55439/scoring_fix_test"
+        if source == "SCORING_OWNED_TEST_URL"
+        else "release_test@127.0.0.1:5432/release_test"
+    )
+    monkeypatch.setenv(source, "postgresql+psycopg://" + target + suffix)
+    with pytest.raises(AssertionError):
+        owned_postgres_url()
+
+
+@pytest.mark.parametrize(
+    "setting", ["PGHOSTADDR", "PGSERVICE", "PGSERVICEFILE", "PGOPTIONS"]
+)
+def test_scoring_target_rejects_libpq_redirection(monkeypatch, setting):
+    monkeypatch.setenv(
+        "SCORING_OWNED_TEST_URL",
+        "postgresql+psycopg://scoring_test@127.0.0.1:55439/scoring_fix_test",
+    )
+    monkeypatch.setenv(setting, "synthetic-override")
+    with pytest.raises(AssertionError):
+        owned_postgres_url()
+
+
+@pytest.mark.parametrize("driver", ["postgresql", "postgresql+psycopg2"])
+def test_scoring_target_rejects_other_drivers(monkeypatch, driver):
+    monkeypatch.setenv(
+        "SCORING_OWNED_TEST_URL",
+        driver + "://scoring_test@127.0.0.1:55439/scoring_fix_test",
+    )
+    with pytest.raises(AssertionError):
+        owned_postgres_url()
 
 
 def point(id, minutes=-60, run_id=1):
@@ -270,7 +393,7 @@ def test_diagnostics_do_not_include_exception_text():
     d = ScoringDiagnostics()
     d.enter("payload_fetch")
     with pytest.raises(RuntimeError), scoring_trace(d):
-        raise RuntimeError("postgresql://secret@host/household secret-payload")
+        raise RuntimeError("postgresql+psycopg://secret@host/household secret-payload")
     first = d.snapshot()
     assert first == d.snapshot()
     assert "secret" not in json.dumps(first)
