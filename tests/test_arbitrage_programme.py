@@ -109,7 +109,7 @@ def test_capture_post_commit_witness_immutability_and_rollback(capture_db):
     with pytest.raises(ValueError, match="immutable_capture_conflict"):
         store.save(origin="one", kind="source", at=T, body={"value": 2})
     assert store.latest("source")["body"] == {"value": 1}
-    assert current_revision(repo.engine) == "20261008_01"
+    assert current_revision(repo.engine) == "20261024_01"
 
 
 def test_capture_crash_between_transactions_not_ready(capture_db):

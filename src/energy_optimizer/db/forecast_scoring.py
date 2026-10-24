@@ -10,10 +10,15 @@ from sqlalchemy import select
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session
 
-from energy_optimizer.db.models import ForecastPoint, ForecastPointScore, ForecastRun
+from energy_optimizer.db.models import (
+    ForecastScorePending,
+)
 
-RANGE_WIDTH = 10_000
 SELECTION_BUDGET_SECONDS = 60
+
+
+class ScoringSelectionBudgetExceeded(TimeoutError):
+    """Selection's own budget, distinct from the coordinator-wide deadline."""
 
 
 @dataclass
@@ -59,7 +64,7 @@ class ScoringDiagnostics:
         end = self._finished if self._finished is not None else monotonic()
         timings[self.phase] = timings.get(self.phase, 0) + end - self._phase_started
         return {
-            "version": "bounded-score-selection-v1",
+            "version": "indexed-score-inventory-v2",
             "phase": self.phase,
             "ranges": self.ranges,
             "selected": self.selected,
@@ -94,32 +99,6 @@ def scoring_trace(diagnostics: ScoringDiagnostics) -> Iterator[None]:
         diagnostics.enter("complete")
 
 
-def pending_range_statement(lower: int, upper: int, cutoff: datetime, limit: int):
-    scores = (
-        select(ForecastPointScore.forecast_point_id)
-        .where(
-            ForecastPointScore.forecast_point_id >= lower,
-            ForecastPointScore.forecast_point_id < upper,
-        )
-        .cte("bounded_scores")
-        .prefix_with("MATERIALIZED", dialect="postgresql")
-    )
-    return (
-        select(ForecastPoint.id, ForecastPoint.period_end_utc)
-        .join(ForecastRun, ForecastRun.id == ForecastPoint.forecast_run_id)
-        .outerjoin(scores, scores.c.forecast_point_id == ForecastPoint.id)
-        .where(
-            ForecastPoint.id >= lower,
-            ForecastPoint.id < upper,
-            ForecastPoint.period_end_utc <= cutoff,
-            scores.c.forecast_point_id.is_(None),
-            ForecastRun.forecast_type == "baseline_household_load",
-        )
-        .order_by(ForecastPoint.period_end_utc, ForecastPoint.id)
-        .limit(limit)
-    )
-
-
 def select_pending_ids(
     session: Session,
     *,
@@ -128,11 +107,11 @@ def select_pending_ids(
     runtime_guard: Callable[[], None] | None,
     diagnostics: ScoringDiagnostics,
 ) -> list[int]:
-    """Exact global earliest batch, using a stable snapshot and bounded PK ranges.
+    """Exact globally earliest due batch from an atomically maintained inventory.
 
-    No persistent cursor: future and late-inserted points are reconsidered next
-    cycle. A PK seek skips empty ID gaps without treating MAX(id) as a count.
-    No partial batch is returned when selection exceeds its runtime budget.
+    No historical sweep or cursor. Trigger-maintained rows include future and late
+    inserts; the covering due index bounds runtime work by pending rows and limit.
+    Inventory and scores share the scoring transaction, so interruption is atomic.
     """
     if not 1 <= limit <= 2500:
         raise ValueError("score limit must be 1-2500")
@@ -142,27 +121,22 @@ def select_pending_ids(
         if runtime_guard is not None:
             runtime_guard()
         if monotonic() - started >= SELECTION_BUDGET_SECONDS:
-            raise TimeoutError("Forecast scoring selection budget exceeded")
+            raise ScoringSelectionBudgetExceeded(
+                "Forecast scoring selection budget exceeded"
+            )
 
     checkpoint()
-    lower = session.scalar(select(ForecastPoint.id).order_by(ForecastPoint.id).limit(1))
-    candidates = []
-    while lower is not None:
-        checkpoint()
-        upper = lower + RANGE_WIDTH
-        rows = session.execute(
-            pending_range_statement(lower, upper, cutoff, limit)
-        ).all()
-        diagnostics.ranges += 1
-        # At most 2 * limit skinny rows; truncation preserves exact global order.
-        candidates = sorted(candidates + rows, key=lambda row: (row[1], row[0]))[:limit]
-        checkpoint()
-        lower = session.scalar(
-            select(ForecastPoint.id)
-            .where(ForecastPoint.id >= upper)
-            .order_by(ForecastPoint.id)
-            .limit(1)
+    statement = (
+        select(ForecastScorePending.forecast_point_id)
+        .where(ForecastScorePending.period_end_utc <= cutoff)
+        .order_by(
+            ForecastScorePending.period_end_utc, ForecastScorePending.forecast_point_id
         )
+        .limit(limit)
+        .with_for_update(of=ForecastScorePending)
+    )
+    candidates = list(session.scalars(statement))
+    diagnostics.ranges = 1  # legacy counter: now one indexed inventory query
     checkpoint()
     diagnostics.selected = len(candidates)
-    return [row[0] for row in candidates]
+    return candidates

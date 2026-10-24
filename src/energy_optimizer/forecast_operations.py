@@ -750,6 +750,10 @@ def _decision_calibration_gate(
 
 def _safe_failure(exc: Exception) -> str:
     """Return a bounded class-only failure summary with no option/secret values."""
+    from energy_optimizer.db.forecast_scoring import ScoringSelectionBudgetExceeded
+
+    if isinstance(exc, ScoringSelectionBudgetExceeded):
+        return "Forecast scoring selection budget exceeded"
     if isinstance(exc, TimeoutError):
         return "Configured forecast runtime exceeded"
     return f"{type(exc).__name__} during forecast operation"[:500]
