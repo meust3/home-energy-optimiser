@@ -1,6 +1,19 @@
 # Changelog
 
-## Unreleased - software-only controlled-test readiness review
+## 0.8.5 candidate - unpublished scoring inventory release
+
+- Replaces repeated historical pending-score scans with the transactional indexed
+  inventory from PR #19; preserves issued forecasts, scoring/EV rules and models.
+- Requires explicit migration `20261008_01` -> `20261024_01`; no startup migration.
+  Upgrade/downgrade, role permissions, inventory reconciliation and rollback need
+  an isolated current-data rehearsal before a separately approved live cutover.
+- Includes the previously merged offline readiness/fake-pilot preparation below.
+  No live transport, hardware authorization, operational non-HOLD or retention
+  setting is enabled by preparing this candidate.
+- Candidate preparation is not publication, deployment or production acceptance.
+  The installed v0.8.4 baseline and sealed evidence remain unchanged.
+
+## Previously merged software-only controlled-test readiness review
 
 - Adds an explicit offline preservation-test checklist and read-only field reviewer.
   Unknown limits, recovery and credential disposition remain unresolved. A complete
