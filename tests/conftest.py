@@ -1,9 +1,17 @@
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 
 import pytest
 
 from energy_optimizer import entity_ids as ids
 from energy_optimizer.models import CollectorConfig, HomeAssistantState
+
+
+@pytest.fixture(autouse=True)
+def checkout_source_for_subprocesses(monkeypatch):
+    """CLI children must use the same source tree as pytest, not an old install."""
+    source = Path(__file__).resolve().parents[1] / "src"
+    monkeypatch.setenv("PYTHONPATH", str(source))
 
 
 @pytest.fixture
