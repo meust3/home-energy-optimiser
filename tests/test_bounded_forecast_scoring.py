@@ -275,6 +275,54 @@ def test_empty_and_invalid_limit(repo):
                 bounded(s, limit)
 
 
+def test_backlog_reads_indexed_inventory_without_historical_join(repo):
+    put(repo, [point(1, -20), point(2, -10), point(3, 10), point(4, -30, 2)])
+    statements = []
+
+    def capture(_connection, _cursor, statement, _parameters, _context, _many):
+        statements.append(statement.lower())
+
+    event.listen(repo.engine, "before_cursor_execute", capture)
+    try:
+        backlog = repo.scoring_backlog_read_only(now=NOW, delay_minutes=0, limit=1)
+    finally:
+        event.remove(repo.engine, "before_cursor_execute", capture)
+    assert backlog["pending_count_at_least"] == 1
+    assert backlog["count_truncated"] is True
+    assert backlog["oldest_pending_age_seconds"] == 20 * 60
+    reads = [sql for sql in statements if sql.lstrip().startswith("select")]
+    assert len(reads) == 1
+    assert "forecast_score_pending" in reads[0]
+    assert "join" not in reads[0]
+    assert repo.score_completed_forecast_points(now=NOW, delay_minutes=0) == 2
+    assert (
+        repo.scoring_backlog_read_only(now=NOW, delay_minutes=0)[
+            "pending_count_at_least"
+        ]
+        == 0
+    )
+
+
+def test_batch_actual_lookup_interruption_preserves_inventory(repo):
+    put(repo, [point(1), point(2)])
+    diagnostics = ScoringDiagnostics()
+
+    def guard():
+        if diagnostics.phase == "actual_lookup":
+            raise TimeoutError("synthetic batch interruption")
+
+    with pytest.raises(TimeoutError, match="synthetic batch interruption"):
+        repo.score_completed_forecast_points(
+            now=NOW, delay_minutes=0, runtime_guard=guard, diagnostics=diagnostics
+        )
+    assert diagnostics.failed and diagnostics.phase == "actual_lookup"
+    assert diagnostics.processed == 0
+    with Session(repo.engine) as session:
+        assert bounded(session) == old_selection(session) == [1, 2]
+        assert session.scalar(select(func.count()).select_from(ForecastPointScore)) == 0
+    assert repo.score_completed_forecast_points(now=NOW, delay_minutes=0) == 2
+
+
 def test_guard_during_selection_writes_nothing(repo):
     put(repo, [point(1), point(20000)])
     d = ScoringDiagnostics()
@@ -361,8 +409,10 @@ def test_real_query_timeout_diagnostics_redact_and_rollback(repo):
 
     def delay(conn, cursor, statement, parameters, context, executemany):
         nonlocal fired
-        if not fired and statement.startswith(
-            "SELECT observations.baseline_house_consumption_w"
+        if (
+            not fired
+            and statement.lstrip().startswith("SELECT")
+            and "FROM observations" in statement
         ):
             fired = True
             cursor.execute("SET LOCAL statement_timeout='10ms'")

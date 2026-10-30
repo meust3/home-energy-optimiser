@@ -26,3 +26,11 @@ tooltips, and the existing accessible table fallback. The mode is stored only in
 browser `localStorage`. No CDN, external asset, Node pipeline, run-now action, or
 write endpoint is used. A future native Home Assistant card can reuse the API; no
 HACS/Lovelace custom card is included in v0.6.0.
+
+
+In v0.6.6, live mode reads eligible completed observations while official scoring
+is pending, using the shared scorer eligibility rules. Existing official scores
+remain authoritative. `actual_source` distinguishes `stored_score` from
+`observations_pending_score`; missing/excluded/future reasons stay explicit.
+These bounded presentation queries perform no score or forecast writes.
+Uncertainty columns are omitted when this model has no stored bounds.

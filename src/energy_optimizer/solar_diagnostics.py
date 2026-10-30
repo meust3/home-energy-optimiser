@@ -1,15 +1,19 @@
 """Cautious daily Solcast-versus-realised-PV diagnostics."""
 
 from collections import defaultdict
-from datetime import date
+from datetime import UTC, date, datetime, time, timedelta
 from typing import Any
 
 EXPECTED_DAILY_SLOTS = 288
 
 
 def calculate_solar_diagnostics(
-    rows: list[dict[str, Any]], *, coverage_percent: float = 95
+    rows: list[dict[str, Any]],
+    *,
+    coverage_percent: float = 95,
+    now: datetime | None = None,
 ) -> list[dict[str, Any]]:
+    current = now or datetime.now(UTC)
     groups: dict[date, list[dict[str, Any]]] = defaultdict(list)
     for row in rows:
         local = row.get("observed_at_local")
@@ -24,11 +28,17 @@ def calculate_solar_diagnostics(
             if r.get("pv_power_w") is not None and bool(r.get("telemetry_is_healthy"))
         ]
         coverage = len(pv) / EXPECTED_DAILY_SLOTS * 100
+        day_start = datetime.combine(
+            day, time.min, tzinfo=values[0]["observed_at_local"].tzinfo
+        )
+        day_complete = current >= day_start + timedelta(days=1)
         forecast = None
+        snapshot_at = None
         for row in values:
             candidate = _forecast_values(row.get("solcast_today_kwh_json"))
             if candidate is not None:
                 forecast = candidate
+                snapshot_at = row["observed_at_local"]
                 break
         actual = sum(max(value, 0) for value in pv) / 12_000 if pv else None
         soc_values = [
@@ -61,7 +71,10 @@ def calculate_solar_diagnostics(
             <= max(sustained_exports) * 0.05
         )
         sufficient = (
-            coverage >= coverage_percent and forecast is not None and actual is not None
+            day_complete
+            and coverage >= coverage_percent
+            and forecast is not None
+            and actual is not None
         )
         if not sufficient:
             classification = "insufficient_context"
@@ -83,25 +96,43 @@ def calculate_solar_diagnostics(
                 "local_date": day,
                 "coverage_percent": coverage,
                 "coverage_sufficient": sufficient,
+                "day_complete": day_complete,
+                "comparison_status": (
+                    "complete_day"
+                    if sufficient
+                    else (
+                        "incomplete_day"
+                        if not day_complete
+                        else "insufficient_coverage_or_forecast"
+                    )
+                ),
+                "forecast_snapshot_observed_at": snapshot_at,
+                "forecast_snapshot_policy": "first_available_local_day",
+                "forecast_issue_time_verified": False,
+                "error_convention": "actual_minus_forecast",
                 "actual_pv_kwh": actual,
                 "solcast_p10_kwh": forecast[0] if forecast else None,
                 "solcast_p50_kwh": forecast[1] if forecast else None,
                 "solcast_p90_kwh": forecast[2] if forecast else None,
-                "actual_minus_p50_kwh": (
-                    actual - forecast[1] if actual is not None and forecast else None
-                ),
+                "actual_minus_p50_kwh": (actual - forecast[1] if sufficient else None),
                 "actual_in_solcast_range": (
                     forecast[0] is not None
                     and forecast[2] is not None
                     and forecast[0] <= actual <= forecast[2]
-                    if actual is not None and forecast
+                    if sufficient
                     else None
                 ),
                 "p50_percentage_error": (
                     (forecast[1] - actual) / actual * 100
-                    if actual is not None and actual > 0 and forecast
+                    if sufficient and actual > 0
                     else None
                 ),
+                "signed_percentage_error_percent": (
+                    (actual - forecast[1]) / actual * 100
+                    if sufficient and actual > 0
+                    else None
+                ),
+                "legacy_p50_percentage_error_convention": "forecast_minus_actual",
                 "near_full_battery_minutes": near_full_slots * 5,
                 "minimum_battery_headroom_percent": (
                     max(0.0, 100 - max(soc_values)) if soc_values else None
