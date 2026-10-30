@@ -1,5 +1,36 @@
 # Shared AI infrastructure
 
+## Current reconciliation: 31 October 2026
+
+Local source reconciliation retains v0.8.5 packaging and pins the optional Python
+extra to SDK **1.0.3**, commit `2aa746e42b6acea0515b099c5ba2ec986e925fc1`.
+Normal builds omit the SDK (`INCLUDE_AI_SDK=false`). An optional private build
+requires a 1.0.3 wheel supplied as a BuildKit secret and its explicit
+`AI_SDK_WHEEL_SHA256`; an absent/mismatched digest fails the build.
+The wheel must be built from the pinned source; a checksum alone does not prove
+provider provenance. No SDK wheel or credentials are committed to this repository.
+
+This reconciliation does not install a runtime connection bundle, enable live
+SEMS or AI calls, change routing, or deploy an App. The failed synthetic-model
+quality gate remains failed. Main's existing `20261024_01` migration requirement
+is unchanged. The dated evidence and historical deployment instructions below
+are retained for provenance, not current runtime acceptance or permission to run.
+
+## Historical evidence
+
+Expanded evaluation on 3 October 2026: SDK 1.0.3/task 1.1.0 freeze a separate 48-case
+synthetic set. Actual model execution matched 16/48 labels versus 44/48 rule labels,
+with 20 false-supported results. The predeclared quality gate failed; production
+and active routing remain disabled. See [expanded evidence](ai-review-holdout-20261003.md).
+
+Update on 3 October 2026: an explicit synthetic battery-review pilot is implemented
+with the additive panel task contract and pinned SDK 1.0.2. A real local replay
+through an isolated panel/test database matched 7/8 review labels versus an 8/8
+deterministic baseline, including a material reserve-review error. Active routing
+remains disabled. See [pilot evidence and usage](ai-review-pilot-20261003.md).
+The older production candidate/image and the shared running panel were not updated.
+The sections below describe the preceding diagnostic onboarding release.
+
 Status on 2026-09-27: **fresh project Codex inference verified; development-runtime
 inference and production readiness verified in isolated containers; not deployed
 to the Home Assistant NUC**. The NUC still runs 0.6.3. Candidate 0.6.4 packages the
@@ -200,10 +231,10 @@ accepts only enabled/base_url, insists on HTTPS and fixed production/TLS filenam
 rejects symlinks, bounds config reads, and performs no network activity. Malformed
 configuration appears as invalid in local status and cannot stop core startup.
 
-Build privately with the wheel whose SHA-256 is pinned in the Dockerfile:
+The current optional build uses the reviewed wheel's SHA-256 explicitly:
 
 ```powershell
-docker build --platform linux/amd64 --build-arg INCLUDE_AI_SDK=true --secret id=panel_sdk_wheel,src=.local/ai-control-panel/wheels/ai_control_panel_client-1.0.1-py3-none-any.whl -t home-energy-ai:0.6.4-candidate home_energy_optimiser
+docker build --platform linux/amd64 --build-arg INCLUDE_AI_SDK=true --build-arg AI_SDK_WHEEL_SHA256=$reviewedWheelSha256 --secret id=panel_sdk_wheel,src=.local/ai-control-panel/wheels/ai_control_panel_client-1.0.3-py3-none-any.whl -f home_energy_optimiser/Dockerfile -t home-energy-ai:local-candidate .
 ```
 
 No wheel or credential is added to Git or the build context. The wheel is a scoped

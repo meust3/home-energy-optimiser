@@ -69,7 +69,7 @@ def test_missing_energy_stays_missing():
 
 def test_join_is_half_open_at_observation_instants_and_non_mutating():
     rows = [
-        {"slot_utc": stamp, "house_consumption_w": "5000"}
+        {"slot_utc": stamp, "observed_at_utc": stamp, "house_consumption_w": "5000"}
         for stamp in (
             "2026-01-01T21:00:00Z",
             "2026-01-01T21:05:00Z",
@@ -92,7 +92,36 @@ def test_join_is_half_open_at_observation_instants_and_non_mutating():
 def test_naive_observation_rejected():
     with pytest.raises(ValueError, match="offsets"):
         preview_join(
-            [{"slot_utc": "2026-01-01T21:05:00"}],
+            [
+                {
+                    "slot_utc": "2026-01-01T21:05:00",
+                    "observed_at_utc": "2026-01-01T21:05:00",
+                }
+            ],
+            prepare_sessions(evidence()),
+            confirmed_utc_offset_hours=10,
+        )
+
+
+def test_preview_uses_actual_instant_and_preserves_slot_identity():
+    rows = [
+        {"slot_utc": "2026-01-01T21:00:00Z", "observed_at_utc": "2026-01-01T21:03:00Z"},
+        {"slot_utc": "2026-01-01T21:55:00Z", "observed_at_utc": "2026-01-01T22:00:00Z"},
+    ]
+    original = deepcopy(rows)
+    result = preview_join(
+        rows, prepare_sessions(evidence()), confirmed_utc_offset_hours=10
+    )
+    assert [row["context"] for row in result] == ["within_recorded_session", "unknown"]
+    assert result[0]["slot_utc"] == "2026-01-01T21:00:00+00:00"
+    assert result[0]["observed_at_utc"] == "2026-01-01T21:03:00+00:00"
+    assert rows == original
+
+
+def test_preview_does_not_invent_missing_observation_instant():
+    with pytest.raises(ValueError, match="observed_at_utc"):
+        preview_join(
+            [{"slot_utc": "2026-01-01T21:05:00Z"}],
             prepare_sessions(evidence()),
             confirmed_utc_offset_hours=10,
         )

@@ -1,5 +1,8 @@
 # Test baseline and data-quality reconciliation — 2026-10-31
 
+This records the first reconciliation phase. For the subsequent SEMS and AI
+integration, see [the follow-up evidence](sems_ai_reconciliation_20261031.md).
+
 ## Scope and source identity
 
 Integration branch: `codex/reconcile-data-quality-20261031`.

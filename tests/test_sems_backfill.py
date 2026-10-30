@@ -4,6 +4,7 @@ from uuid import uuid4
 
 import pytest
 from sqlalchemy import create_engine, select, text, update
+from sqlalchemy.engine import make_url
 from test_bounded_forecast_scoring import owned_postgres_url
 
 from energy_optimizer.collector import build_observation
@@ -24,14 +25,27 @@ def prepared(request, tmp_path, healthy_states, config, now):
         url = owned_postgres_url()
         if not url:
             pytest.skip("Requires exclusively owned disposable SEMS PostgreSQL")
-        engine = create_engine(url)
+        admin_engine = create_engine(url)
         schema = "sems_test_" + uuid4().hex
-        with engine.begin() as connection:
+        with admin_engine.begin() as connection:
             connection.execute(text(f"CREATE SCHEMA {schema}"))
-        engine = engine.execution_options(schema_translate_map={None: schema})
+        engine = create_engine(
+            make_url(url).update_query_dict({"options": f"-csearch_path={schema}"})
+        )
     else:
         engine = create_engine(f"sqlite:///{tmp_path / 'context.db'}")
     repo = DatabaseRepository(engine)
+
+    def cleanup():
+        engine.dispose()
+        if schema:
+            try:
+                with admin_engine.begin() as connection:
+                    connection.execute(text(f"DROP SCHEMA {schema} CASCADE"))
+            finally:
+                admin_engine.dispose()
+
+    request.addfinalizer(cleanup)
     repo.create_schema_for_tests()
     for i in range(3):
         repo.save(
@@ -57,10 +71,6 @@ def prepared(request, tmp_path, healthy_states, config, now):
         ],
     }
     yield repo, snapshot, ledger, now + timedelta(days=3)
-    if schema:
-        with engine.begin() as connection:
-            connection.execute(text(f"DROP SCHEMA {schema} CASCADE"))
-    repo.engine.dispose()
 
 
 def test_boundaries_use_actual_instant_half_open_and_preserve_source(prepared):

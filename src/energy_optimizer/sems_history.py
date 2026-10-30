@@ -145,13 +145,19 @@ def preview_join(
     ]
     result = []
     for row in observations:
-        stamp = datetime.fromisoformat(row["slot_utc"].replace("Z", "+00:00"))
-        if stamp.tzinfo is None or stamp.utcoffset() is None:
+        if not isinstance(row.get("observed_at_utc"), str):
+            raise ValueError(
+                "Preview requires observed_at_utc; slot time is not evidence"
+            )
+        stamp = datetime.fromisoformat(row["observed_at_utc"].replace("Z", "+00:00"))
+        slot = datetime.fromisoformat(row["slot_utc"].replace("Z", "+00:00"))
+        if any(t.tzinfo is None or t.utcoffset() is None for t in (stamp, slot)):
             raise ValueError("Observation timestamps must have UTC offsets")
         matches = [sid for start, end, sid in ranges if start <= stamp < end]
         result.append(
             {
-                "slot_utc": stamp.astimezone(UTC).isoformat(),
+                "slot_utc": slot.astimezone(UTC).isoformat(),
+                "observed_at_utc": stamp.astimezone(UTC).isoformat(),
                 "session_evidence_ids": matches,
                 "context": "within_recorded_session" if matches else "unknown",
                 "confirmed_source_utc_offset_hours": confirmed_utc_offset_hours,

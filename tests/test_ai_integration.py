@@ -119,8 +119,19 @@ def test_status_is_local_and_never_claims_live_verification():
     assert status["connection"] == "unconfigured"
     assert status["latest_manual_live_test"] is None
     assert status["contract_version"] == "1.0.0"
+    assert status["sdk_expected_version"] == "1.0.3"
     assert "secret" not in json.dumps(status)
     assert local_status({"ENERGY_AI_ENABLED": "secret"})["configuration"] == "invalid"
+
+
+def test_disabled_manual_check_does_not_fabricate_sdk_evidence(tmp_path):
+    from energy_optimizer.ai_panel import manual_check, read_status
+
+    settings = AISettings(status_file=tmp_path / "status.json")
+    report = asyncio.run(manual_check(settings))
+    assert report.failure == AIFailure.DISABLED
+    assert report.sdk_version is None
+    assert read_status(settings)["sdk_version"] is None
 
 
 def test_optional_failure_leaves_ingestion_and_calculations_identical(
