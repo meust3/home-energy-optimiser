@@ -511,6 +511,27 @@ def _request(server, method, path, headers=None):
     return result
 
 
+@pytest.mark.parametrize("allowed", [True, False])
+def test_ai_status_uses_ingress_access_without_discovery(allowed, monkeypatch):
+    monkeypatch.setenv("ENERGY_AI_ENABLED", "invalid-secret")
+    server, thread = _serve(IngressAccessPolicy(allow_loopback=allowed))
+    try:
+        status, headers, body = _request(server, "GET", "/api/v1/ai/status")
+        assert status == (200 if allowed else 403)
+        assert b"invalid-secret" not in body
+        if allowed:
+            assert json.loads(body)["connection"] == "unconfigured"
+            assert headers["Cache-Control"] == "no-store"
+            status, _, _ = _request(server, "POST", "/api/v1/ai/status")
+            assert status == 405
+            status, _, _ = _request(server, "GET", "/api/v1/ai/status?run=true")
+            assert status == 400
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=2)
+
+
 def test_web_shell_static_nested_ingress_api_and_security_headers():
     server, thread = _serve(IngressAccessPolicy())
     prefix = "/api/hassio_ingress/test-token/"
