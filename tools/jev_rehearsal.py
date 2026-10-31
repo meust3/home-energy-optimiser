@@ -14,6 +14,11 @@ def main(argv: list[str] | None = None) -> int:
     prepare = commands.add_parser("prepare")
     prepare.add_argument("--experiment-id", required=True)
     prepare.add_argument("--max-cost-usd", default="0.13")
+    prepare.add_argument(
+        "--transport",
+        choices=("offline_pipe", "offline_shared_adapter"),
+        default="offline_pipe",
+    )
     prepare.add_argument("--output", type=Path, required=True)
     run = commands.add_parser("run")
     run.add_argument("--manifest", type=Path, required=True)
@@ -22,7 +27,9 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     try:
         if args.command == "prepare":
-            value = manifest_template(args.experiment_id, args.max_cost_usd)
+            value = manifest_template(
+                args.experiment_id, args.max_cost_usd, transport=args.transport
+            )
             with args.output.open("x", encoding="utf-8") as handle:
                 json.dump(value, handle, indent=2, allow_nan=False)
             return 0

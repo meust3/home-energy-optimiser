@@ -1,4 +1,4 @@
-"""Offline-only Jev lifecycle rehearsal. No provider adapter or live backend."""
+"""Offline-only Jev lifecycle rehearsal, optionally through the shared adapter."""
 
 from __future__ import annotations
 
@@ -32,6 +32,10 @@ SOURCE_FILES = (
     "jev_rehearsal_worker.py",
     "jev_reference.json",
     "jev_evaluation.py",
+    "jev_offline_adapter.py",
+    "ai_panel.py",
+    "ai_integration.py",
+    "ai_review.py",
 )
 
 
@@ -45,6 +49,8 @@ class Strict(BaseModel):
 
 class Manifest(Strict):
     mode: Literal["offline_rehearsal"]
+    transport: Literal["offline_pipe", "offline_shared_adapter"] = "offline_pipe"
+    sdk_source_sha256: str | None = None
     experiment_id: str
     source_sha256: str
     provider_commit: Literal["3d194368db297e33049b414c4cae345e632e5dbb"]
@@ -81,10 +87,22 @@ def source_digest() -> str:
     return digest.hexdigest()
 
 
-def manifest_template(experiment_id: str, max_cost_usd: str = "0.13") -> dict:
+def manifest_template(
+    experiment_id: str,
+    max_cost_usd: str = "0.13",
+    *,
+    transport: Literal["offline_pipe", "offline_shared_adapter"] = "offline_pipe",
+) -> dict:
     frozen = reference()
+    sdk_digest = None
+    if transport == "offline_shared_adapter":
+        from energy_optimizer.jev_offline_adapter import checked_sdk_digest
+
+        sdk_digest = checked_sdk_digest()
     return Manifest(
         mode="offline_rehearsal",
+        transport=transport,
+        sdk_source_sha256=sdk_digest,
         experiment_id=str(UUID(experiment_id)),
         source_sha256=source_digest(),
         provider_commit="3d194368db297e33049b414c4cae345e632e5dbb",
@@ -119,6 +137,13 @@ def preflight(
         ):
             raise ValueError()
         approval = Approval.model_validate_json(approval_bytes)
+        if manifest.transport == "offline_shared_adapter":
+            from energy_optimizer.jev_offline_adapter import checked_sdk_digest
+
+            if manifest.sdk_source_sha256 != checked_sdk_digest():
+                raise ValueError()
+        elif manifest.sdk_source_sha256 is not None:
+            raise ValueError()
         digest = hashlib.sha256(manifest_bytes).hexdigest()
         frozen = reference()
         cap = Decimal(manifest.max_cost_usd)
@@ -301,6 +326,8 @@ async def rehearse(
         "manifest_sha256": digest,
         "source_sha256": manifest.source_sha256,
         "mode": "offline_rehearsal",
+        "transport": manifest.transport,
+        "sdk_source_sha256": manifest.sdk_source_sha256,
         "status": "starting",
         "results": [],
         "reserved_usd": "0",
@@ -377,9 +404,17 @@ async def rehearse(
             db.execute("INSERT INTO attempts VALUES (?,?)", (ordinal, json.dumps(row)))
             db.commit()  # Durable unknown before any submission; never release it.
             _save(state_path, report)
-            receipt = await asyncio.wait_for(
-                _exchange(process, nonce, request), min(CASE_SECONDS, remaining)
-            )
+            if manifest.transport == "offline_shared_adapter":
+                from energy_optimizer.jev_offline_adapter import (
+                    exchange_via_shared_adapter,
+                )
+
+                submission = exchange_via_shared_adapter(
+                    lambda body: _exchange(process, nonce, body), request
+                )
+            else:
+                submission = _exchange(process, nonce, request)
+            receipt = await asyncio.wait_for(submission, min(CASE_SECONDS, remaining))
             receipt = _checked_receipt(receipt, request)
             if any(
                 receipt[key] == prior.get(key)

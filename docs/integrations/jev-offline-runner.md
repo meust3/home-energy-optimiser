@@ -1,10 +1,12 @@
 # Jev experiment lifecycle: offline rehearsal
 
 This runner exercises experiment safeguards using a real owned local child and
-a synthetic SQLite ledger. It has **no live mode**, provider adapter, URL option,
-production database connection, inference request or hardware path. It needs no
-Panel SDK. Its result is lifecycle evidence, not Jev performance or paid-run
-readiness.
+a synthetic SQLite ledger. It has **no live mode**, URL option, production
+database connection, inference request or hardware path. The default
+`offline_pipe` transport needs no Panel SDK. The optional
+`offline_shared_adapter` transport exercises the real shared adapter and pinned
+SDK through a mandatory mock transport. Its result is lifecycle and adapter
+contract evidence, not Jev performance or paid-run readiness.
 
 ## Running a rehearsal
 
@@ -13,6 +15,18 @@ From an installed development checkout, prepare a manifest with a fresh UUID:
 ```powershell
 python -m tools.jev_rehearsal prepare --experiment-id <UUID> --output <manifest.json>
 ```
+
+To include the shared adapter and SDK validators, use the pinned SDK 1.0.4 and:
+
+```powershell
+python -m tools.jev_rehearsal prepare --transport offline_shared_adapter --experiment-id <UUID> --output <manifest.json>
+```
+
+The selected transport and SDK source digest are included in the manifest and
+its approval hash. There is no run-time override or automatic fallback. Missing,
+wrong-version or modified SDK files refuse this mode before a registry claim or
+child is created. Prepare a fresh manifest after source changes; existing
+experiment claims remain protected against restart.
 
 Preparation refuses an existing output file and does not create an approval.
 An offline approval JSON has this shape:
@@ -37,6 +51,32 @@ the offline runner. The manifest binds the bundled code/reference bytes, exact
 fixture/question identities, historical provider publication, experiment UUID,
 48-attempt maximum, sequential execution, 120-second deadline, zero retries and
 no fallback. Runtime credentials are neither requested nor read.
+
+## Shared-adapter path
+
+The path is runner → `EnergyPanelAdapter.review_jev_evaluation_case` → pinned
+`AsyncPanelClient.review_energy_jev_case` → `httpx.MockTransport` → owned child
+pipes. SDK request serialization and receipt validation execute normally. The
+offline SDK subclass overrides only construction so it never creates a socket
+transport; proxy inheritance and redirects are disabled. It accepts exactly one
+fixed mock evaluation route, with no discovery, health or provider route.
+
+Seven SDK module files are checked against the canonical source digest from
+published commit `3d194368db297e33049b414c4cae345e632e5dbb`:
+`d7e595e586ba589e4b026faaf9e7efbadc097932c5c887a56040263144adb3fa`.
+This is code identity, not live provider identity or permission.
+
+An internal adapter instance is enabled solely for this mock call path. It uses
+an injected mock-only factory and no key file is read. Application configuration,
+environment flags and the normal live client factory remain untouched.
+
+The mock wire response supplies the published validator's required
+`cloud_evaluation` enum and fixed model/policy fields. These are synthetic wire
+constants, not a claim that cloud execution happened. Saved receipts are projected
+back to `offline_simulation`; reports retain `live_calls=0`, unknown actual cost
+and `production_activation=NOT AUTHORISED`. Unexpected child modes are rejected
+before this conversion. Unknown outcomes still stop the run and retain their
+reservation.
 
 Exit zero means the synthetic lifecycle completed with cleanup and ledger
 reconciliation. Exit two means refusal, partial execution or incomplete cleanup.
@@ -109,3 +149,5 @@ disabled App configuration are unchanged. The earlier failed model quality gate
 remains failed.
 
 See [validation receipts](../Testing/jev_runner_reconciliation_20261031.md).
+For the shared-adapter increment, see
+[wiring validation](../Testing/jev_runner_adapter_wiring_20261031.md).
