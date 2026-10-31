@@ -61,6 +61,21 @@ def test_partial_results_remain_unknown_without_mutation(retained):
     assert (retained, challenger) == before
 
 
+def test_uncertain_rehearsal_results_remain_unknown(retained):
+    report = compare(
+        retained,
+        {
+            "mode": "offline_rehearsal",
+            "results": [{"case_id": "h01", "status": "unknown"}],
+        },
+    )
+    assert report["simulation_only"]
+    assert report["comparison"]["all"]["jev"]["unknown"] == 1
+    assert report["comparison"]["all"]["jev"]["valid"] == 0
+    assert report["comparison"]["all"]["jev"]["unattempted"] == 47
+    assert not report["frozen_quality_gate_passed"]
+
+
 def test_complete_synthetic_labels_never_authorize_activation(retained):
     challenger = {
         "results": [

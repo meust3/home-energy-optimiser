@@ -48,6 +48,9 @@ def metrics(rows: list[dict[str, Any]], field: str) -> dict[str, Any]:
             sum(r.get("status") == "unattempted" for r in rows) if field == "jev" else 0
         ),
         "unattempted_or_failed": len(rows) - len(valid),
+        "unknown": (
+            sum(r.get("status") == "unknown" for r in rows) if field == "jev" else 0
+        ),
         "correct": sum(r[field] == r["expected"] for r in valid),
         "correctness_percent_all_cases": (
             100 * sum(r[field] == r["expected"] for r in valid) / len(rows)
@@ -95,6 +98,7 @@ def compare(mapika: dict[str, Any], jev: dict[str, Any]) -> dict[str, Any]:
             "attempting",
             "invalid",
             "unattempted",
+            "unknown",
         }:
             raise ValueError("Unknown challenger status")
         labels = {"supported", "needs_review", "insufficient_evidence"}
@@ -156,6 +160,7 @@ def compare(mapika: dict[str, Any], jev: dict[str, Any]) -> dict[str, Any]:
         "question_sha256": frozen["question_sha256"],
         "reference_source_commit": frozen["source_commit"],
         "evidence_scope": "offline supplied artifacts; execution and ledger unverified",
+        "simulation_only": jev.get("mode") == "offline_rehearsal",
         "comparison": summary,
         "cases": rows,
         "per_family": {
