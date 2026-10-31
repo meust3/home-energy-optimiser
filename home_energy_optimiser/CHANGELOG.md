@@ -1,24 +1,22 @@
 # Changelog
 
-## 0.8.5 - deployment candidate (not deployed)
+## 0.8.6 - reconciled App update
 
-- Replaces repeated historical pending-score scans with a transactional indexed
-  inventory, preserving forecast values, scoring rules and existing observations.
 - Improves elapsed forecast actuals, missing-data explanations, collection incident
-  diagnostics and partial-day solar reporting. Operational uncertainty bounds stay off.
-- Requires explicit PostgreSQL migration `20261008_01` -> `20261024_01` with
-  analytical writers stopped. Startup does not migrate. Take a fresh backup and
-  rehearse restore, migration, runtime-role permissions and rollback before cutover.
-- Rollback requires stopping writers, downgrading the derived inventory to
-  `20261008_01`, verifying historical data, then restoring the retained v0.8.4 App.
-  Do not run old code against the new schema or bypass the schema gate.
-- Includes optional diagnostic/review modules and offline SEMS/Jev tooling. The
-  standard build omits the AI SDK. No live integration, hardware execution,
-  operational non-HOLD recommendation, retention or SEMS backfill is activated.
-- Preserves the existing runtime dependency baseline. Historical v0.6.3 acceptance
-  is qualified by its monitoring gap and later scoring cancellation.
-- Deployment remains a separate approved operation. See
-  [the v0.8.5 deployment runbook](../docs/Testing/v085_deployment_preparation_20261031.md).
+  diagnostics and qualified solar reporting, preserving v0.8.5 scoring guarantees.
+- Includes optional review/SDK support and offline Jev/SEMS tooling. Standard builds
+  omit the AI SDK; no new live integration or hardware authority is activated.
+- No schema change from installed v0.8.5 (`20261024_01`). Preserve protected options;
+  operational non-HOLD selection and retention remain disabled.
+- Restore-tested backup and App rollback to v0.8.5 are required before cutover.
+  See [the runbook](../docs/Testing/v086_deployment_20261031.md).
+
+## 0.8.5 - deployed 25 October 2026
+
+- Introduced the transactional pending-score inventory and revision `20261024_01`.
+- Retained acceptance verifies two natural cycles and HOLD/no-command policy.
+  The 31 October live preflight confirms this App version and schema already run.
+- Independent installed-byte attestation was not established by that acceptance.
 
 ## 0.8.3 - scoring reliability candidate (not published)
 

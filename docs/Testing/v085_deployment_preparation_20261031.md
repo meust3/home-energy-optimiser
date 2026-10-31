@@ -1,5 +1,10 @@
 # v0.8.5 App/database deployment preparation - 31 October 2026
 
+> Superseded deployment baseline: live preflight confirmed v0.8.5 and schema
+> `20261024_01` were already deployed on 25 October. This retained rehearsal
+> remains historical evidence only. Follow `v086_deployment_20261031.md` for
+> the authorized App update; do not repeat the production migration.
+
 Status: preparation only; no release tag, live migration, App installation or
 integration activation is authorized by this document. The candidate is based on
 reconciled main `06b832749d6fc657061eb232127a7c5ffaecb974`. Runtime code and dependency

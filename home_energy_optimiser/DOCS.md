@@ -1,18 +1,17 @@
 # Home Energy Optimiser
 
-## Current candidate: v0.8.5
+## Current release: v0.8.6
 
-This candidate adds scoring-inventory reliability and data-quality reporting.
-The documented v0.8.4 baseline uses schema `20261008_01`; this App requires
-`20261024_01`. Migration is manual, with analytical writers stopped and a fresh
-restore-tested backup. Startup never migrates. Rollback requires the matching
-old schema and retained v0.8.4 App. Preserve the installation's protected options;
-do not replace them with default examples or enable new integrations.
+Reconciles data-quality reporting, elapsed forecast actuals, collection diagnostics
+and optional offline review tooling. The verified running v0.8.5 baseline already
+uses PostgreSQL revision `20261024_01`; **no database migration is required** for
+this update. Startup never migrates. Rollback restores v0.8.5 and the original
+protected options on the same schema; do not downgrade the inventory migration.
 
+Take a fresh restore-tested backup before cutover. Preserve protected options.
 The standard build omits the AI SDK. Live AI/Jev/SEMS, hardware execution,
-operational non-HOLD recommendations and retention remain disabled. Preparation
-and CI do not establish deployed acceptance. Follow the
-[v0.8.5 deployment runbook](../docs/Testing/v085_deployment_preparation_20261031.md).
+operational non-HOLD recommendations and retention remain disabled.
+See the [v0.8.6 deployment runbook](../docs/Testing/v086_deployment_20261031.md).
 
 ## Historical release transitions
 

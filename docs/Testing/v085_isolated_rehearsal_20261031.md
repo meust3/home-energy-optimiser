@@ -1,5 +1,10 @@
 # v0.8.5 isolated deployment rehearsal - 31 October 2026
 
+> Superseded deployment baseline: live preflight confirmed v0.8.5 and schema
+> `20261024_01` were already deployed on 25 October. This retained rehearsal
+> remains historical evidence only. Follow `v086_deployment_20261031.md` for
+> the authorized App update; do not repeat the production migration.
+
 Status: **local preparation passed; not deployed or published**. Production was
 not contacted. Live AI, SEMS, Jev and hardware integrations remain disabled;
 no production options, data or services were changed.

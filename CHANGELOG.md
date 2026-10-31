@@ -1,6 +1,19 @@
 # Changelog
 
-## 0.8.5 candidate - unpublished scoring inventory release
+## 0.8.6 - reconciled App update
+
+- Publishes reconciled data-quality, diagnostic and optional offline review work.
+- Preserves running schema `20261024_01`; no live migration from v0.8.5.
+- Standard builds omit the SDK. Live integrations, hardware controls, operational
+  non-HOLD selection and retention remain disabled. Preserve protected options.
+- Corrects the release baseline using the verified 25 October v0.8.5 acceptance.
+- See [deployment and rollback](docs/Testing/v086_deployment_20261031.md).
+
+## 0.8.5 historical preparation notes (superseded)
+
+The 31 October live preflight and retained 25 October acceptance establish that
+v0.8.5 was already deployed. Migration instructions below apply only to the old
+v0.8.4-to-v0.8.5 transition, not the v0.8.6 update.
 
 - Reconciles data-quality reporting, elapsed forecast actuals, bounded observation
   batching and collection diagnostics while retaining main's indexed scoring,
