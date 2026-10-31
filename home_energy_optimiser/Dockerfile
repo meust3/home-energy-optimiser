@@ -2,6 +2,8 @@ FROM python:3.12.11-slim-bookworm
 
 ARG BUILD_VERSION=0.8.5
 ARG APP_SOURCE_REF=v0.8.5
+ARG INCLUDE_AI_SDK=false
+ARG AI_SDK_WHEEL_SHA256=""
 # Optional local release rehearsal: immutable git archive, never household data.
 ARG APP_SOURCE_ARCHIVE_SHA256=""
 
@@ -22,6 +24,7 @@ RUN apt-get update \
 
 WORKDIR /opt/home-energy-optimiser
 RUN --mount=type=secret,id=local_source_archive \
+    --mount=type=secret,id=panel_sdk_wheel,target=/tmp/ai_control_panel_client-1.0.4-py3-none-any.whl \
     if [ -s /run/secrets/local_source_archive ]; then \
       test -n "$APP_SOURCE_ARCHIVE_SHA256" \
       && printf '%s  %s\n' "$APP_SOURCE_ARCHIVE_SHA256" /run/secrets/local_source_archive | sha256sum --check - \
@@ -32,6 +35,13 @@ RUN --mount=type=secret,id=local_source_archive \
         | tar --extract --gzip --strip-components=1; \
     fi \
     && python -m pip install --constraint requirements-runtime.txt . \
+    && case "${INCLUDE_AI_SDK}" in \
+      true) test -n "$AI_SDK_WHEEL_SHA256" \
+        && printf '%s  %s\n' "$AI_SDK_WHEEL_SHA256" /tmp/ai_control_panel_client-1.0.4-py3-none-any.whl | sha256sum --check --status \
+        && python -m pip install --constraint requirements-runtime.txt /tmp/ai_control_panel_client-1.0.4-py3-none-any.whl ;; \
+      false) true ;; \
+      *) exit 1 ;; \
+    esac \
     && chmod 0755 home_energy_optimiser/run.sh \
     && rm -rf .git .env .venv data logs captures exports secrets credentials \
       tests docs .pytest_cache .ruff_cache .mypy_cache htmlcov \

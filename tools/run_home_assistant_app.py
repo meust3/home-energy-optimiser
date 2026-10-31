@@ -7,6 +7,7 @@ import threading
 
 import run_collector
 
+from energy_optimizer.ai_app import app_ai_environment
 from energy_optimizer.config import load_config
 from energy_optimizer.db.redaction import display_database_url
 from energy_optimizer.forecast_operations import (
@@ -51,6 +52,8 @@ def main() -> int:
 
 
 def _run(options) -> int:
+    # Local files only. Optional AI never participates in collector startup checks.
+    os.environ.update(app_ai_environment())
     environment = app_environment(options)
     os.environ.update(environment)
     config = load_config(env_file=None)

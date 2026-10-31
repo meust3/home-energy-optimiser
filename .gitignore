@@ -6,6 +6,7 @@ __pycache__/
 .env.*
 !.env.example
 .venv/
+.local/ai-control-panel/
 __pycache__/
 *.pyc
 data/*.db

@@ -263,6 +263,8 @@ def test_solar_overprediction_with_near_full_battery_is_context_not_derating():
     assert result["actual_pv_kwh"] == 12
     assert result["classification"] == "possible_battery_saturation"
     assert result["actual_minus_p50_kwh"] == -18
+    assert result["signed_percentage_error_percent"] == -150
+    assert result["p50_percentage_error"] == 150
     assert "no automatic Solcast derating" in result["interpretation"]
 
 
@@ -535,3 +537,48 @@ def test_v052_postgresql_populated_migration_round_trip():
         with admin_engine.begin() as connection:
             connection.execute(text(f'DROP SCHEMA "{schema}" CASCADE'))
         admin_engine.dispose()
+
+
+@pytest.mark.parametrize("elapsed_slots", [10, 285])
+def test_solar_partial_day_never_reports_full_day_error(elapsed_slots):
+    start = datetime(2026, 8, 3, tzinfo=UTC)
+    rows = [
+        {
+            "observed_at_local": start + timedelta(minutes=5 * i),
+            "pv_power_w": 1000,
+            "telemetry_is_healthy": True,
+            "solcast_today_kwh_json": {
+                "estimate": 24,
+                "estimate10": 20,
+                "estimate90": 28,
+            },
+        }
+        for i in range(elapsed_slots)
+    ]
+    result = calculate_solar_diagnostics(
+        rows, now=start + timedelta(minutes=5 * elapsed_slots)
+    )[0]
+    assert result["day_complete"] is False
+    assert result["actual_pv_kwh"] > 0
+    assert result["actual_minus_p50_kwh"] is None
+    assert result["p50_percentage_error"] is None
+    assert result["actual_in_solcast_range"] is None
+    assert result["comparison_status"] == "incomplete_day"
+    assert result["forecast_snapshot_observed_at"] == start
+
+
+def test_solar_low_coverage_day_has_no_error_and_explicit_provenance():
+    start = datetime(2026, 8, 3, tzinfo=UTC)
+    rows = [
+        {
+            "observed_at_local": start,
+            "pv_power_w": 1000,
+            "telemetry_is_healthy": True,
+            "solcast_today_kwh_json": {"estimate": 24},
+        }
+    ]
+    result = calculate_solar_diagnostics(rows, now=start + timedelta(days=1))[0]
+    assert result["day_complete"]
+    assert result["actual_minus_p50_kwh"] is None
+    assert result["comparison_status"] == "insufficient_coverage_or_forecast"
+    assert result["forecast_issue_time_verified"] is False

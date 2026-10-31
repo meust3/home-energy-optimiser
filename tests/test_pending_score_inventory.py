@@ -12,6 +12,7 @@ from sqlalchemy import delete, event, func, insert, inspect, select, text, updat
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session
 from test_bounded_forecast_scoring import NOW, bounded, old_selection, point, put
+from test_bounded_forecast_scoring import repo as repo
 
 from energy_optimizer.db import pending_inventory
 from energy_optimizer.db.forecast_scoring import ScoringSelectionBudgetExceeded
@@ -23,8 +24,6 @@ from energy_optimizer.db.models import (
     ForecastScorePending,
 )
 from energy_optimizer.forecast_operations import _safe_failure
-
-pytest_plugins = ("test_bounded_forecast_scoring",)
 
 
 def inventory(connection):
