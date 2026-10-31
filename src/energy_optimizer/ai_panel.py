@@ -1,4 +1,4 @@
-"""Thin Energy adapter for contract 1.0.0 and optional task SDK 1.0.2.
+"""Thin Energy adapter for contract 1.0.0 and optional task SDK 1.0.4.
 
 Only explicit synthetic diagnostics/reviews are executable. Collection/calculation
 code never imports this module. Lazy SDK imports keep the AI extra optional.
@@ -11,6 +11,7 @@ import json
 from collections.abc import AsyncIterator, Awaitable, Callable
 from datetime import UTC, datetime
 from typing import Any, Literal, Protocol, Self, TypeVar
+from urllib.parse import urlsplit
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
@@ -23,7 +24,7 @@ from energy_optimizer.ai_integration import (
 )
 
 CONTRACT_COMMIT = "436b04c50514487f9558d67c93facd0998e2f8a6"
-SDK_COMMIT = "2aa746e42b6acea0515b099c5ba2ec986e925fc1"
+SDK_COMMIT = "3d194368db297e33049b414c4cae345e632e5dbb"
 T = TypeVar("T")
 
 
@@ -37,6 +38,14 @@ class PanelSession(Protocol):
     ) -> dict[str, Any]: ...
     async def review_battery_holdout_case(
         self, case_id: str, *, operation_id: str
+    ) -> dict[str, Any]: ...
+    async def review_energy_jev_case(
+        self,
+        case_id: str,
+        *,
+        operation_id: str,
+        experiment_id: str,
+        manifest_sha256: str,
     ) -> dict[str, Any]: ...
     async def decide(
         self,
@@ -101,7 +110,7 @@ class DiagnosticReport(BaseModel):
     checked_at: datetime
     configuration_hash: str = Field(pattern=r"^[a-f0-9]{64}$")
     contract_version: Literal["1.0.0"] = "1.0.0"
-    sdk_version: Literal["1.0.1", "1.0.2", "1.0.3"] | None = None
+    sdk_version: Literal["1.0.1", "1.0.2", "1.0.3", "1.0.4"] | None = None
     project: Literal["home-energy"] = "home-energy"
     caller: Literal["application_backend"] = "application_backend"
     environment: Literal["development", "test", "production"]
@@ -186,7 +195,7 @@ async def sdk_client(settings: AISettings) -> PanelSession:
     import httpx
     import panel_client
 
-    if panel_client.__version__ not in {"1.0.1", "1.0.2", "1.0.3"}:
+    if panel_client.__version__ not in {"1.0.1", "1.0.2", "1.0.3", "1.0.4"}:
         raise AIUnavailable(AIFailure.UNAVAILABLE)
     if not settings.key_file or not settings.base_url:
         raise AIUnavailable(AIFailure.HANDOFF_PENDING)
@@ -259,10 +268,21 @@ class EnergyPanelAdapter:
         self.client_factory = client_factory
         self.boundary = OptionalAI(settings)
 
-    async def _execute(self, action: Callable[[PanelSession], Awaitable[T]]) -> T:
+    async def _execute(
+        self,
+        action: Callable[[PanelSession], Awaitable[T]],
+        *,
+        required_sdk_version: str | None = None,
+    ) -> T:
         async def operation(_settings: AISettings) -> T:
+            import panel_client
             from panel_client import AuthenticationError, PanelError, PolicyError
 
+            if (
+                required_sdk_version is not None
+                and panel_client.__version__ != required_sdk_version
+            ):
+                raise AIUnavailable(AIFailure.POLICY_DENIED)
             failure = AIFailure.UNAVAILABLE
             try:
                 async with await self.client_factory(self.settings) as client:
@@ -344,6 +364,34 @@ class EnergyPanelAdapter:
 
     async def discover(self) -> DiagnosticReport:
         return await self._execute(self._discover_with_client)
+
+    async def review_jev_evaluation_case(
+        self,
+        case_id: str,
+        operation_id: UUID,
+        *,
+        experiment_id: UUID,
+        manifest_sha256: str,
+    ) -> dict[str, Any]:
+        """Explicit frozen evaluation only; never a runner or approval grant."""
+        if (
+            self.settings.environment != "test"
+            or not self.settings.base_url
+            or urlsplit(self.settings.base_url).hostname
+            not in {"127.0.0.1", "localhost"}
+        ):
+            raise AIUnavailable(AIFailure.POLICY_DENIED)
+
+        async def action(client: PanelSession) -> dict[str, Any]:
+            # Ordinary capability discovery could contact the shared GPU.
+            return await client.review_energy_jev_case(
+                case_id,
+                operation_id=str(operation_id),
+                experiment_id=str(experiment_id),
+                manifest_sha256=manifest_sha256,
+            )
+
+        return await self._execute(action, required_sdk_version="1.0.4")
 
     async def review_synthetic_case(
         self,

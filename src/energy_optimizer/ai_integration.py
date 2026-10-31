@@ -186,7 +186,7 @@ def local_status(env: Mapping[str, str] | None = None) -> dict[str, object]:
         ),
         "contract_version": "1.0.0",
         "sdk_version": sdk_version,
-        "sdk_expected_version": "1.0.3",
+        "sdk_expected_version": "1.0.4",
         "transport_authentication": "unverified",
         "capability_permissions": "unverified",
         "worker_health": "unverified",

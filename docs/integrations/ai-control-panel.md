@@ -3,12 +3,20 @@
 ## Current reconciliation: 31 October 2026
 
 Local source reconciliation retains v0.8.5 packaging and pins the optional Python
-extra to SDK **1.0.3**, commit `2aa746e42b6acea0515b099c5ba2ec986e925fc1`.
+extra to SDK **1.0.4**, commit `3d194368db297e33049b414c4cae345e632e5dbb`.
 Normal builds omit the SDK (`INCLUDE_AI_SDK=false`). An optional private build
-requires a 1.0.3 wheel supplied as a BuildKit secret and its explicit
+requires a 1.0.4 wheel supplied as a BuildKit secret and its explicit
 `AI_SDK_WHEEL_SHA256`; an absent/mismatched digest fails the build.
 The wheel must be built from the pinned source; a checksum alone does not prove
 provider provenance. No SDK wheel or credentials are committed to this repository.
+
+The additive Jev adapter accepts only the published frozen evaluation contract
+in a test environment on loopback, through exactly SDK 1.0.4. It performs no
+ordinary capability discovery. Disabled/missing-SDK failures remain bounded and
+secret-safe; unknown diagnostic SDK versions remain null. This method is not an
+experiment runner or approval grant. No caller, scheduler, connection bundle or
+live submission CLI is enabled by this reconciliation. See
+[validation evidence](../Testing/jev_sdk104_reconciliation_20261031.md).
 
 This reconciliation does not install a runtime connection bundle, enable live
 SEMS or AI calls, change routing, or deploy an App. The failed synthetic-model
@@ -234,7 +242,7 @@ configuration appears as invalid in local status and cannot stop core startup.
 The current optional build uses the reviewed wheel's SHA-256 explicitly:
 
 ```powershell
-docker build --platform linux/amd64 --build-arg INCLUDE_AI_SDK=true --build-arg AI_SDK_WHEEL_SHA256=$reviewedWheelSha256 --secret id=panel_sdk_wheel,src=.local/ai-control-panel/wheels/ai_control_panel_client-1.0.3-py3-none-any.whl -f home_energy_optimiser/Dockerfile -t home-energy-ai:local-candidate .
+docker build --platform linux/amd64 --build-arg INCLUDE_AI_SDK=true --build-arg AI_SDK_WHEEL_SHA256=$reviewedWheelSha256 --secret id=panel_sdk_wheel,src=.local/ai-control-panel/wheels/ai_control_panel_client-1.0.4-py3-none-any.whl -f home_energy_optimiser/Dockerfile -t home-energy-ai:local-candidate .
 ```
 
 No wheel or credential is added to Git or the build context. The wheel is a scoped

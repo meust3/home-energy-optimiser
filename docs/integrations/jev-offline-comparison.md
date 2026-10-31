@@ -1,5 +1,10 @@
 # Offline Jev comparison
 
+The subsequent [SDK 1.0.4 reconciliation](../Testing/jev_sdk104_reconciliation_20261031.md)
+updates the optional dependency and adapter. This offline tool still needs no
+SDK; its frozen task 1.1.0 metadata remains unchanged. The scope and validation
+below record the preceding offline-only increment at `0b5f655`.
+
 This reconciles only the offline comparison portion of the uncommitted Jev
 evaluator. It reads saved synthetic results and never submits inference,
 loads runtime credentials, discovers providers or changes energy decisions.

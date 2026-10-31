@@ -69,11 +69,11 @@ def task_dataset(suite: Literal["pilot", "holdout"] = "pilot"):
     import panel_client
 
     if suite == "holdout":
-        if panel_client.__version__ != "1.0.3":
-            raise ValueError("Holdout requires pinned SDK 1.0.3")
+        if panel_client.__version__ not in {"1.0.3", "1.0.4"}:
+            raise ValueError("Holdout requires SDK 1.0.3 or 1.0.4")
         import panel_energy_review_holdout as data
     elif suite == "pilot":
-        if panel_client.__version__ not in {"1.0.2", "1.0.3"}:
+        if panel_client.__version__ not in {"1.0.2", "1.0.3", "1.0.4"}:
             raise ValueError("Synthetic review requires the pinned task SDK")
         import panel_energy_review as data
     else:

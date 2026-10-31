@@ -109,8 +109,8 @@ def test_retained_label_and_stratum_cannot_change(retained, field, value):
 
 def test_optional_pinned_sdk_matches_frozen_reference():
     sdk = pytest.importorskip("panel_client")
-    if sdk.__version__ != "1.0.3":
-        pytest.skip("Fidelity check requires the project's pinned SDK 1.0.3")
+    if sdk.__version__ != "1.0.4":
+        pytest.skip("Fidelity check requires the project's pinned SDK 1.0.4")
     frozen = pytest.importorskip("panel_energy_review_holdout")
     snapshot = reference()
     assert snapshot["task_version"] == frozen.VERSION

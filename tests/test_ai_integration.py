@@ -119,7 +119,7 @@ def test_status_is_local_and_never_claims_live_verification():
     assert status["connection"] == "unconfigured"
     assert status["latest_manual_live_test"] is None
     assert status["contract_version"] == "1.0.0"
-    assert status["sdk_expected_version"] == "1.0.3"
+    assert status["sdk_expected_version"] == "1.0.4"
     assert "secret" not in json.dumps(status)
     assert local_status({"ENERGY_AI_ENABLED": "secret"})["configuration"] == "invalid"
 
