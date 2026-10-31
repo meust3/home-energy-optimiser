@@ -1,5 +1,16 @@
 # Home Energy Optimiser
 
+## Current candidate: v0.8.5
+
+Scoring-inventory and data-quality improvements require explicit PostgreSQL
+migration `20261008_01` -> `20261024_01`, a fresh restore-tested backup and a
+separately approved maintenance window. Startup never migrates. Standard builds
+omit the AI SDK; installation must not activate new integrations, hardware
+execution, operational non-HOLD recommendations, retention or SEMS backfills.
+
+See the [deployment and rollback runbook](../docs/Testing/v085_deployment_preparation_20261031.md).
+The sections below describe historical transitions, not the current upgrade path.
+
 Version 0.7.0 is a local release candidate for optional forecast-context
 collection. Collection defaults to disabled and the mapping defaults to empty.
 It requires manual migration to `20261005_01` even while disabled. Forecasts do

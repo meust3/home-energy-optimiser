@@ -1,5 +1,21 @@
 # Home Energy Optimiser
 
+## Current candidate: v0.8.5
+
+This candidate adds scoring-inventory reliability and data-quality reporting.
+The documented v0.8.4 baseline uses schema `20261008_01`; this App requires
+`20261024_01`. Migration is manual, with analytical writers stopped and a fresh
+restore-tested backup. Startup never migrates. Rollback requires the matching
+old schema and retained v0.8.4 App. Preserve the installation's protected options;
+do not replace them with default examples or enable new integrations.
+
+The standard build omits the AI SDK. Live AI/Jev/SEMS, hardware execution,
+operational non-HOLD recommendations and retention remain disabled. Preparation
+and CI do not establish deployed acceptance. Follow the
+[v0.8.5 deployment runbook](../docs/Testing/v085_deployment_preparation_20261031.md).
+
+## Historical release transitions
+
 Version 0.7.0 is a local release candidate for optional forecast-context
 collection. Collection defaults to disabled and the mapping defaults to empty.
 It requires manual migration to `20261005_01` even while disabled. Forecasts do

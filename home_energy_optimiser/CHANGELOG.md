@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.8.5 - deployment candidate (not deployed)
+
+- Replaces repeated historical pending-score scans with a transactional indexed
+  inventory, preserving forecast values, scoring rules and existing observations.
+- Improves elapsed forecast actuals, missing-data explanations, collection incident
+  diagnostics and partial-day solar reporting. Operational uncertainty bounds stay off.
+- Requires explicit PostgreSQL migration `20261008_01` -> `20261024_01` with
+  analytical writers stopped. Startup does not migrate. Take a fresh backup and
+  rehearse restore, migration, runtime-role permissions and rollback before cutover.
+- Rollback requires stopping writers, downgrading the derived inventory to
+  `20261008_01`, verifying historical data, then restoring the retained v0.8.4 App.
+  Do not run old code against the new schema or bypass the schema gate.
+- Includes optional diagnostic/review modules and offline SEMS/Jev tooling. The
+  standard build omits the AI SDK. No live integration, hardware execution,
+  operational non-HOLD recommendation, retention or SEMS backfill is activated.
+- Preserves the existing runtime dependency baseline. Historical v0.6.3 acceptance
+  is qualified by its monitoring gap and later scoring cancellation.
+- Deployment remains a separate approved operation. See
+  [the v0.8.5 deployment runbook](../docs/Testing/v085_deployment_preparation_20261031.md).
+
 ## 0.8.3 - scoring reliability candidate (not published)
 
 - Selects pending forecast scores in bounded ID ranges while preserving oldest-first

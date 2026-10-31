@@ -2,6 +2,14 @@
 
 ## 0.8.5 candidate - unpublished scoring inventory release
 
+- Reconciles data-quality reporting, elapsed forecast actuals, bounded observation
+  batching and collection diagnostics while retaining main's indexed scoring,
+  transaction guarantees, model policy and existing release configuration.
+- Includes optional AI review/SDK support and standalone SEMS/Jev tooling; the
+  standard App omits the SDK and no live capability is activated by installation.
+- Deployment preparation and isolated retained-backup rehearsal are documented in
+  [the v0.8.5 runbook](docs/Testing/v085_deployment_preparation_20261031.md).
+
 - Replaces repeated historical pending-score scans with the transactional indexed
   inventory from PR #19; preserves issued forecasts, scoring/EV rules and models.
 - Requires explicit migration `20261008_01` -> `20261024_01`; no startup migration.
