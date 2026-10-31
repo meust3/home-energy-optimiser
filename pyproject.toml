@@ -33,7 +33,7 @@ dev = [
 where = ["src"]
 
 [tool.setuptools.package-data]
-energy_optimizer = ["dashboard_static/*"]
+energy_optimizer = ["dashboard_static/*", "jev_reference.json"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -1,0 +1,248 @@
+{
+  "source_commit": "2aa746e42b6acea0515b099c5ba2ec986e925fc1",
+  "task_version": "1.1.0",
+  "dataset_sha256": "5502dccde5e6be647178df2e19071b69263093d3b8dc5074b56dee8819782f09",
+  "question_sha256": "cb15ecec506f737d90b896c9728e47664923ab9cd2701098a809b952d12c50d4",
+  "cases": {
+    "h01": {
+      "stratum": "numeric",
+      "expected": "supported",
+      "reference": "supported"
+    },
+    "h02": {
+      "stratum": "numeric",
+      "expected": "supported",
+      "reference": "supported"
+    },
+    "h03": {
+      "stratum": "numeric",
+      "expected": "supported",
+      "reference": "supported"
+    },
+    "h04": {
+      "stratum": "numeric",
+      "expected": "supported",
+      "reference": "supported"
+    },
+    "h05": {
+      "stratum": "numeric",
+      "expected": "insufficient_evidence",
+      "reference": "insufficient_evidence"
+    },
+    "h06": {
+      "stratum": "numeric",
+      "expected": "insufficient_evidence",
+      "reference": "insufficient_evidence"
+    },
+    "h07": {
+      "stratum": "numeric",
+      "expected": "insufficient_evidence",
+      "reference": "insufficient_evidence"
+    },
+    "h08": {
+      "stratum": "numeric",
+      "expected": "insufficient_evidence",
+      "reference": "insufficient_evidence"
+    },
+    "h09": {
+      "stratum": "numeric",
+      "expected": "insufficient_evidence",
+      "reference": "insufficient_evidence"
+    },
+    "h10": {
+      "stratum": "numeric",
+      "expected": "insufficient_evidence",
+      "reference": "insufficient_evidence"
+    },
+    "h11": {
+      "stratum": "numeric",
+      "expected": "insufficient_evidence",
+      "reference": "insufficient_evidence"
+    },
+    "h12": {
+      "stratum": "numeric",
+      "expected": "insufficient_evidence",
+      "reference": "insufficient_evidence"
+    },
+    "h13": {
+      "stratum": "numeric",
+      "expected": "insufficient_evidence",
+      "reference": "insufficient_evidence"
+    },
+    "h14": {
+      "stratum": "numeric",
+      "expected": "insufficient_evidence",
+      "reference": "insufficient_evidence"
+    },
+    "h15": {
+      "stratum": "numeric",
+      "expected": "insufficient_evidence",
+      "reference": "insufficient_evidence"
+    },
+    "h16": {
+      "stratum": "numeric",
+      "expected": "insufficient_evidence",
+      "reference": "insufficient_evidence"
+    },
+    "h17": {
+      "stratum": "numeric",
+      "expected": "needs_review",
+      "reference": "needs_review"
+    },
+    "h18": {
+      "stratum": "numeric",
+      "expected": "needs_review",
+      "reference": "needs_review"
+    },
+    "h19": {
+      "stratum": "numeric",
+      "expected": "needs_review",
+      "reference": "needs_review"
+    },
+    "h20": {
+      "stratum": "numeric",
+      "expected": "needs_review",
+      "reference": "needs_review"
+    },
+    "h21": {
+      "stratum": "numeric",
+      "expected": "needs_review",
+      "reference": "needs_review"
+    },
+    "h22": {
+      "stratum": "numeric",
+      "expected": "needs_review",
+      "reference": "needs_review"
+    },
+    "h23": {
+      "stratum": "numeric",
+      "expected": "needs_review",
+      "reference": "needs_review"
+    },
+    "h24": {
+      "stratum": "numeric",
+      "expected": "needs_review",
+      "reference": "needs_review"
+    },
+    "h25": {
+      "stratum": "numeric",
+      "expected": "supported",
+      "reference": "supported"
+    },
+    "h26": {
+      "stratum": "numeric",
+      "expected": "supported",
+      "reference": "supported"
+    },
+    "h27": {
+      "stratum": "numeric",
+      "expected": "supported",
+      "reference": "supported"
+    },
+    "h28": {
+      "stratum": "numeric",
+      "expected": "supported",
+      "reference": "supported"
+    },
+    "h29": {
+      "stratum": "numeric",
+      "expected": "needs_review",
+      "reference": "needs_review"
+    },
+    "h30": {
+      "stratum": "numeric",
+      "expected": "needs_review",
+      "reference": "needs_review"
+    },
+    "h31": {
+      "stratum": "numeric",
+      "expected": "needs_review",
+      "reference": "needs_review"
+    },
+    "h32": {
+      "stratum": "numeric",
+      "expected": "needs_review",
+      "reference": "needs_review"
+    },
+    "h33": {
+      "stratum": "numeric",
+      "expected": "needs_review",
+      "reference": "needs_review"
+    },
+    "h34": {
+      "stratum": "numeric",
+      "expected": "needs_review",
+      "reference": "needs_review"
+    },
+    "h35": {
+      "stratum": "numeric",
+      "expected": "needs_review",
+      "reference": "needs_review"
+    },
+    "h36": {
+      "stratum": "numeric",
+      "expected": "needs_review",
+      "reference": "needs_review"
+    },
+    "h37": {
+      "stratum": "numeric",
+      "expected": "needs_review",
+      "reference": "needs_review"
+    },
+    "h38": {
+      "stratum": "numeric",
+      "expected": "needs_review",
+      "reference": "needs_review"
+    },
+    "h39": {
+      "stratum": "numeric",
+      "expected": "needs_review",
+      "reference": "needs_review"
+    },
+    "h40": {
+      "stratum": "numeric",
+      "expected": "needs_review",
+      "reference": "needs_review"
+    },
+    "h41": {
+      "stratum": "narrative",
+      "expected": "supported",
+      "reference": "needs_review"
+    },
+    "h42": {
+      "stratum": "narrative",
+      "expected": "needs_review",
+      "reference": "needs_review"
+    },
+    "h43": {
+      "stratum": "narrative",
+      "expected": "supported",
+      "reference": "needs_review"
+    },
+    "h44": {
+      "stratum": "narrative",
+      "expected": "needs_review",
+      "reference": "needs_review"
+    },
+    "h45": {
+      "stratum": "narrative",
+      "expected": "supported",
+      "reference": "needs_review"
+    },
+    "h46": {
+      "stratum": "narrative",
+      "expected": "needs_review",
+      "reference": "needs_review"
+    },
+    "h47": {
+      "stratum": "narrative",
+      "expected": "supported",
+      "reference": "needs_review"
+    },
+    "h48": {
+      "stratum": "narrative",
+      "expected": "needs_review",
+      "reference": "needs_review"
+    }
+  }
+}
