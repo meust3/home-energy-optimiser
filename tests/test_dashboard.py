@@ -543,7 +543,7 @@ def test_web_shell_static_nested_ingress_api_and_security_headers():
         html = body.decode()
         assert f'<base href="{prefix}">' in html
         assert 'href="static/app.css?v=0.6.0"' in html
-        assert 'src="static/app.js?v=0.8.5-dq1"' in html
+        assert 'src="static/app.js?v=0.8.6-dq1"' in html
         assert "Advisory only. No command was issued." in html
         assert 'id="decisions"' in html
         assert "Shadow only &mdash; no command issued" in html

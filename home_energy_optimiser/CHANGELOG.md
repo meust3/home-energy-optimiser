@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.8.6 - reconciled App update
+
+- Improves elapsed forecast actuals, missing-data explanations, collection incident
+  diagnostics and qualified solar reporting, preserving v0.8.5 scoring guarantees.
+- Includes optional review/SDK support and offline Jev/SEMS tooling. Standard builds
+  omit the AI SDK; no new live integration or hardware authority is activated.
+- No schema change from installed v0.8.5 (`20261024_01`). Preserve protected options;
+  operational non-HOLD selection and retention remain disabled.
+- Restore-tested backup and App rollback to v0.8.5 are required before cutover.
+  See [the runbook](../docs/Testing/v086_deployment_20261031.md).
+
+## 0.8.5 - deployed 25 October 2026
+
+- Introduced the transactional pending-score inventory and revision `20261024_01`.
+- Retained acceptance verifies two natural cycles and HOLD/no-command policy.
+  The 31 October live preflight confirms this App version and schema already run.
+- Independent installed-byte attestation was not established by that acceptance.
+
 ## 0.8.3 - scoring reliability candidate (not published)
 
 - Selects pending forecast scores in bounded ID ranges while preserving oldest-first

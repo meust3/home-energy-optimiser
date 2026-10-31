@@ -1,7 +1,7 @@
 FROM python:3.12.11-slim-bookworm
 
-ARG BUILD_VERSION=0.8.5
-ARG APP_SOURCE_REF=v0.8.5
+ARG BUILD_VERSION=0.8.6
+ARG APP_SOURCE_REF=v0.8.6
 ARG INCLUDE_AI_SDK=false
 ARG AI_SDK_WHEEL_SHA256=""
 # Optional local release rehearsal: immutable git archive, never household data.

@@ -1,5 +1,20 @@
 # Home Energy Optimiser
 
+## Current release: v0.8.6
+
+Reconciles data-quality reporting, elapsed forecast actuals, collection diagnostics
+and optional offline review tooling. The verified running v0.8.5 baseline already
+uses PostgreSQL revision `20261024_01`; **no database migration is required** for
+this update. Startup never migrates. Rollback restores v0.8.5 and the original
+protected options on the same schema; do not downgrade the inventory migration.
+
+Take a fresh restore-tested backup before cutover. Preserve protected options.
+The standard build omits the AI SDK. Live AI/Jev/SEMS, hardware execution,
+operational non-HOLD recommendations and retention remain disabled.
+See the [v0.8.6 deployment runbook](../docs/Testing/v086_deployment_20261031.md).
+
+## Historical release transitions
+
 Version 0.7.0 is a local release candidate for optional forecast-context
 collection. Collection defaults to disabled and the mapping defaults to empty.
 It requires manual migration to `20261005_01` even while disabled. Forecasts do
