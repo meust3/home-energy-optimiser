@@ -217,3 +217,7 @@ htmlcov/
 
 # Private programme evidence and inputs
 .local/
+
+# Private household usage imports and accidental host cache material
+/data/agl_supplementary_codex_handover_private/
+%SystemDrive%/
