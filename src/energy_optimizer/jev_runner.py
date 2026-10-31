@@ -33,6 +33,8 @@ SOURCE_FILES = (
     "jev_reference.json",
     "jev_evaluation.py",
     "jev_offline_adapter.py",
+    "jev_panel_rehearsal.py",
+    "jev_isolated_lifecycle.py",
     "ai_panel.py",
     "ai_integration.py",
     "ai_review.py",
@@ -49,7 +51,9 @@ class Strict(BaseModel):
 
 class Manifest(Strict):
     mode: Literal["offline_rehearsal"]
-    transport: Literal["offline_pipe", "offline_shared_adapter"] = "offline_pipe"
+    transport: Literal[
+        "offline_pipe", "offline_shared_adapter", "offline_panel_postgres"
+    ] = "offline_pipe"
     sdk_source_sha256: str | None = None
     experiment_id: str
     source_sha256: str
@@ -91,11 +95,13 @@ def manifest_template(
     experiment_id: str,
     max_cost_usd: str = "0.13",
     *,
-    transport: Literal["offline_pipe", "offline_shared_adapter"] = "offline_pipe",
+    transport: Literal[
+        "offline_pipe", "offline_shared_adapter", "offline_panel_postgres"
+    ] = "offline_pipe",
 ) -> dict:
     frozen = reference()
     sdk_digest = None
-    if transport == "offline_shared_adapter":
+    if transport != "offline_pipe":
         from energy_optimizer.jev_offline_adapter import checked_sdk_digest
 
         sdk_digest = checked_sdk_digest()
@@ -137,7 +143,7 @@ def preflight(
         ):
             raise ValueError()
         approval = Approval.model_validate_json(approval_bytes)
-        if manifest.transport == "offline_shared_adapter":
+        if manifest.transport != "offline_pipe":
             from energy_optimizer.jev_offline_adapter import checked_sdk_digest
 
             if manifest.sdk_source_sha256 != checked_sdk_digest():
@@ -309,10 +315,14 @@ async def _cleanup(
 
 
 async def rehearse(
-    manifest_bytes: bytes, approval_bytes: bytes, registry: Path
+    manifest_bytes: bytes, approval_bytes: bytes, registry: Path, *, panel_session=None
 ) -> dict[str, Any]:
     """Run only the bundled offline child; registry is durable and never pruned."""
     manifest, digest, cap = preflight(manifest_bytes, approval_bytes)
+    if (manifest.transport == "offline_panel_postgres") != (panel_session is not None):
+        raise RunnerRefused("Isolated Panel session required for this transport")
+    if panel_session is not None:
+        panel_session.validate(manifest_bytes, approval_bytes)
     run_dir = registry / manifest.experiment_id
     registry.mkdir(parents=True, exist_ok=True)
     try:
@@ -367,9 +377,12 @@ async def rehearse(
                 .joinpath("jev_rehearsal_worker.py")
                 .read_bytes()
             )
-        task = asyncio.create_task(
-            asyncio.wait_for(_start_child(nonce, worker, owner), CASE_SECONDS)
+        startup = (
+            panel_session.start(owner)
+            if panel_session is not None
+            else _start_child(nonce, worker, owner)
         )
+        task = asyncio.create_task(asyncio.wait_for(startup, CASE_SECONDS))
         while not task.done():
             try:
                 await asyncio.shield(task)
@@ -404,7 +417,9 @@ async def rehearse(
             db.execute("INSERT INTO attempts VALUES (?,?)", (ordinal, json.dumps(row)))
             db.commit()  # Durable unknown before any submission; never release it.
             _save(state_path, report)
-            if manifest.transport == "offline_shared_adapter":
+            if panel_session is not None:
+                submission = panel_session.exchange(request)
+            elif manifest.transport == "offline_shared_adapter":
                 from energy_optimizer.jev_offline_adapter import (
                     exchange_via_shared_adapter,
                 )
@@ -441,7 +456,17 @@ async def rehearse(
         # Shield cleanup even from repeated interruption; it has bounded waits.
         if owner.process is not None:
             report["child_pid"] = owner.process.pid
-        cleanup = asyncio.create_task(_cleanup(db, owner.process, report))
+
+        async def finish():
+            try:
+                if panel_session is not None:
+                    await panel_session.finish(report)
+            except Exception:
+                report["cleanup_failure"] = "panel_cleanup_failed"
+            finally:
+                await _cleanup(db, owner.process, report)
+
+        cleanup = asyncio.create_task(finish())
         while not cleanup.done():
             try:
                 await asyncio.shield(cleanup)

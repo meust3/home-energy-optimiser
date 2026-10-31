@@ -133,13 +133,69 @@ Partial states can be supplied to `tools.compare_jev`. Unknown attempts remain
 unknown and unscored; rehearsal reports propagate `simulation_only=true`.
 `production_activation` always remains `NOT AUTHORISED`.
 
+## Isolated Panel/PostgreSQL lifecycle
+
+`python -m tools.jev_panel_rehearsal --image <local-test-image> --registry
+<new-or-existing-evidence-directory> --experiment-id <new-UUID>` runs the separate
+`offline_panel_postgres` transport. Add `--fail-provider` to rehearse a fixed
+provider timeout. Neither option can select a live service or provider response.
+An experiment directory is claimed before Docker operations; reuse is refused.
+
+The launcher creates a PostgreSQL 17 container with `--network none`, tmpfs data
+and no published ports. The runtime shares only that container's network namespace,
+has a read-only root filesystem, no capabilities, no Docker socket, and mounts
+only this Python package read-only plus its newly claimed evidence directory.
+It checks ownership labels and network settings before starting or deleting each
+resource. Container names are recorded before creation, allowing cleanup after
+an interrupted create. A failed identity check prevents deletion and records
+`cleanup_incomplete`; it never cleans up unrelated containers.
+
+Inside the namespace, a loopback-only interface check and exact Panel/SDK source
+fingerprints run before database access. The generated role can address only
+the fixed loopback test database; inherited database/HA/live approval configuration
+is refused. Nonempty databases are refused, never reset. Trust authentication is
+restricted to this disposable, unpublished namespace. No real credentials enter it.
+
+The actual pinned Panel evaluation app applies its migrations, holds its exclusive
+database lock, enforces ordered claims and calls its real admission/settlement
+ledger. A narrow test wrapper replaces its **live approval reader** with the
+runner's exact offline manifest approval and replaces **provider_call** with fixed
+typed responses. The generated approval says `APPROVE_OFFLINE_JEV_REHEARSAL`;
+no live approval or verified-billing assertion is created. An encrypted fixture
+credential and temporary test-only grant exist only in this disposable database.
+
+The runner owns the Panel subprocess and uses the actual shared adapter and SDK
+over loopback HTTP. Cleanup checks the PostgreSQL event/request identities, typed
+answers, reservations, unknown costs, schema versions and absence of extra requests.
+It verifies duplicate rejection, revokes the temporary grant, verifies HTTP 403,
+closes its connection and stops the owned process. The host then removes only its
+labelled containers. Sanitized PostgreSQL ledger evidence survives in `lifecycle.json`
+and the runner checkpoint; the database and fixture secrets are destroyed.
+
+Successful mock answers retain unknown usage and cost. Consequently Panel request
+settlement remains `incomplete` even when evaluation answers are `completed`.
+This is expected; synthetic reservations are retained. A timeout stops after one
+unknown runner attempt, with no retry or fallback. The outer lifecycle can report
+`completed` for a successfully verified timeout scenario; inspect `runner.status`
+to distinguish that `partial` experiment from a completed 48-case batch.
+
+To build a test image, export `apps/api`, `services/system_one` and
+`packages/client-python` from Panel commit
+`3d194368db297e33049b414c4cae345e632e5dbb` into a new build context. Add a locally
+built Energy wheel under `wheels/`, and build using
+`tools/jev-panel-rehearsal.Dockerfile`. Do not copy a provider working directory,
+runtime bundle, `.env`, secrets or production data. Dependency installation occurs
+only at build time; every rehearsal runs without external networking.
+
 ## What this does not establish
 
 The published provider protocol at commit
 `3d194368db297e33049b414c4cae345e632e5dbb` requires a separately verified provider,
 current full-context billing evidence, exact paid-run approval, an exclusively
 owned disposable PostgreSQL instance, real test-grant issuance/revocation and
-independent provider-ledger reconciliation. None is replaced by this simulator.
+independent provider-ledger reconciliation. The isolated mode rehearses local
+database ownership, grants and ledger mechanics using fixtures; it does not
+establish live provider compatibility, billing, spend or model quality.
 No live backend is shipped here, and no paid approval file was created.
 
 The filesystem checks cover ordinary process failure/interruption and atomic
