@@ -1,4 +1,9 @@
-# v0.6.3 controlled deployment — 27 September 2026
+# v0.6.3 controlled deployment - 27 September 2026
+
+Historical evidence only. The follow-up below was reconciled on 31 October 2026
+from dated local receipts, without accessing production or changing integrations.
+It describes September 2026, not current runtime state. See the
+[claim verification record](v063_acceptance_evidence_review_20261031.md).
 
 ## Release and pre-deployment evidence
 
@@ -46,17 +51,29 @@ The first new observation at 08:10 was healthy with SOC 33%. Its persisted
 `goodwe_runtime_timestamp_v1` evidence reported `runtime_frame_fresh`, device age
 6.001028 seconds and receipt age 2.372911 seconds. The maintenance window omitted
 the 08:05 slot; it is not backfilled or hidden. There were no post-start gaps at
-initial acceptance. The first new scheduled forecast is due at 08:30; scheduled
-cycle acceptance is deferred to the monitor rather than claimed from an old run.
+initial acceptance.
 
-Hourly read-only monitoring is active under automation
-`home-energy-v0-6-3-48-hour-acceptance`. Window: 27 September 08:09 through
-29 September 08:09 Australia/Brisbane. It checks collection, SOC evidence,
-forecast/scoring failures and runtimes, index/revision, HOLD-only/no-command
-records, PV issues and retention. It reports meaningful failures and a final
-assessment, then disables itself. Local checks depend on the Codex host being
-available; missing coverage must be reported. The 48-hour soak has not yet passed.
-No hardware command was issued. Non-HOLD selection and retention remain disabled.
+The check around 09:10 Brisbane on 27 September recorded two successful scheduled
+cycles, at 08:30 and 09:00, with 288 forecast points and non-null forecast/reserve
+run IDs. Durations were 36.36 and 12.66 seconds respectively. It recorded 13
+observations with fresh GoodWe runtime-clock evidence, zero collection gaps,
+no recorded operation failures or PV plausibility flags, and no retention runs.
+The two shadow decisions were HOLD with `no_command_issued=true` and non-HOLD
+selection false. Revision `20260927_01` and scoring-index validity were confirmed.
+
+The check around 21:19 recorded 158 observations and 26 successful cycles with
+HOLD-only/no-command decisions. Of those observations, 156 had fresh runtime-clock
+evidence. The separate `soc-exceptions-20260927T1119.json` receipt records the two
+exceptions at 20:25 and 20:35: all five core GoodWe entities and the inverter clock
+were unavailable, SOC was null, telemetry health was false, and the recorded
+reason was `soc_unavailable_or_invalid`. Collection had no missing slots. These
+are unavailable-input rejections, not a stale-clock test at a scheduled decision
+boundary; neither exception was at a half-hour decision slot.
+
+The planned monitoring window for `home-energy-v0-6-3-48-hour-acceptance` was
+27 September 08:08:58.856579 through 29 September 08:08:58.856579 Brisbane
+(approximately 08:09 to 08:09). Monitoring coverage and its limits are assessed
+below. No current automation state is asserted from these historical receipts.
 
 ## Rollback
 
@@ -64,3 +81,42 @@ Stop the App before rollback. Since v0.6.2 rejects an unexpected schema head, do
 only the new index revision to `20260905_01` using the validated migration image,
 then restore the v0.6.2 App backup and verify collection. A full database restore is
 reserved for an integrity failure; the migration itself changes no application rows.
+
+## Qualified historical assessment - 30 September 2026
+
+The retained `final-window-audit.json` records 576 observations in the fixed
+48-hour window, from 27 September 08:10 through 29 September 08:05 Brisbane,
+and 96 successful operations with runtimes from 11.83 to 55.39 seconds. Its
+`actual_points` summary is `[96, 288, 288]`, consistent with 288 points per run.
+The audit records 96 completed HOLD decisions with `no_command_issued=true` and
+non-HOLD selection false, 574 fresh SOC records, two unavailable/invalid SOC
+records, no failures and no retention runs. The later monitor's broader interval
+reports zero collection gaps and PV plausibility flags, with the revision and
+scoring index still valid. These are retained aggregate results, not a new
+database audit; the final audit query definitions were not available for this
+review, so an independent per-run points/reserve verification is not claimed.
+
+**Continuous monitoring coverage did not pass.** Recomputing the intervals between
+all 46 entries in `monitor-history.jsonl` gives a largest gap of 40.3844 hours:
+29 September 02:41:23 to 30 September 19:04:27 Brisbane. The final 5 hours
+27 minutes 36 seconds of the planned window had no intervening recorded check
+and were assessed retrospectively. The receipts do not establish why checks
+stopped. This must not be described as uninterrupted 48-hour monitoring.
+
+**The historical evidence did not close the scoring-timeout issue.** Outside the
+fixed window, the 29 September 19:30 cycle failed with
+`DatabaseQueryCanceledError during forecast operation; phase=score_forecast_points`.
+Its recorded total duration was 47.24 seconds. Later cycles succeeded, including
+30 September 19:00. These receipts establish recurrence after the index migration,
+not its cause or current resolution; they do not establish NAS contention or
+quantify the index's performance benefit.
+
+No live stale-clock decision-boundary rejection is demonstrated by the reviewed
+receipts. The unavailable-input examples must not substitute for that evidence.
+The proposed statement that the automation was disabled afterward was not
+verified from the reviewed local receipts and is not adopted here.
+
+Overall acceptance remains qualified: retained in-window operating results were
+positive, monitoring coverage was incomplete, and a later cancellation prevented
+closing the timeout issue at that date. This historical reconciliation authorizes
+no migration, backfill, restart, deployment, hardware command or live integration.
