@@ -98,6 +98,14 @@ class ApiModel(BaseModel):
     model_config = ConfigDict(allow_inf_nan=False)
 
 
+class WeatherArchiveResponse(ApiModel):
+    collection: dict[str, Any]
+    as_of: datetime
+    cycles: list[dict[str, Any]]
+    selected: dict[str, Any] | None = None
+    attribution: str = "Weather data provided by OpenWeather, ODbL"
+
+
 class ArbitrageResponse(ApiModel):
     status: str
     execution: str
@@ -512,6 +520,58 @@ class DashboardService:
         with self._repository() as repository:
             body = board(repository, now=datetime.now(UTC))
         return ArbitrageResponse(**body)
+
+    def weather_archive(
+        self,
+        *,
+        cycle_id: str | None = None,
+        as_of: datetime | None = None,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> ApiModel:
+        from uuid import UUID
+
+        from energy_optimizer.weather.repository import WeatherRepository
+
+        current = datetime.now(UTC)
+        cutoff = as_of or current
+        if cutoff.tzinfo is None or cutoff.utcoffset() is None or cutoff > current:
+            raise DashboardQueryError(
+                "invalid_weather_time", "Weather as-of must be an aware past timestamp."
+            )
+        if cycle_id is not None:
+            try:
+                UUID(cycle_id)
+            except ValueError:
+                raise DashboardQueryError(
+                    "invalid_cycle", "Invalid weather cycle identity."
+                ) from None
+        if not 1 <= limit <= 200 or not 0 <= offset <= 1000:
+            raise DashboardQueryError(
+                "weather_query_bound", "Weather query exceeds bounds."
+            )
+        with self._repository() as repository:
+            archive = WeatherRepository(repository)
+            history = archive.history(as_of=cutoff, limit=100)
+            selected = cycle_id or (history[0]["id"] if history else None)
+            cycle = (
+                archive.cycle(
+                    cycle_id=selected, as_of=cutoff, limit=limit, offset=offset
+                )
+                if selected
+                else None
+            )
+        _, health = self.health.response()
+        return WeatherArchiveResponse(
+            collection=(
+                {"status": "historical_query"}
+                if as_of is not None
+                else health.get("weather_collection", {"status": "disabled"})
+            ),
+            as_of=cutoff,
+            cycles=history,
+            selected=cycle,
+        )
 
     def status(self) -> StatusResponse:
         _, health = self.health.response()

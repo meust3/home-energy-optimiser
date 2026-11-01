@@ -54,6 +54,16 @@ class HomeAssistantAppOptions(BaseModel):
     arbitrage_research_profile_json: str = ""
     context_collection_enabled: bool = False
     context_mapping_json: str = ""
+    weather_collection_enabled: bool = False
+    weather_provider_cap_confirmed: bool = False
+    weather_provider_daily_cap: Literal[1000] = 1000
+    weather_openweather_api_key: SecretStr = Field(default=SecretStr(""), repr=False)
+    weather_latitude: float | None = Field(
+        default=None, ge=-90, le=90, allow_inf_nan=False, repr=False
+    )
+    weather_longitude: float | None = Field(
+        default=None, ge=-180, le=180, allow_inf_nan=False, repr=False
+    )
     ev_vehicle_enabled: bool = False
     ev_charging_entity: str = ""
     ev_plugged_entity: str = ""
@@ -342,6 +352,9 @@ class AppHealth:
     context_collection: dict[str, Any] = field(
         default_factory=lambda: {"status": "disabled"}
     )
+    weather_collection: dict[str, Any] = field(
+        default_factory=lambda: {"status": "disabled"}
+    )
     dashboard: str = "healthy"
     forecast_scheduler: str = "disabled"
     reserve_scheduler: str = "disabled"
@@ -402,6 +415,26 @@ class AppHealth:
             elif previous.get("last_weather_coverage"):
                 current["last_weather_coverage"] = previous["last_weather_coverage"]
             self.context_collection = current
+
+    def record_weather(self, result: dict[str, Any]) -> None:
+        from energy_optimizer.timestamps import json_safe
+
+        with self._lock:
+            self.weather_collection = json_safe(result)
+
+    def weather_collection_allowed(self, now: datetime) -> bool:
+        """Defer near collector boundaries or when the collector has not succeeded."""
+        with self._lock:
+            latest = self.last_successful_collection_utc
+            phase = now.timestamp() % 300
+            return (
+                latest is not None
+                and self.collector == "healthy"
+                and self.database == "healthy"
+                and self.home_assistant == "healthy"
+                and 0 <= (now - latest).total_seconds() < 240
+                and 20 <= phase < 210
+            )
 
     def record_failure(self, component: str) -> None:
         with self._lock:
@@ -517,6 +550,7 @@ class AppHealth:
                 "home_assistant": self.home_assistant,
                 "collector": collector,
                 "context_collection": self.context_collection,
+                "weather_collection": self.weather_collection,
                 "dashboard": self.dashboard,
                 "forecast_scheduler": self.forecast_scheduler,
                 "last_forecast_success_utc": _iso(self.last_forecast_success_utc),

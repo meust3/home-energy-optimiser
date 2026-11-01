@@ -72,6 +72,17 @@ def emit_database_info(repository: ApplicationRepository) -> None:
     )
 
 
+def open_bounded_weather_repository(database_url: str) -> ApplicationRepository:
+    """Optional weather uses the canonical backend with short database waits."""
+    return ApplicationRepository(
+        create_database_engine(
+            database_url,
+            connect_timeout_seconds=3,
+            statement_timeout_ms=2000,
+        )
+    )
+
+
 @contextmanager
 def configured_repository(
     database_url: str | None = None,

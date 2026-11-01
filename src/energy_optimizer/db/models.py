@@ -749,3 +749,9 @@ class ArbitrageCommitWitness(Base):
         String(64), ForeignKey("arbitrage_input_captures.id"), primary_key=True
     )
     confirmed_at_utc: Mapped[datetime] = mapped_column(AwareDateTime(), nullable=False)
+
+
+# Canonical optional weather tables share deployed Base metadata and migrations.
+from energy_optimizer.weather.schema import register_weather_tables  # noqa: E402
+
+WEATHER_TABLES = register_weather_tables(Base.metadata)

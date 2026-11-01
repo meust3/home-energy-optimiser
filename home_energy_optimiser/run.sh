@@ -13,6 +13,8 @@ fi
 
 umask 077
 install -d -o app -g app -m 0700 "${runtime_dir}"
+# Private persistent delivery buffer; acquisition remains disabled by default.
+install -d -o app -g app -m 0700 /data/weather-spool
 rm -f -- "${runtime_options}"
 
 if [[ ! -e "${source_options}" ]]; then

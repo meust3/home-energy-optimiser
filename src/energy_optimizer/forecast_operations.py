@@ -101,6 +101,7 @@ class ForecastCoordinator:
         shadow_config: ShadowDecisionConfig | None = None,
         clock: Callable[[], datetime] = lambda: datetime.now(UTC),
         monotonic: Callable[[], float] = time.monotonic,
+        weather: Any | None = None,
     ) -> None:
         self.repository_factory = repository_factory
         self.collector_config = collector_config
@@ -109,11 +110,15 @@ class ForecastCoordinator:
         self.shadow_config = shadow_config or ShadowDecisionConfig()
         self.clock = clock
         self.monotonic = monotonic
+        self.weather = weather
         self._active = threading.Lock()
         self._stop_requested: Callable[[], bool] = lambda: False
 
     def run(self, stop_event: threading.Event) -> None:
         self._stop_requested = stop_event.is_set
+        if self.weather is not None and self.weather.enabled:
+            self._run_with_weather(stop_event)
+            return
         if not self.config.enabled:
             self.health.configure_forecast_scheduler(enabled=False, next_run=None)
             if hasattr(self.health, "configure_shadow_decisioning"):
@@ -121,6 +126,21 @@ class ForecastCoordinator:
             return
         if hasattr(self.health, "configure_shadow_decisioning"):
             self.health.configure_shadow_decisioning(enabled=self.shadow_config.enabled)
+        self._recover_forecast_operations()
+        while not stop_event.is_set():
+            boundary = next_aligned_boundary(
+                self.clock(),
+                timezone_name=self.config.timezone,
+                alignment_minutes=self.config.interval_minutes,
+            )
+            self.health.configure_forecast_scheduler(enabled=True, next_run=boundary)
+            wake_at = boundary + timedelta(seconds=self.config.collector_grace_seconds)
+            delay = max((wake_at - self.clock().astimezone(UTC)).total_seconds(), 0)
+            if stop_event.wait(delay):
+                break
+            self._run_guarded_boundary(boundary)
+
+    def _recover_forecast_operations(self) -> None:
         recovered_at = self.clock().astimezone(UTC)
         try:
             repository = self.repository_factory()
@@ -137,24 +157,92 @@ class ForecastCoordinator:
                 reserve=self.config.reserve_snapshot_enabled
             )
             LOGGER.error("Forecast recovery audit failed; next boundary will retry")
-        while not stop_event.is_set():
-            boundary = next_aligned_boundary(
-                self.clock(),
+
+    def _run_guarded_boundary(self, boundary: datetime) -> None:
+        try:
+            self.run_boundary(boundary)
+        except Exception:
+            self.health.record_forecast_failure(
+                reserve=self.config.reserve_snapshot_enabled
+            )
+            LOGGER.error("Forecast boundary failed; details withheld")
+
+    def _run_with_weather(self, stop_event: threading.Event) -> None:
+        """Same worker, independent due times; core forecast work always goes first."""
+        if hasattr(self.health, "configure_shadow_decisioning"):
+            self.health.configure_shadow_decisioning(
+                enabled=self.config.enabled and self.shadow_config.enabled
+            )
+        if self.config.enabled:
+            self._recover_forecast_operations()
+        grace = timedelta(seconds=self.config.collector_grace_seconds)
+        now = self.clock().astimezone(UTC)
+        forecast_due = (
+            next_aligned_boundary(
+                now,
                 timezone_name=self.config.timezone,
                 alignment_minutes=self.config.interval_minutes,
             )
-            self.health.configure_forecast_scheduler(enabled=True, next_run=boundary)
-            wake_at = boundary + timedelta(seconds=self.config.collector_grace_seconds)
-            delay = max((wake_at - self.clock().astimezone(UTC)).total_seconds(), 0)
-            if stop_event.wait(delay):
-                break
-            try:
-                self.run_boundary(boundary)
-            except Exception:
-                self.health.record_forecast_failure(
-                    reserve=self.config.reserve_snapshot_enabled
+            + grace
+            if self.config.enabled
+            else None
+        )
+        # Inspect durable work promptly after restart. claim_page enforces slots;
+        # collector readiness/phase guards still prevent an early provider call.
+        weather_due = now
+        self.health.configure_forecast_scheduler(
+            enabled=self.config.enabled,
+            next_run=forecast_due - grace if forecast_due else None,
+        )
+        while not stop_event.is_set():
+            wake = min(d for d in (forecast_due, weather_due) if d is not None)
+            if stop_event.wait(
+                max(0, (wake - self.clock().astimezone(UTC)).total_seconds())
+            ):
+                return
+            now = self.clock().astimezone(UTC)
+            if forecast_due is not None and now >= forecast_due:
+                self._run_guarded_boundary(forecast_due - grace)
+                now = self.clock().astimezone(UTC)
+                forecast_due = (
+                    next_aligned_boundary(
+                        now,
+                        timezone_name=self.config.timezone,
+                        alignment_minutes=self.config.interval_minutes,
+                    )
+                    + grace
                 )
-                LOGGER.error("Forecast boundary failed before a claim was recorded")
+                self.health.configure_forecast_scheduler(
+                    enabled=True, next_run=forecast_due - grace
+                )
+            if stop_event.is_set():
+                return
+            if now >= weather_due:
+                weather_result = {}
+                try:
+                    weather_result = (
+                        self.weather.step(
+                            now,
+                            collector_idle=self.health.weather_collection_allowed(now),
+                        )
+                        or {}
+                    )
+                except Exception:
+                    LOGGER.error("Optional weather step failed; details withheld")
+                    self.health.record_weather({"status": "unavailable"})
+                now = self.clock().astimezone(UTC)
+                weather_due = (
+                    now + timedelta(seconds=5)
+                    if weather_result.get("status") == "deferred_to_collector"
+                    else (
+                        now + timedelta(seconds=1)
+                        if self.weather.active
+                        else next_aligned_boundary(
+                            now, timezone_name="UTC", alignment_minutes=10
+                        )
+                        + grace
+                    )
+                )
 
     def run_boundary(self, scheduled_for: datetime) -> bool:
         """Claim and execute one boundary; return false for duplicate/overlap."""

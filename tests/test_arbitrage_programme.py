@@ -43,7 +43,11 @@ from energy_optimizer.arbitrage.selector import POLICY_SHA
 from energy_optimizer.arbitrage.selector import select as research_select
 from energy_optimizer.arbitrage.synthetic_cases import authored_case
 from energy_optimizer.db.engine import create_database_engine
-from energy_optimizer.db.migrations import alembic_config, current_revision
+from energy_optimizer.db.migrations import (
+    alembic_config,
+    current_revision,
+    expected_revision,
+)
 from energy_optimizer.persistence import open_repository
 
 T = datetime(2030, 1, 1, tzinfo=UTC)
@@ -109,7 +113,7 @@ def test_capture_post_commit_witness_immutability_and_rollback(capture_db):
     with pytest.raises(ValueError, match="immutable_capture_conflict"):
         store.save(origin="one", kind="source", at=T, body={"value": 2})
     assert store.latest("source")["body"] == {"value": 1}
-    assert current_revision(repo.engine) == "20261024_01"
+    assert current_revision(repo.engine) == expected_revision()
 
 
 def test_capture_crash_between_transactions_not_ready(capture_db):

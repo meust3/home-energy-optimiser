@@ -1,5 +1,17 @@
 # Home Energy Optimiser
 
+## Optional archived weather (disabled pending review)
+
+The app includes optional ten-minute One Call 4.0 collection with bounded 48-hour
+pagination and immutable forecast history. `weather_collection_enabled` and
+`weather_provider_cap_confirmed` both default false. The account cap must remain
+1,000/day; a shared durable local 900-attempt rolling budget protects collection.
+Keys and location are entered only in private Supervisor options after review.
+The Weather archive dashboard is GET-only. Weather never controls devices or
+replaces Solcast. See `docs/integrations/weather-collection.md` in the repository
+for migration, recovery, privacy and activation requirements. This change does not
+deploy, migrate production or enable collection.
+
 ## Current release: v0.8.6
 
 Reconciles data-quality reporting, elapsed forecast actuals, collection diagnostics
