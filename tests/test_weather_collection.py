@@ -15,8 +15,9 @@ from types import SimpleNamespace
 import pytest
 import requests
 from alembic import command
-from sqlalchemy import func, insert, inspect, select, text
+from sqlalchemy import Engine, event, func, insert, inspect, select, text
 from sqlalchemy.engine import make_url
+from sqlalchemy.exc import DBAPIError
 
 from energy_optimizer.dashboard_api import DashboardService
 from energy_optimizer.dashboard_web import IngressAccessPolicy, make_handler
@@ -672,13 +673,39 @@ def test_postgresql_migration_roundtrip_uses_only_owned_loopback_database():
     schema = "weather_migration_" + uuid.uuid4().hex
     with admin.engine.begin() as conn:
         conn.execute(text(f'CREATE SCHEMA "{schema}"'))
-    url = parsed.set(query={"options": f"-csearch_path={schema}"}).render_as_string(
-        hide_password=False
-    )
+    url = parsed.set(
+        query={"options": f"-csearch_path={schema} -clock_timeout=250ms"}
+    ).render_as_string(hide_password=False)
     cfg = alembic_config(url)
     try:
         command.upgrade(cfg, "20261024_01")
         command.upgrade(cfg, "head")
+        repository = open_repository(url)
+        statements = []
+
+        def capture(connection, cursor, statement, parameters, context, many):
+            if any(
+                t.name.upper() in statement.upper() for t in WEATHER_TABLES.values()
+            ):
+                statements.append(statement.strip().upper())
+
+        event.listen(Engine, "before_cursor_execute", capture)
+        try:
+            with repository.engine.begin() as writer:
+                writer.exec_driver_sql(
+                    "LOCK TABLE weather_collection_cycles IN ROW EXCLUSIVE MODE"
+                )
+                with pytest.raises(DBAPIError) as error:
+                    command.downgrade(cfg, "20261024_01")
+                assert error.value.orig.sqlstate == "55P03"
+            assert any("ACCESS EXCLUSIVE MODE NOWAIT" in q for q in statements)
+            assert not any(q.startswith(("SELECT", "DROP TABLE")) for q in statements)
+            assert set(t.name for t in WEATHER_TABLES.values()) <= set(
+                inspect(repository.engine).get_table_names()
+            )
+        finally:
+            event.remove(Engine, "before_cursor_execute", capture)
+            repository.close()
         command.downgrade(cfg, "20261024_01")
         command.upgrade(cfg, "head")
         repository = open_repository(url)

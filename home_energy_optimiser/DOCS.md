@@ -12,18 +12,21 @@ replaces Solcast. See `docs/integrations/weather-collection.md` in the repositor
 for migration, recovery, privacy and activation requirements. This change does not
 deploy, migrate production or enable collection.
 
-## Current release: v0.8.6
+## Prepared candidate: v0.8.7 (not published)
 
-Reconciles data-quality reporting, elapsed forecast actuals, collection diagnostics
-and optional offline review tooling. The verified running v0.8.5 baseline already
-uses PostgreSQL revision `20261024_01`; **no database migration is required** for
-this update. Startup never migrates. Rollback restores v0.8.5 and the original
-protected options on the same schema; do not downgrade the inventory migration.
+Weather collection and provider-cap confirmation stay disabled. The update needs
+an explicit `20261024_01` → `20261101_01` migration and a fresh restore-tested
+external PostgreSQL backup, separately from the Home Assistant App backup.
+Rollback to v0.8.6 requires an empty-weather physical downgrade; a nonempty
+archive must be preserved. No release, production migration or update is
+authorized by this preparation. See [the controlled update runbook](../docs/Testing/v087_update_preparation.md).
 
-Take a fresh restore-tested backup before cutover. Preserve protected options.
-The standard build omits the AI SDK. Live AI/Jev/SEMS, hardware execution,
-operational non-HOLD recommendations and retention remain disabled.
-See the [v0.8.6 deployment runbook](../docs/Testing/v086_deployment_20261031.md).
+## Historical v0.8.6 acceptance
+
+The recorded v0.8.6 update retained schema `20261024_01`; its no-migration statement
+applied only to that older transition. It does not apply to v0.8.7. See the retained
+[v0.8.6 acceptance record](../docs/Testing/v086_production_acceptance_20261031.md).
+The prepared v0.8.7 runbook above owns the next update and rollback requirements.
 
 ## Historical release transitions
 

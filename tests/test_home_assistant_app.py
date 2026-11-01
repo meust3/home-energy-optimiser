@@ -592,11 +592,11 @@ def test_app_patch_versions_are_consistent():
     manifest = Path("home_energy_optimiser/config.yaml").read_text(encoding="utf-8")
     dockerfile = Path("home_energy_optimiser/Dockerfile").read_text(encoding="utf-8")
     project = Path("pyproject.toml").read_text(encoding="utf-8")
-    assert APP_VERSION == "0.8.6"
-    assert 'version: "0.8.6"' in manifest
-    assert "ARG BUILD_VERSION=0.8.6" in dockerfile
-    assert "ARG APP_SOURCE_REF=v0.8.6" in dockerfile
-    assert 'version = "0.8.6"' in project
+    assert APP_VERSION == "0.8.7"
+    assert 'version: "0.8.7"' in manifest
+    assert "ARG BUILD_VERSION=0.8.7" in dockerfile
+    assert "ARG APP_SOURCE_REF=v0.8.7" in dockerfile
+    assert 'version = "0.8.7"' in project
 
 
 def test_app_launcher_execs_existing_collector_without_restart_loop():
@@ -604,6 +604,32 @@ def test_app_launcher_execs_existing_collector_without_restart_loop():
     assert "exec gosu app:app python tools/run_home_assistant_app.py" in launcher
     assert 'export HOME_ENERGY_APP_OPTIONS_PATH="${runtime_options}"' in launcher
     assert "while" not in launcher
+
+
+def test_container_validator_forces_network_none(monkeypatch):
+    from tools import test_home_assistant_app_container as validator
+
+    calls = []
+
+    def fake_run(command, **kwargs):
+        calls.append(command)
+        return SimpleNamespace(returncode=0)
+
+    monkeypatch.setattr(validator.subprocess, "run", fake_run)
+    validator.docker("run", "--rm", "synthetic-image")
+    assert calls == [["docker", "run", "--network", "none", "--rm", "synthetic-image"]]
+
+
+@pytest.mark.parametrize("network", [["--network", "bridge"], ["--network=host"]])
+def test_container_validator_rejects_network_override(monkeypatch, network):
+    from tools import test_home_assistant_app_container as validator
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError("Network override reached Docker")
+
+    monkeypatch.setattr(validator.subprocess, "run", forbidden)
+    with pytest.raises(ValueError, match="network none"):
+        validator.docker("run", *network, "synthetic-image")
 
 
 def test_app_bootstrap_copies_options_without_modifying_supervisor_file():

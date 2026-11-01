@@ -52,6 +52,60 @@ def parse_options() -> None:
     assert options.sign_convention_confidence == "high"
     assert options.sign_convention_supporting_samples == 175
     assert options.balance_tolerance_w == 250
+    assert not options.weather_collection_enabled
+    assert not options.weather_provider_cap_confirmed
+    assert options.weather_provider_daily_cap == 1000
+    assert options.weather_openweather_api_key.get_secret_value() == ""
+    assert options.weather_latitude is None and options.weather_longitude is None
+    spool_path = Path("/data/weather-spool")
+    metadata = spool_path.stat()
+    assert metadata.st_uid == metadata.st_gid == 10001
+    assert stat.S_IMODE(metadata.st_mode) == 0o700
+    from datetime import UTC, datetime, timedelta
+    from uuid import uuid4
+
+    from energy_optimizer.weather.receipt import PayloadReceipt
+    from energy_optimizer.weather.spool import PendingPage, WeatherSpool
+
+    spool = WeatherSpool(spool_path)
+    spool.prepare()
+    now = datetime.now(UTC)
+    page = PendingPage(
+        {
+            "id": str(uuid4()),
+            "requested_at": now,
+            "window_start": now,
+            "window_end": now + timedelta(hours=48),
+        },
+        now,
+        200,
+        PayloadReceipt.from_wire(b'{"synthetic":true}', ""),
+        None,
+        None,
+    )
+    spool.save(page)
+    assert spool.load() == page
+    receipt_mode = stat.S_IMODE(next(spool_path.glob("*.json")).stat().st_mode)
+    assert receipt_mode == 0o600
+    import io
+    import tarfile
+    import tempfile
+
+    archive = io.BytesIO()
+    with tarfile.open(fileobj=archive, mode="w") as backup:
+        backup.add(spool_path, arcname="weather-spool")
+    archive.seek(0)
+    with tempfile.TemporaryDirectory(prefix="weather-spool-restore-") as target:
+        with tarfile.open(fileobj=archive, mode="r") as backup:
+            backup.extractall(target, filter="data")
+        restored = WeatherSpool(Path(target) / "weather-spool")
+        assert restored.load() == page
+        assert (
+            stat.S_IMODE(next(restored.directory.glob("*.json")).stat().st_mode)
+            == 0o600
+        )
+    spool.acknowledge(page)
+    assert spool.load() is None
     assert not options.forecast_operations_enabled
     assert options.forecast_interval_minutes == 30
     assert options.forecast_horizon_hours == 24
@@ -101,6 +155,8 @@ def parse_options() -> None:
                 "forecast_environment": "propagated",
                 "sign_environment": "propagated",
                 "shadow_defaults": "safe",
+                "weather_defaults": "disabled_1000",
+                "weather_spool": "private_persistence_backup_restore_pass",
                 "status": "ok",
                 "token_present": True,
                 "uid": os.getuid(),

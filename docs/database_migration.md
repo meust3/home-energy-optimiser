@@ -1,5 +1,13 @@
 # SQLite to PostgreSQL migration
 
+## Prepared v0.8.7 weather transition (not deployed)
+
+The pending controlled update is `20261024_01` → `20261101_01`, even with weather
+disabled. Use [the v0.8.7 preparation runbook](Testing/v087_update_preparation.md)
+for fresh backup, explicit migration, empty-weather rollback and acceptance gates.
+Startup never migrates. The older release procedures below are historical and do
+not authorize another SQLite-to-PostgreSQL migration or production change.
+
 The v0.6.0 head is `20260905_01`, based on released v0.5.2 revision
 `20260814_01`. After a fresh restore-tested backup and only from reviewed release
 source, the explicit operator command is:

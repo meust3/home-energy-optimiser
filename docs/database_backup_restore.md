@@ -1,5 +1,13 @@
 # Database backup, restore, and rollback
 
+## Prepared v0.8.7 weather transition (not deployed)
+
+Follow [the controlled update runbook](Testing/v087_update_preparation.md) for the
+`20261024_01` → `20261101_01` transition. A fresh external PostgreSQL dump and
+disposable restore are separate from the Home Assistant App/spool backup. Rollback
+requires six empty One Call tables and no pending spool receipt; a nonempty archive
+must be preserved. The historical procedures below do not replace these gates.
+
 Before any v0.6.0 production migration, create a new PostgreSQL backup and prove a
 full restore in a disposable PostgreSQL 17 target. Record revision, row counts and
 constraints before/after the migration and downgrade rehearsal. Stop the sole
