@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<base href="__INGRESS_BASE_PATH__"><title>Weather archive · Energy Optimiser</title>
+<link rel="stylesheet" href="static/app.css"><script defer src="static/weather.js"></script>
+</head><body><header class="app-header"><div><p class="eyebrow">Home Energy Optimiser</p>
+<h1>Weather archive</h1></div><span class="badge badge-safe">Read only</span></header>
+<main><p><a href="./">Energy dashboard</a></p>
+<p class="advisory">Optional weather context. Receipt time is when data became available here;
+provider issue time, model identity and native model resolution remain UNKNOWN.
+Weather does not replace Solcast. No command was issued.</p>
+<article class="panel"><p id="weather-status" role="status">Loading stored history…</p>
+<label>Capture cycle <select id="weather-cycle"></select></label>
+<label>Known as of (optional UTC/offset ISO timestamp) <input id="weather-asof" type="text" placeholder="Leave empty for current archive"></label>
+<button id="weather-refresh" type="button">Read archive</button>
+<p id="weather-coverage"></p><div class="table-scroll"><table><thead><tr>
+<th>Target UTC</th><th>Temperature °C</th><th>Cloud %</th><th>Rain mm/h</th>
+<th>Receipt UTC</th><th>Page</th><th>Original SHA-256</th>
+</tr></thead><tbody id="weather-targets"></tbody></table></div></article>
+<p class="muted">Weather data provided by <a href="https://openweathermap.org/">OpenWeather</a> ·
+<a href="https://opendatacommons.org/licenses/odbl/1-0/">ODbL</a>. Values normalized for display;
+missing values remain missing. Collection settings are not editable here.</p>
+</main></body></html>

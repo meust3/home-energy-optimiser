@@ -15,7 +15,11 @@ from sqlalchemy.orm import Session
 from energy_optimizer.collector import build_observation
 from energy_optimizer.dashboard_api import DashboardQueryError, DashboardService
 from energy_optimizer.db.engine import create_database_engine
-from energy_optimizer.db.migrations import alembic_config, current_revision
+from energy_optimizer.db.migrations import (
+    alembic_config,
+    current_revision,
+    expected_revision,
+)
 from energy_optimizer.db.models import ForecastPoint as DBForecastPoint
 from energy_optimizer.db.models import ForecastPointScore, ReserveRun
 from energy_optimizer.forecast_operations import (
@@ -843,14 +847,14 @@ def test_v060_sqlite_migration_downgrade_reupgrade_preserves_preexisting_data(tm
     engine = open_repository(url)
     forecast_id, _ = _persist_dependencies(engine)
     command.upgrade(config, "head")
-    assert current_revision(engine.engine) == "20261024_01"
+    assert current_revision(engine.engine) == expected_revision()
     assert "shadow_decision_runs" in inspect(engine.engine).get_table_names()
     command.downgrade(config, "20260814_01")
     assert current_revision(engine.engine) == "20260814_01"
     assert "shadow_decision_runs" not in inspect(engine.engine).get_table_names()
     assert engine.forecast_run(forecast_id) is not None
     command.upgrade(config, "head")
-    assert current_revision(engine.engine) == "20261024_01"
+    assert current_revision(engine.engine) == expected_revision()
     assert engine.forecast_run(forecast_id) is not None
     engine.close()
 

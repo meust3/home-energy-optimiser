@@ -26,6 +26,7 @@ from energy_optimizer.home_assistant_app import (
 from energy_optimizer.logging_config import configure_logging
 from energy_optimizer.persistence import open_bounded_forecast_repository
 from energy_optimizer.shadow_decisioning import ShadowDecisionConfig
+from energy_optimizer.weather.app import build_weather_collector
 
 LOGGER = logging.getLogger(__name__)
 
@@ -46,6 +47,11 @@ def main() -> int:
                 exc,
                 database_password,
                 os.getenv("SUPERVISOR_TOKEN"),
+                (
+                    options.weather_openweather_api_key.get_secret_value()
+                    if options is not None
+                    else None
+                ),
             ),
         )
         return 1
@@ -142,6 +148,9 @@ def _run(options) -> int:
             discharge_efficiency=options.shadow_discharge_efficiency,
         ),
         health=health,
+        weather=build_weather_collector(
+            options, database_url=environment["DATABASE_URL"], health=health
+        ),
     )
     forecast_thread = threading.Thread(
         target=coordinator.run,

@@ -9,7 +9,11 @@ from sqlalchemy.orm import Session
 from energy_optimizer.collector import build_observation
 from energy_optimizer.dashboard_api import DashboardService
 from energy_optimizer.db.engine import create_database_engine
-from energy_optimizer.db.migrations import alembic_config, current_revision
+from energy_optimizer.db.migrations import (
+    alembic_config,
+    current_revision,
+    expected_revision,
+)
 from energy_optimizer.db.models import (
     ForecastPointScore,
     ReserveOpportunityEvaluation,
@@ -473,7 +477,7 @@ def test_migration_upgrade_downgrade_reupgrade_preserves_observations(tmp_path):
         column["name"] for column in inspect(engine).get_columns("observations")
     }
     command.upgrade(config, "head")
-    assert current_revision(engine) == "20261024_01"
+    assert current_revision(engine) == expected_revision()
     assert set(inspect(engine).get_table_names()) >= {
         "forecast_point_scores",
         "forecast_operation_attempts",
@@ -492,7 +496,7 @@ def test_migration_upgrade_downgrade_reupgrade_preserves_observations(tmp_path):
     } == legacy_columns
     assert "reserve_runs" not in inspect(engine).get_table_names()
     command.upgrade(config, "head")
-    assert current_revision(engine) == "20261024_01"
+    assert current_revision(engine) == expected_revision()
 
 
 def test_migration_compiles_reversible_postgresql_ddl():

@@ -23,6 +23,7 @@ STATIC_DIRECTORY = Path(__file__).with_name("dashboard_static")
 STATIC_FILES = {
     "app.css": "text/css; charset=utf-8",
     "app.js": "text/javascript; charset=utf-8",
+    "weather.js": "text/javascript; charset=utf-8",
 }
 SHELL_ROUTES = {
     "/",
@@ -130,6 +131,19 @@ def make_handler(
                 if route == "/health":
                     status, payload = health.response()
                     self._json(status, payload, cache="no-store")
+                elif route == "/weather":
+                    template = (static_directory / "weather.html").read_text(
+                        encoding="utf-8"
+                    )
+                    body = template.replace(
+                        "__INGRESS_BASE_PATH__", escape(prefix, quote=True)
+                    ).encode()
+                    self._send(
+                        HTTPStatus.OK,
+                        body,
+                        "text/html; charset=utf-8",
+                        cache="no-store",
+                    )
                 elif route in SHELL_ROUTES:
                     self._shell(prefix)
                 elif route.startswith("/static/"):
@@ -208,6 +222,18 @@ def make_handler(
                 self._require_params(params, set())
                 self._json(HTTPStatus.OK, local_status(), cache="no-store")
                 return
+            elif route == "/api/v1/weather":
+                self._require_params(params, {"cycle_id", "as_of", "limit", "offset"})
+                response = service.weather_archive(
+                    cycle_id=self._single(params, "cycle_id"),
+                    as_of=self._timestamp(params, "as_of"),
+                    limit=self._integer(
+                        params, "limit", default=100, minimum=1, maximum=200
+                    ),
+                    offset=self._integer(
+                        params, "offset", default=0, minimum=0, maximum=1000
+                    ),
+                )
             elif route == "/api/v1/arbitrage":
                 self._require_params(params, set())
                 response = service.arbitrage()

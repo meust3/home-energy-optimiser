@@ -308,7 +308,7 @@ def test_sqlite_alembic_ddl_timeout_atomic_and_retry(tmp_path, monkeypatch):
     ticks = iter([0, 0, 121])
     monkeypatch.setattr(pending_inventory, "monotonic", lambda: next(ticks))
     with pytest.raises(TimeoutError):
-        command.upgrade(cfg, "head")
+        command.upgrade(cfg, "20261024_01")
     assert current_revision(engine) == "20261008_01"
     assert "forecast_score_pending" not in inspect(engine).get_table_names()
     with engine.connect() as c:
@@ -323,7 +323,7 @@ def test_sqlite_alembic_ddl_timeout_atomic_and_retry(tmp_path, monkeypatch):
         )
         assert c.scalar(select(func.count()).select_from(ForecastPoint)) == 2
     monkeypatch.setattr(pending_inventory, "monotonic", lambda: 0)
-    command.upgrade(cfg, "head")
+    command.upgrade(cfg, "20261024_01")
     assert current_revision(engine) == "20261024_01"
     with engine.connect() as c:
         assert inventory(c) == [1, 2]
@@ -352,7 +352,7 @@ def test_sqlite_alembic_ddl_timeout_atomic_and_retry(tmp_path, monkeypatch):
     assert "forecast_score_pending" not in inspect(engine).get_table_names()
     with engine.connect() as c:
         assert c.scalar(select(func.count()).select_from(ForecastPoint)) == 2
-    command.upgrade(cfg, "head")
+    command.upgrade(cfg, "20261024_01")
     with engine.connect() as c:
         assert inventory(c) == [1, 2]
     engine.dispose()
@@ -389,7 +389,7 @@ def test_postgresql_migration_atomic_backfill_lock_timeout_and_retry(repo, monke
         ticks = iter([0, 0, 121])
         monkeypatch.setattr(pending_inventory, "monotonic", lambda: next(ticks))
         with pytest.raises(TimeoutError):
-            command.upgrade(cfg, "head")
+            command.upgrade(cfg, "20261024_01")
         assert current_revision(engine) == "20261008_01"
         assert "forecast_score_pending" not in inspect(engine).get_table_names()
         with engine.connect() as c:
@@ -407,11 +407,11 @@ def test_postgresql_migration_atomic_backfill_lock_timeout_and_retry(repo, monke
         with engine.begin() as blocker:
             blocker.exec_driver_sql("LOCK TABLE forecast_points IN ROW EXCLUSIVE MODE")
             with pytest.raises(DBAPIError) as error:
-                command.upgrade(cfg, "head")
+                command.upgrade(cfg, "20261024_01")
             assert error.value.orig.sqlstate == "55P03"
         assert current_revision(engine) == "20261008_01"
         assert "forecast_score_pending" not in inspect(engine).get_table_names()
-        command.upgrade(cfg, "head")
+        command.upgrade(cfg, "20261024_01")
         assert current_revision(engine) == "20261024_01"
         with engine.connect() as c:
             assert inventory(c) == [1, 2]
@@ -425,7 +425,7 @@ def test_postgresql_migration_atomic_backfill_lock_timeout_and_retry(repo, monke
             assert inventory(c) == [1, 2]
         command.downgrade(cfg, "20261008_01")
         assert "forecast_score_pending" not in inspect(engine).get_table_names()
-        command.upgrade(cfg, "head")
+        command.upgrade(cfg, "20261024_01")
         with engine.connect() as c:
             assert inventory(c) == [1, 2]
             c.execute(delete(ForecastPoint).where(ForecastPoint.id == 1))
