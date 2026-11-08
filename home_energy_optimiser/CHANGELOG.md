@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.8.7 - weather archive candidate (not published)
+
+- Adds optional ten-minute One Call 4.0 collection, a durable 900-attempt budget
+  beneath the separately confirmed 1,000/day provider cap, and immutable forecast
+  receipts/history. Collection and cap confirmation remain disabled.
+- Requires explicit migration from `20261024_01` to `20261101_01` even while
+  weather is disabled. Startup never migrates. Empty-weather physical rollback
+  preserves legacy history; a nonempty archive intentionally blocks downgrade.
+- Rollback locks all six archive tables before bounded emptiness checks and
+  refuses a busy reader/writer before dropping anything. Existing legacy weather
+  context is outside this rollback boundary.
+- Adds private durable page recovery and GET-only Ingress history; no new worker,
+  hardware command, production activation or weather-driven decisioning.
+- See [the controlled update preparation](../docs/Testing/v087_update_preparation.md)
+  for backup, migration, recovery and acceptance gates before any publication.
+
 ## 0.8.6 - reconciled App update
 
 - Improves elapsed forecast actuals, missing-data explanations, collection incident

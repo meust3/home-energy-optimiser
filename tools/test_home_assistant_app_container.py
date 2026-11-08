@@ -21,6 +21,10 @@ TEST_PASSWORD = "container-test-password"
 
 def docker(*arguments: str, **kwargs) -> subprocess.CompletedProcess[str]:
     """Run Docker with output captured so callers control secret-safe reporting."""
+    if arguments and arguments[0] == "run":
+        if any(a == "--network" or a.startswith("--network=") for a in arguments):
+            raise ValueError("Container probes always use network none")
+        arguments = ("run", "--network", "none", *arguments[1:])
     return subprocess.run(
         ["docker", *arguments],
         check=True,
@@ -183,6 +187,8 @@ def test_options_and_identity(
         "forecast_environment": "propagated",
         "sign_environment": "propagated",
         "shadow_defaults": "safe",
+        "weather_defaults": "disabled_1000",
+        "weather_spool": "private_persistence_backup_restore_pass",
         "status": "ok",
         "token_present": True,
         "uid": 10001,
@@ -197,6 +203,11 @@ def test_options_and_identity(
         "propagated to the application environment"
     )
     print("PASS shadow decisioning defaults disabled and HOLD-only")
+    print("PASS weather disabled; provider cap fixed at 1,000; no key or location")
+    print(
+        "PASS private persistent weather spool mode 0700/0600, "
+        "persistence and backup/restore"
+    )
     print("PASS application process uid=10001 gid=10001")
     print("PASS ephemeral options copy removed")
     print("PASS no secret printed")
