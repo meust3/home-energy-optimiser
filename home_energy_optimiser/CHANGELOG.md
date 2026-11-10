@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.8.8
+
+- Exclude household baseline training rows when configured EV telemetry is stale or unknown and direct AC power is unavailable. Preserve raw household measurements and core collection health.
+- Preserve the exclusion during historical reprocessing and record the baseline policy version. Fresh idle, unconfigured monitoring and existing direct AC handling keep their behaviour.
+- No schema migration or automatic historical repair. Existing weather configuration, budgets, context corrections, schedules and hardware safety settings are unchanged by this release.
+
 ## 0.8.7 - weather archive candidate (not published)
 
 - Adds optional ten-minute One Call 4.0 collection, a durable 900-attempt budget
