@@ -113,7 +113,11 @@ def test_stale_off_is_unknown_and_does_not_make_core_health_unhealthy(
         "ev_telemetry_stale"
     }
     assert observation.data_health.overall.is_healthy
-    assert observation.baseline_training_eligible
+    assert not observation.baseline_training_eligible
+    assert (
+        observation.baseline_exclusion_reason
+        == "configured_ev_status_unknown_without_ac_power"
+    )
 
 
 def test_offline_and_invalid_optional_values_are_nonfatal(healthy_states, config, now):

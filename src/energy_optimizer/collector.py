@@ -109,6 +109,7 @@ def build_observation(
     elif any(
         (
             config.ev_charging_active_entity_id,
+            config.ev_charging_power_entity_id,
             config.ev_energy_required_entity_id,
             config.ev_ready_by_entity_id,
         )
@@ -122,6 +123,11 @@ def build_observation(
         house_consumption,
         ev_charging_active=ev_active,
         ev_power_w=ev_power,
+        ev_telemetry_configured=bool(
+            config.ev_vehicle_enabled
+            or config.ev_charging_active_entity_id
+            or config.ev_charging_power_entity_id
+        ),
         active_without_power_reason=(
             "known_ev_session_without_ac_power"
             if config.ev_vehicle_enabled
