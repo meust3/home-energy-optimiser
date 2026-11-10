@@ -248,6 +248,8 @@ def _derive(
             row.get("house_consumption_w"),
             ev_charging_active=_bool_or_none(row.get("ev_charging_active")),
             ev_power_w=row.get("ev_power_w"),
+            ev_telemetry_configured=row.get("ev_source")
+            in {"byd_vehicle_cloud", "home_assistant_helper", "charger"},
             active_without_power_reason=(
                 "known_ev_session_without_ac_power"
                 if row.get("ev_source") == "byd_vehicle_cloud"
@@ -268,6 +270,7 @@ def _derive(
     )
     metadata = {
         "model_version": DERIVATION_MODEL_VERSION,
+        "baseline_policy_version": "configured-ev-unknown-exclusion-v1",
         "reprocessed_at_utc": timestamp.isoformat(),
         "grid_power_sign": config.grid_power_sign_convention,
         "battery_power_sign": config.battery_power_sign_convention,

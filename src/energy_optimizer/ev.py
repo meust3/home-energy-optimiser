@@ -32,6 +32,7 @@ def calculate_baseline_load(
     inferred_session: bool = False,
     inference_confidence: str = "unconfirmed",
     active_without_power_reason: str = "ev_active_power_unknown",
+    ev_telemetry_configured: bool = False,
 ) -> tuple[float | None, bool, str | None]:
     if house_consumption_w is None:
         return None, False, "house_consumption_missing"
@@ -50,6 +51,12 @@ def calculate_baseline_load(
         )
     if ev_charging_active is True:
         return house_consumption_w, False, active_without_power_reason
+    if ev_telemetry_configured:
+        return (
+            house_consumption_w,
+            False,
+            "configured_ev_status_unknown_without_ac_power",
+        )
     return house_consumption_w, True, None
 
 
