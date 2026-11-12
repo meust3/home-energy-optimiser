@@ -18,7 +18,7 @@ from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from energy_optimizer.db.models import WEATHER_TABLES
 from energy_optimizer.db.repository import DatabaseRepository
 from energy_optimizer.weather.config import WeatherCollectionConfig
-from energy_optimizer.weather.domain import Capture, utc
+from energy_optimizer.weather.domain import PARSER_VERSION, Capture, utc
 from energy_optimizer.weather.receipt import PayloadReceipt
 
 CYCLES = WEATHER_TABLES["cycles"]
@@ -205,7 +205,7 @@ class WeatherRepository:
                 status="RESERVED",
                 model_identity="UNKNOWN",
                 native_resolution="UNKNOWN",
-                parser_version="weather-v1",
+                parser_version=PARSER_VERSION,
             )
             db.execute(insert(ATTEMPTS).values(**attempt))
             return {
@@ -302,6 +302,10 @@ class WeatherRepository:
                         else "RECEIVED" if raw is not None else "UNKNOWN"
                     ),
                     received_at=now if raw is not None else None,
+                    # Pending raw receipts may have been reserved by an older parser.
+                    parser_version=(
+                        capture.parser_version if capture else attempt["parser_version"]
+                    ),
                     http_status=http_status,
                     error_code=error_code,
                     payload_sha256=payload_hash,
