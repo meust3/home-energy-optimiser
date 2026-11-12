@@ -11,6 +11,7 @@ from datetime import UTC, datetime
 from typing import Any, Literal
 
 UNKNOWN = "UNKNOWN"
+PARSER_VERSION = "weather-v2"
 MAX_BYTES = 5_000_000
 
 
@@ -76,7 +77,7 @@ class Capture:
     provider_issue_time: datetime | None = None
     attribution: str = ""
     licence: str = ""
-    parser_version: str = "weather-v1"
+    parser_version: str = PARSER_VERSION
     normalization_issues: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import io
 import json
 import os
@@ -19,6 +20,8 @@ from sqlalchemy import Engine, event, func, insert, inspect, select, text
 from sqlalchemy.engine import make_url
 from sqlalchemy.exc import DBAPIError
 
+import energy_optimizer.weather.collection as collection_module
+import energy_optimizer.weather.repository as repository_module
 from energy_optimizer.dashboard_api import DashboardService
 from energy_optimizer.dashboard_web import IngressAccessPolicy, make_handler
 from energy_optimizer.db.migrations import alembic_config
@@ -48,6 +51,7 @@ from energy_optimizer.weather.deadline import (
     deadline_adapter,
 )
 from energy_optimizer.weather.pagination import page_metadata
+from energy_optimizer.weather.providers import parse_onecall4
 from energy_optimizer.weather.receipt import sanitized_payload
 from energy_optimizer.weather.repository import (
     ATTEMPTS,
@@ -285,6 +289,112 @@ def test_identical_content_reused_but_every_receipt_is_kept(store):
         assert db.scalar(select(func.count()).select_from(ATTEMPTS)) == 8
         assert db.scalar(select(func.count()).select_from(VERSIONS)) == 200
         assert db.scalar(select(func.count()).select_from(TARGETS)) == 400
+
+
+def test_celsius_parser_upgrade_preserves_every_legacy_record(store, monkeypatch):
+    def legacy_parser(*args, **kwargs):
+        capture = parse_onecall4(*args, **kwargs)
+        return replace(
+            capture,
+            parser_version="weather-v1",
+            points=tuple(
+                replace(p, unit="\u00c2\u00b0C") if p.unit == "\u00b0C" else p
+                for p in capture.points
+            ),
+        )
+
+    monkeypatch.setattr(collection_module, "parse_onecall4", legacy_parser)
+    monkeypatch.setattr(repository_module, "PARSER_VERSION", "weather-v1")
+    client = Client(store.factory)
+    service, _ = collector(store, client)
+    first = finish(service, client)
+    with store.repository.transaction() as db:
+        original = {
+            table.name: [dict(r) for r in db.execute(select(table)).mappings()]
+            for table in WEATHER_TABLES.values()
+        }
+    monkeypatch.setattr(collection_module, "parse_onecall4", parse_onecall4)
+    monkeypatch.setattr(repository_module, "PARSER_VERSION", "weather-v2")
+    second = finish(service, client, NOW + timedelta(minutes=10))
+    assert first["status"] == second["status"] == "COMPLETE"
+    with store.repository.transaction() as db:
+        for table in WEATHER_TABLES.values():
+            current = [dict(r) for r in db.execute(select(table)).mappings()]
+            assert all(row in current for row in original[table.name])
+        assert db.scalar(select(func.count()).select_from(PAYLOADS)) == 4
+        assert db.scalar(select(func.count()).select_from(VERSIONS)) == 400
+        assert db.scalar(select(func.count()).select_from(ATTEMPTS)) == 8
+        for attempt, version in db.execute(
+            select(ATTEMPTS.c.parser_version, VERSIONS.c.body).select_from(
+                TARGETS.join(ATTEMPTS).join(VERSIONS)
+            )
+        ):
+            assert version["temperature"]["unit"] == (
+                "\u00c2\u00b0C" if attempt == "weather-v1" else "\u00b0C"
+            )
+    old = store.archive.cycle(
+        cycle_id=first["cycle_id"], as_of=NOW + timedelta(hours=1)
+    )
+    new = store.archive.cycle(
+        cycle_id=second["cycle_id"], as_of=NOW + timedelta(hours=1)
+    )
+    assert old["targets"][0]["body"]["temperature"]["unit"] == "\u00c2\u00b0C"
+    assert new["targets"][0]["body"]["temperature"]["unit"] == "\u00b0C"
+
+
+def test_pending_v1_receipt_uses_actual_v2_parser_without_another_request(
+    store, monkeypatch
+):
+    monkeypatch.setattr(repository_module, "PARSER_VERSION", "weather-v1")
+    claim = store.archive.claim_page(config=CONFIG, now=NOW)
+    store.spool.prepare()
+    client = Client(store.factory)
+    service, _ = collector(store, client)
+    page = service._fetch(claim)
+    store.spool.save(page)
+    monkeypatch.setattr(repository_module, "PARSER_VERSION", "weather-v2")
+    restarted, _ = collector(store, client)
+    assert step(restarted, client, NOW + timedelta(seconds=1))["status"] == "COLLECTING"
+    assert len(client.calls) == 1
+    with store.repository.transaction() as db:
+        attempt = db.execute(select(ATTEMPTS)).mappings().one()
+        assert attempt["parser_version"] == "weather-v2"
+        assert attempt["requested_at"] == claim["requested_at"]
+        for row in db.execute(select(VERSIONS)).mappings():
+            assert row["body"]["temperature"]["unit"] == "\u00b0C"
+            canonical = json.dumps(
+                {
+                    "scope": CONFIG.scope,
+                    "target": row["target_at"].isoformat(),
+                    "values": row["body"],
+                    "parser": attempt["parser_version"],
+                },
+                sort_keys=True,
+                allow_nan=False,
+            )
+            assert hashlib.sha256(canonical.encode()).hexdigest() == row["sha256"]
+        before = dict(attempt)
+    # A duplicate delivery cannot reinterpret a completed attempt again.
+    store.archive.finish_page(
+        claim,
+        now=NOW + timedelta(minutes=1),
+        config=CONFIG,
+        raw=page.receipt.body,
+        http_status=200,
+        capture=replace(
+            parse_onecall4(
+                page.receipt.body,
+                product="onecall4_15min",
+                site_ref="home",
+                requested_at=NOW,
+                received_at=page.finished_at,
+                requested_units="metric",
+            ),
+            parser_version="unexpected-replay-version",
+        ),
+    )
+    with store.repository.transaction() as db:
+        assert dict(db.execute(select(ATTEMPTS)).mappings().one()) == before
 
 
 def test_worker_restart_resumes_only_next_committed_page(store):

@@ -17,7 +17,7 @@ from energy_optimizer.weather.domain import (
 
 # Includes the eight variables in the immutable earlier property pilot.
 METEO_FIELDS = {
-    "temperature_2m": ("temperature", "Â°C", "point", False, False),
+    "temperature_2m": ("temperature", "\u00b0C", "point", False, False),
     "cloud_cover": ("cloud_cover", "%", "point", True, False),
     "cloud_cover_low": ("cloud_cover_low", "%", "point", True, False),
     "cloud_cover_mid": ("cloud_cover_mid", "%", "point", True, False),
@@ -58,11 +58,11 @@ ONECALL_PATHS = {
     "onecall4_1day": ("timeline/1day", "daily_period_bounds_unknown", 86400, 10),
 }
 ONECALL_FIELDS = {
-    "temp": ("temperature", "Â°C", False, False),
-    "feels_like": ("feels_like", "Â°C", False, False),
+    "temp": ("temperature", "\u00b0C", False, False),
+    "feels_like": ("feels_like", "\u00b0C", False, False),
     "pressure": ("pressure", "hPa", False, True),
     "humidity": ("relative_humidity", "%", True, False),
-    "dew_point": ("dew_point", "Â°C", False, False),
+    "dew_point": ("dew_point", "\u00b0C", False, False),
     "uvi": ("uvi", "index", False, True),
     "clouds": ("cloud_cover", "%", True, False),
     "visibility": ("visibility", "m", False, True),
