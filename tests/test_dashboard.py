@@ -661,9 +661,14 @@ def test_forecast_metadata_uses_stable_readable_key_value_layout():
     assert '<div id="forecast-run-meta" class="forecast-meta"></div>' in html
     assert '<div id="forecast-run-meta" class="definition-grid">' not in html
     assert ".forecast-meta .definition-grid" in css
-    assert "overflow-wrap: break-word" in css
-    assert "word-break: normal" in css
-    assert "overflow-wrap: anywhere" not in css
+    # Metadata values use the definition-grid rule; hashes deliberately wrap
+    # anywhere in their separate capture-hash rule on narrow screens.
+    metadata_values = css.split(".definition-grid dd {", 1)[1].split("}", 1)[0]
+    assert "overflow-wrap: break-word" in metadata_values
+    assert "word-break: normal" in metadata_values
+    assert "overflow-wrap: anywhere" not in metadata_values
+    capture_hash = css.split(".capture-hash {", 1)[1].split("}", 1)[0]
+    assert "overflow-wrap: anywhere" in capture_hash
     assert '["Created", localTime(data.created_at_utc)]' in javascript
     assert '["Model", data.model_version]' in javascript
 
