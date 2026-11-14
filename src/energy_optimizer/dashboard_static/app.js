@@ -15,10 +15,15 @@ async function request(key, path, params = {}) {
   state.controllers.get(key)?.abort();
   const controller = new AbortController();
   state.controllers.set(key, controller);
-  const response = await fetch(apiUrl(path, params), { signal: controller.signal, cache: "no-store" });
-  const payload = await response.json();
-  if (!response.ok) throw new Error(payload?.error?.message || "Dashboard data is unavailable.");
-  return payload;
+  try {
+    const response = await fetch(apiUrl(path, params), { signal: controller.signal, cache: "no-store" });
+    const payload = await response.json();
+    controller.signal.throwIfAborted();
+    if (!response.ok) throw new Error(payload?.error?.message || "Dashboard data is unavailable.");
+    return payload;
+  } finally {
+    if (state.controllers.get(key) === controller) state.controllers.delete(key);
+  }
 }
 
 function localTime(value) {
@@ -81,7 +86,7 @@ async function loadStatus() {
       node.textContent = `${label} · ${value}`; node.className = value === "healthy" ? "ok" : "bad";
     });
     const ageNode = $('[data-status="age"]'); ageNode.textContent = `Last update · ${age(data.observation_age_seconds)} ago`; ageNode.className = data.observation_age_seconds != null && data.observation_age_seconds <= 900 ? "ok" : "bad";
-  } catch (error) { setState("#overview-state", error.message, "error-state"); }
+  } catch (error) { if (error.name === "AbortError") return; setState("#overview-state", error.message, "error-state"); }
 }
 
 function kpi(label, value, detail) { return `<article class="kpi"><p class="label">${label}</p><div class="value">${value}</div><p class="detail">${detail}</p></article>`; }
@@ -155,7 +160,7 @@ async function loadLive() {
       ]));
       evCard.insertAdjacentHTML("beforeend", '<p class="ev-help">Vehicle battery power is vehicle-side/raw telemetry and is not treated as charger AC demand.</p>');
     }
-  } catch (error) { setState("#overview-state", error.message, "error-state"); }
+  } catch (error) { if (error.name === "AbortError") return; setState("#overview-state", error.message, "error-state"); }
 }
 
 async function loadReserve() {
@@ -196,7 +201,7 @@ async function loadReserve() {
     ];
     const calibrationWarning = data.calibration_warning ? `<aside class="panel schema-notice" role="note"><strong>Forecast calibration: ${safeText(data.forecast_calibration_status)}</strong><p>${safeText(data.calibration_warning)}</p></aside>` : "";
     content.innerHTML = `${calibrationWarning}<aside class="panel schema-notice" role="note"><strong>${completeAudit ? "Complete advisory audit" : "Legacy stored result coverage"}</strong><p>${completeAudit ? "The complete typed estimator output is persisted separately from immutable forecast values." : "Missing stored values are labelled separately from fields the legacy schema did not store."}</p></aside>${sections.map(([title, help, rows]) => `<article class="panel reserve-card"><h3>${title}</h3><p class="section-help">${help}</p>${definition(rows)}</article>`).join("")}`;
-  } catch (error) { setState("#reserve-state", error.message, "error-state"); }
+  } catch (error) { if (error.name === "AbortError") return; setState("#reserve-state", error.message, "error-state"); }
 }
 
 async function loadShadowOverview() {
@@ -220,7 +225,7 @@ async function loadShadowOverview() {
       ])}<div class="no-command-banner">Shadow only &mdash; no command issued</div>${decision.non_hold_selection_enabled ? "" : '<p class="muted">Candidate analysis is active. Selected recommendation is forced to HOLD.</p>'}`;
     }
     target.append(body);
-  } catch (error) {
+  } catch (error) { if (error.name === "AbortError") return;
     target.querySelector(".loading-block")?.remove();
     target.insertAdjacentHTML("beforeend", `<div class="error-state">${safeText(error.message)}</div>`);
   }
@@ -265,7 +270,7 @@ async function loadForecastActualCard() {
     const nowPercent = end > start ? (now - start) / (end - start) * 100 : null;
     const chart = makeChart("Forecast expected and actual household demand", "kW", [["Forecast expected", "expected"], ["Actual household demand", "actual"], ...(data.uncertainty_status === "stored_bounds" ? [["Forecast lower", "lower"], ["Forecast upper", "upper"]] : [])], points, value => value / 1000, "No comparable forecast and actual intervals are available.", { band: ["lower", "upper"], nowPercent: mode === "live" ? nowPercent : null });
     target.append(chart);
-  } catch (error) {
+  } catch (error) { if (error.name === "AbortError") return;
     target.className = "error-state"; target.textContent = error.message;
   }
 }
@@ -313,7 +318,7 @@ async function loadDecisions() {
     }
     $("#decision-history").innerHTML = history.empty ? '<div class="empty-state">No shadow decision history is available.</div>' : `<div class="table-wrap"><table><thead><tr><th>Boundary</th><th>Selected</th><th>Expected gross value</th><th>Confidence</th><th>Status</th><th>Outcome</th></tr></thead><tbody>${history.decisions.map(item => `<tr><td>${localTime(item.decision_boundary_utc)}</td><td>${safeText(item.selected_action || "None")}</td><td>${money(item.expected_gross_value_aud)}</td><td>${safeText(item.confidence_rating)}</td><td>${safeText(item.status)}</td><td>${item.latest_outcome_scored_at_utc ? `Scored ${localTime(item.latest_outcome_scored_at_utc)}` : "Unscored"}</td></tr>`).join("")}</tbody></table></div>`;
     $("#decision-outcomes").innerHTML = outcomes.empty ? '<div class="empty-state">No decision interval has matured for outcome scoring yet.</div>' : `<div class="table-wrap"><table><thead><tr><th>Scored</th><th>Observed gross value</th><th>Slot coverage</th><th>Price coverage</th><th>Flow coverage</th><th>Decision comparison</th><th>Intervention</th></tr></thead><tbody>${outcomes.outcomes.map(item => `<tr><td>${localTime(item.scored_at_utc)}</td><td>${item.scoring_version === "battery-shadow-outcome-v2" ? money(item.observed_variable_energy_value_aud) : "Legacy estimate (unvalidated)"}</td><td>${percent(item.actual_coverage_percent)}</td><td>${percent(item.actual_price_coverage_percent)}</td><td>${percent(item.actual_energy_coverage_percent)}</td><td>Unavailable</td><td>${item.operator_intervention_possible ? `Possible (${safeText(item.operator_intervention_confidence)})` : "Not detected"}</td></tr>`).join("")}</tbody></table></div><p class="muted">Observed gross variable-energy value uses five-minute samples and requires complete flow and price evidence. It does not establish value versus HOLD. HOLD comparisons, hindsight, regret and simulated reserve safety are unavailable until a counterfactual model is validated. Legacy outcome estimates are retained for audit only.</p>`;
-  } catch (error) {
+  } catch (error) { if (error.name === "AbortError") return;
     setState("#decisions-state", error.message, "error-state");
   }
 }
@@ -454,7 +459,7 @@ async function loadHistory() {
       const emptyMessage = normalizedFlowChart && data.normalized_flow_unavailable_due_to_unconfigured_signs ? unconfiguredPowerSignsMessage : def[4];
       root.append(makeChart(def[0], def[1], def[2], data.points, def[3], emptyMessage));
     }); root.append(makeEVTimeline(data.points));
-  } catch (error) { setState("#history-state", error.message, "error-state"); $("#history-charts").innerHTML = `<div class="panel error-state">${safeText(error.message)}</div>`; }
+  } catch (error) { if (error.name === "AbortError") return; setState("#history-state", error.message, "error-state"); $("#history-charts").innerHTML = `<div class="panel error-state">${safeText(error.message)}</div>`; }
 }
 
 async function loadForecastRuns() {
@@ -466,7 +471,7 @@ async function loadForecastRuns() {
     select.innerHTML = data.runs.map(run => `<option value="${run.forecast_run_id}">${safeText(run.forecast_type)} · ${localTime(run.created_at_utc)}</option>`).join("");
     if (data.runs.some(run => String(run.forecast_run_id) === selectedRun)) select.value = selectedRun;
     select.dataset.runs = JSON.stringify(data.runs); await loadForecastComparison();
-  } catch (error) { setState("#forecast-state", error.message, "error-state"); }
+  } catch (error) { if (error.name === "AbortError") return; setState("#forecast-state", error.message, "error-state"); }
 }
 
 async function loadForecastComparison() {
@@ -482,7 +487,7 @@ async function loadForecastComparison() {
     const panel = makeChart("Expected versus actual", data.unit || "Stored unit", [["Expected", "expected"], ["Comparable actual", "actual"], ["Lower bound", "lower"], ["Upper bound", "upper"]], points, value => value, undefined, { start: data.horizon_start_utc, end: data.horizon_end_utc });
     if (data.forecast_type === "baseline_household_load") panel.insertAdjacentHTML("beforeend", '<p class="muted">Baseline household demand excludes known EV charging without measured charger AC power and unhealthy or ineligible observations. Those actuals remain gaps; no EV power is inferred or subtracted. Forecast values cover the full selected horizon.</p>');
     const target = $("#forecast-comparison"); target.replaceWith(panel); panel.id = "forecast-comparison";
-  } catch (error) { if (error.name !== "AbortError" && $("#forecast-run").value === id) setState("#forecast-state", error.message, "error-state"); }
+  } catch (error) { if (error.name === "AbortError") return; if (error.name !== "AbortError" && $("#forecast-run").value === id) setState("#forecast-state", error.message, "error-state"); }
 }
 
 function metricCard(label, metric) {
@@ -526,15 +531,20 @@ async function loadForecastOperations() {
     }
     setState("#operations-state", "Completed points are scored after the configured delay; missing and unhealthy actuals are excluded from errors.");
     $("#accuracy-summary").innerHTML = `<span>MAE ${power(accuracy.metrics.mae)}</span><span>Bias ${power(accuracy.metrics.bias)}</span><span>RMSE ${power(accuracy.metrics.rmse)}</span><span>Coverage ${number(accuracy.metrics.coverage_percent, 1)}%</span>`;
-    const points = accuracy.points.map(point => ({ timestamp_utc: point.period_start_utc, has_observation: point.health_eligible === true, expected: point.expected_value, actual: point.actual_value }));
-    const chart = makeChart("Scheduled expected versus eligible actual", "kW", [["Expected", "expected"], ["Actual", "actual"]], points, value => value / 1000, "Scored points are not yet available for this range.");
+    const points = accuracy.points.map(point => ({ timestamp_utc: point.period_start_utc, series_available: { expected: true, actual: point.health_eligible === true }, actual_missing_reason: point.missing_reason, expected: point.expected_value, actual: point.actual_value }));
+    const chart = selectedRun ? makeChart("Scheduled expected versus eligible actual", "kW", [["Expected", "expected"], ["Actual", "actual"]], points, value => value / 1000, "Scored points are not yet available for this range.") : null;
     const groups = [
       ["Horizon", accuracy.by_horizon], ["Local hour", accuracy.by_local_hour],
       ["Day type", accuracy.by_day_type], ["Model", accuracy.by_model_version],
       ["Forecast type", accuracy.by_forecast_type],
     ].flatMap(([title, values]) => Object.entries(values).map(([label, metric]) => metricCard(`${title}: ${label}`, metric)));
-    const target = $("#accuracy-content"); target.innerHTML = ""; target.append(chart); target.insertAdjacentHTML("beforeend", groups.join(""));
-  } catch (error) { setState("#operations-state", error.message, "error-state"); }
+    const target = $("#accuracy-content"); target.innerHTML = "";
+    const limitReached = accuracy.points.length >= 2500;
+    target.insertAdjacentHTML("beforeend", `<p class="${limitReached ? "schema-notice" : "muted"}">${limitReached ? "The 2,500-point query limit was reached. Metrics describe only the returned earliest points and may not cover the full selected range. Select a single run or a shorter range. " : ""}Returned forecast points: ${accuracy.points.length}. Metrics describe these points, including overlapping versions; coverage measures eligible actuals within this returned set.</p>`);
+    if (chart) target.append(chart);
+    else target.insertAdjacentHTML("beforeend", '<p class="muted">Metrics include overlapping forecast versions. Select one forecast run to view its time series; versions are not joined into a single curve.</p>');
+    target.insertAdjacentHTML("beforeend", groups.join(""));
+  } catch (error) { if (error.name === "AbortError") return; setState("#operations-state", error.message, "error-state"); }
 }
 
 async function loadReserveHistory() {
@@ -543,7 +553,7 @@ async function loadReserveHistory() {
     const data = await request("reserve-history", "reserve-history", { range: "30d" });
     if (!data.available) { target.innerHTML = `<div class="empty-state">${safeText(data.message)}</div>`; return; }
     target.innerHTML = `<div class="table-wrap"><table><thead><tr><th>Evaluation</th><th>Recommended</th><th>Gross</th><th>Battery</th><th>Demand</th><th>Uncertainty</th><th>Tradable</th><th>Confidence</th><th>Ready</th></tr></thead><tbody>${data.runs.map(run => `<tr><td>${localTime(run.evaluation_timestamp_utc)}</td><td>${energy(run.recommended_reserve_kwh)}</td><td>${energy(run.gross_reserve_requirement_kwh)}</td><td>${energy(run.battery_energy_kwh)}</td><td>${energy(run.expected_demand_kwh)}</td><td>${energy(run.uncertainty_buffer_kwh)}</td><td>${energy(run.potentially_tradable_kwh)}</td><td>${safeText(run.confidence)}</td><td>${run.readiness ? "Yes" : "No"}</td></tr>`).join("")}</tbody></table></div><p class="advisory">Advisory only. Every stored run records command_issued = false.</p>`;
-  } catch (error) { target.innerHTML = `<div class="error-state">${safeText(error.message)}</div>`; }
+  } catch (error) { if (error.name === "AbortError") return; target.innerHTML = `<div class="error-state">${safeText(error.message)}</div>`; }
 }
 
 async function loadQuality() {
@@ -560,7 +570,7 @@ async function loadQuality() {
       ["Charger AC power", data.independent_ac_charger_power_available ? "Available" : "No", `${data.known_charging_rows_excluded} known charging rows excluded`],
       ["Power signs", `${data.configured_grid_power_sign} / ${data.configured_battery_power_sign}`, `${data.configured_sign_confidence} confidence; ${data.configured_sign_supporting_samples} samples; ${number(data.configured_balance_tolerance_w, 1)} W tolerance`],
       ["Balance residual", `P95 ${power(data.residual_p95_w)}`, `Median ${power(data.residual_median_w)}; max ${power(data.residual_max_w)}; ${data.rows_above_tolerance} above tolerance`],
-      ["Weather measurements", data.weather_measurements_present ? "Present" : "Unavailable", "Optional weather health does not indicate measurement availability. Temperature adjustment is unavailable."],
+      ["Observation weather context", data.weather_measurements_present ? "Present" : "Unavailable", "This describes collector observations, not the separately collected forecasts in Weather archive. Temperature adjustment is unavailable."],
       ["Forecast storage", `${storage.tables.reduce((sum, item) => sum + item.row_count, 0)} rows`, `${storage.retention_health}; detail ${storage.point_retention_days}d, runs ${storage.run_retention_days}d`],
       ["Training history", `${percent(data.verified_share * 100)} EV-verified`, `${percent(data.unverified_share * 100)} unverified; policy ${data.training_policy}`],
       ["Tier 1 readiness", `${data.exact_slots_currently_qualified} / ${data.exact_slots_total}`, `${number(data.exact_slot_coverage_percent, 2)}% exact weekday/five-minute buckets qualified`],
@@ -570,7 +580,7 @@ async function loadQuality() {
     const incidents = data.incidents || {};
     const incidentDetails = `<article class="panel"><h3>Collection gaps and telemetry incidents</h3><p>${incidents.collection_gap_period_count || 0} collection gaps; ${incidents.telemetry_incident_count || 0} telemetry incidents. ${incidents.incident_details_truncated ? "Showing the latest 20 of each type." : ""}</p><ul>${(incidents.collection_gap_periods || []).map(item => `<li>Absent collection: ${localTime(item.start_utc)} to ${localTime(item.end_utc)}; ${item.slots * 5} min</li>`).join("")}${(incidents.telemetry_incidents || []).map(item => `<li>Stored unhealthy telemetry: ${localTime(item.start_utc)} to ${localTime(item.end_utc)}; ${item.slots * 5} min; ${safeText(item.reasons.join(", "))}; ${safeText(item.entities.join(", "))}; recovery ${localTime(item.recovered_at_utc)}</li>`).join("")}</ul><p>Training exclusions are reported separately above. Missing values are retained.</p></article>`;
     $("#quality-content").innerHTML = `<div class="quality-grid">${cards.map(([label,value,detail]) => `<article class="panel"><p class="eyebrow">${safeText(label)}</p><div class="quality-metric">${safeText(value)}</div><p class="muted">${safeText(detail)}</p></article>`).join("")}${evWarning}</div><h3>Domain health</h3><div class="quality-grid">${domains}</div>${incidentDetails}`;
-  } catch (error) { setState("#quality-state", error.message, "error-state"); }
+  } catch (error) { if (error.name === "AbortError") return; setState("#quality-state", error.message, "error-state"); }
 }
 
 async function loadCalibration() {
@@ -596,7 +606,7 @@ async function loadCalibration() {
     ];
     const horizons = Object.entries(data.metrics_by_horizon).map(([name, value]) => `<article class="panel"><h3>${safeText(name)}</h3>${definition([["Bias", power(value.bias_w)], ["MAE", power(value.mae_w)], ["RMSE", power(value.rmse_w)], ["Coverage", percent(value.coverage)]])}</article>`).join("");
     $("#calibration-content").innerHTML = `${cards.map(([label, value, detail]) => `<article class="panel"><p class="eyebrow">${safeText(label)}</p><div class="quality-metric">${safeText(value)}</div><p class="muted">${safeText(detail)}</p></article>`).join("")}${horizons}`;
-  } catch (error) { setState("#calibration-state", error.message, "error-state"); }
+  } catch (error) { if (error.name === "AbortError") return; setState("#calibration-state", error.message, "error-state"); }
 }
 
 async function loadSolarDiagnostics() {
@@ -605,7 +615,7 @@ async function loadSolarDiagnostics() {
     const data = await request("solar", "solar-forecast-diagnostics", { range: "30d" });
     setState("#solar-state", data.truncated ? "The bounded result was explicitly truncated." : "Daily diagnostics loaded; no automatic derating is applied.");
     $("#solar-content").innerHTML = data.days.map(day => `<article class="panel"><h3>${safeText(day.local_date)}</h3>${definition([["Evidence label", day.classification], ["Comparison", ({complete_day:"Completed day with sufficient coverage",incomplete_day:"Day still in progress",insufficient_coverage_or_forecast:"Insufficient daily coverage or forecast"})[day.comparison_status] || "Unavailable"], ["First stored forecast snapshot", localTime(day.forecast_snapshot_observed_at)], ["Coverage", percent(day.coverage_percent)], [day.day_complete ? "Recorded PV energy" : "Generation so far", energy(day.actual_pv_kwh)], ["Full-day Solcast P10 / P50 / P90", `${energy(day.solcast_p10_kwh)} / ${energy(day.solcast_p50_kwh)} / ${energy(day.solcast_p90_kwh)}`], ["Actual minus P50", energy(day.actual_minus_p50_kwh)], ["Actual minus P50 (% of actual)", percent(day.signed_percentage_error_percent)], ["Inside Solcast range", day.actual_in_solcast_range == null ? "Unavailable" : (day.actual_in_solcast_range ? "Yes" : "No")], ["Minimum battery headroom", percent(day.minimum_battery_headroom_percent)], ["Battery charge / discharge", `${number(day.battery_charge_minutes, 0)} / ${number(day.battery_discharge_minutes, 0)} min`], ["Near-full battery", `${number(day.near_full_battery_minutes, 0)} min`], ["Possible clipping context", `${number(day.possible_inverter_clipping_minutes, 0)} min`], ["Export context", `${number(day.export_minutes, 0)} min`], ["Observed work modes", (day.observed_work_modes || []).join(", ") || "Unavailable"]])}<p class="muted">${safeText(day.interpretation)} The snapshot is the first forecast stored that day; its original issue time is unverified.</p></article>`).join("") || '<article class="panel"><p>No sufficiently bounded daily data is available.</p></article>';
-  } catch (error) { setState("#solar-state", error.message, "error-state"); }
+  } catch (error) { if (error.name === "AbortError") return; setState("#solar-state", error.message, "error-state"); }
 }
 
 async function loadArbitrage() {
@@ -628,9 +638,9 @@ async function loadArbitrage() {
         ["Reserve binding", binding.mode || "Legacy fixed research floor"],
         ["Linked reserve field / hash", binding.source_field ? `${binding.source_field} / ${binding.snapshot_sha256}` : "Not linked"],
         ["Capacity-floor constraint", semantics.full_capacity_floor ? "Floor equals capacity: no permitted model discharge; R/P identity is scenario-specific" : "See resolved floor and modelled margins"]];
-      const values = [...inputValues, ["Reserve floor / branch energy", `${energy(reserve.floor_stored_kwh)} / ${energy(reserve.branch_stored_kwh)}`], ["Conditional capacity", energy(reserve.capacity_stored_kwh)], ["Reserve scope", reserve.scope], ["Minimum R / P / G reserve margins", `${energy(paths.R?.minimum_policy_margin_kwh)} / ${energy(paths.P?.minimum_policy_margin_kwh)} / ${energy(paths.G?.minimum_policy_margin_kwh)}`], ["Terminal R / P / G energy", `${energy(paths.R?.terminal_energy_kwh)} / ${energy(paths.P?.terminal_energy_kwh)} / ${energy(paths.G?.terminal_energy_kwh)}`], ["Charging clipping reasons", (item.action_clipping_reasons?.G || []).join(", ") || (e ? "None in modelled action window" : "Unavailable")], ["Status", item.status], ["Research selection", item.selected], ["Created", localTime(item.created_at)], ["Expires", localTime(item.expires_at)], ["Profile", item.profile_id], ["Model", p.model], ["Forecast / reserve IDs", `${p.forecast_id} / ${p.reserve_id}`], ["Commit witness", localTime(p.commit_witness)], ["Provider issue time", p.provider_issue], ["Physical applicability", p.physical_applicability], ["Total-load basis", item.research_load_basis || item.load_basis], ["Expected R / P / G cost", e ? `${money(e.costs_aud.R)} / ${money(e.costs_aud.P)} / ${money(e.costs_aud.G)}` : "Unavailable"], ["Preservation benefit", money(pairs.preservation?.primary_comparative_gross_value_aud)], ["Additional charging benefit", money(pairs.charging_increment?.primary_comparative_gross_value_aud)], ["Combined benefit before wear", money(pairs.combined?.primary_comparative_gross_value_aud)], ["Requested / delivered charging", `${energy(paths.G?.requested_action_ac_kwh)} / ${energy(paths.G?.delivered_action_ac_kwh)}`], ["Observed accounting", item.observed_accounting == null ? "Unavailable here; actual operation remains separate" : money(item.observed_accounting)], ["Later simulated comparison", item.simulated_comparative_value == null ? "Awaiting admitted outcome" : money(item.simulated_comparative_value)], ["Export", "Experimental offline model only; physical export locked"], ["Wear / uncertainty", "Not included in frozen gross value; use declared sensitivity scenarios"]];
-      const sourceRows = Object.entries(item.sources || {}).filter(([key]) => key.endsWith("forecast")).map(([key, source]) => `<article class="panel"><h3>${safeText(key.replaceAll("_", " "))}</h3><p class="muted">HA cached per_kwh (${safeText(source?.attributes?.unit_of_measurement)}) · first 288 intervals; source report age ${age(item.source_ages_seconds?.[key])}; provider issue unknown.</p><details><summary>Captured interval table (bounded to 288 rows)</summary><div class="table-scroll"><table><thead><tr><th>Interval start</th><th>Interval end</th><th>Price (reported domain)</th></tr></thead><tbody>${(source?.forecasts || []).slice(0, 288).map(row => `<tr><td>${safeText(localTime(row.start_time))}</td><td>${safeText(localTime(row.end_time))}</td><td>${safeText(price(row.per_kwh))}</td></tr>`).join("")}</tbody></table></div></details></article>`).join("");
-      return `<article class="panel overview-wide"><h3>Current opportunity evidence</h3>${definition(values)}<ul class="issue-list">${(item.reasons || []).map(r => `<li>${safeText(r)}</li>`).join("") || "<li>No research admission errors; execution prerequisites still unverified</li>"}</ul><p class="muted">Capture hash: ${safeText(p.capture_hash)}. Missing values remain unavailable; overlapping comparisons must not be aggregated as household benefit.</p></article>${sourceRows}`;
+      const values = [...inputValues, ["Reserve floor / branch energy", `${energy(reserve.floor_stored_kwh)} / ${energy(reserve.branch_stored_kwh)}`], ["Conditional capacity", energy(reserve.capacity_stored_kwh)], ["Reserve scope", reserve.scope], ["Minimum R / P / G reserve margins", `${energy(paths.R?.minimum_policy_margin_kwh)} / ${energy(paths.P?.minimum_policy_margin_kwh)} / ${energy(paths.G?.minimum_policy_margin_kwh)}`], ["Terminal R / P / G energy", `${energy(paths.R?.terminal_energy_kwh)} / ${energy(paths.P?.terminal_energy_kwh)} / ${energy(paths.G?.terminal_energy_kwh)}`], ["Charging clipping reasons", (item.action_clipping_reasons?.G || []).join(", ") || (e ? "None in modelled action window" : "Unavailable")], ["Status", item.status], ["Research selection", item.selected], ["Created", localTime(item.created_at)], ["Expires", localTime(item.expires_at)], ["Profile", item.profile_id], ["Model", p.model], ["Forecast / reserve IDs", `${p.forecast_id ?? "Unavailable"} / ${p.reserve_id ?? "Unavailable"}`], ["Commit witness", localTime(p.commit_witness)], ["Provider issue time", p.provider_issue], ["Physical applicability", p.physical_applicability], ["Total-load basis", item.research_load_basis || item.load_basis], ["Expected R / P / G cost", e ? `${money(e.costs_aud.R)} / ${money(e.costs_aud.P)} / ${money(e.costs_aud.G)}` : "Unavailable"], ["Preservation benefit", money(pairs.preservation?.primary_comparative_gross_value_aud)], ["Additional charging benefit", money(pairs.charging_increment?.primary_comparative_gross_value_aud)], ["Combined benefit before wear", money(pairs.combined?.primary_comparative_gross_value_aud)], ["Requested / delivered charging", `${energy(paths.G?.requested_action_ac_kwh)} / ${energy(paths.G?.delivered_action_ac_kwh)}`], ["Observed accounting", item.observed_accounting == null ? "Unavailable here; actual operation remains separate" : money(item.observed_accounting)], ["Later simulated comparison", item.simulated_comparative_value == null ? "Awaiting admitted outcome" : money(item.simulated_comparative_value)], ["Export", "Experimental offline model only; physical export locked"], ["Wear / uncertainty", "Not included in frozen gross value; use declared sensitivity scenarios"]];
+      const sourceRows = Object.entries(item.sources || {}).filter(([key]) => key.endsWith("forecast")).map(([key, source]) => `<article class="panel"><h3>${safeText(key.replaceAll("_", " "))}</h3><p class="muted">HA cached per_kwh (${safeText(source?.attributes?.unit_of_measurement)}) · first 288 intervals; source report age ${age(item.source_ages_seconds?.[key])}; provider issue unknown.</p><details><summary>Captured interval table (bounded to 288 rows)</summary><div class="table-wrap" tabindex="0" role="region" aria-label="Captured forecast intervals"><table><thead><tr><th>Interval start</th><th>Interval end</th><th>Price (reported domain)</th></tr></thead><tbody>${(source?.forecasts || []).slice(0, 288).map(row => `<tr><td>${safeText(localTime(row.start_time))}</td><td>${safeText(localTime(row.end_time))}</td><td>${safeText(price(row.per_kwh))}</td></tr>`).join("")}</tbody></table></div></details></article>`).join("");
+      return `<article class="panel overview-wide"><h3>Current opportunity evidence</h3>${definition(values)}<ul class="issue-list">${(item.reasons || []).map(r => `<li>${safeText(r)}</li>`).join("") || "<li>No research admission errors; execution prerequisites still unverified</li>"}</ul><p class="muted">Capture hash: <span class="capture-hash">${safeText(p.capture_hash)}</span>. Missing values remain unavailable; overlapping comparisons must not be aggregated as household benefit.</p></article>${sourceRows}`;
     }).join("") || `<article class="panel"><h3>Awaiting approved capture deployment</h3><p>No arbitrage receipt has been persisted. Existing Forecast vs Actual and shadow accounting remain available.</p></article>`;
     data.items.forEach(item => {
       Object.entries(item.sources || {}).filter(([key]) => key.endsWith("forecast")).forEach(([key, source]) => {
@@ -645,11 +655,11 @@ async function loadArbitrage() {
         if (points.length) $("#arbitrage-content").append(makeChart(`${key.replaceAll("_", " ")} — captured interval quotes`, source?.attributes?.unit_of_measurement || "unknown price domain", [["Cached per_kwh", "quote"]], points));
       });
     });
-  } catch (error) { setState("#arbitrage-state", error.message, "error-state"); }
+  } catch (error) { if (error.name === "AbortError") return; setState("#arbitrage-state", error.message, "error-state"); }
 }
 
 function activateTab() {
-  const name = location.hash.slice(1) || "overview"; const valid = $("#" + CSS.escape(name)) ? name : "overview";
+  const name = location.hash.slice(1) || "overview"; const valid = $$(".page").some(page => page.id === name) ? name : "overview";
   $$(".page").forEach(page => page.hidden = page.id !== valid); $$(".tabs a").forEach(link => link.setAttribute("aria-current", link.dataset.tab === valid ? "page" : "false"));
   if (valid === "arbitrage" && !state.loaded.has("arbitrage")) { state.loaded.add("arbitrage"); loadArbitrage(); }
   if (valid === "history" && !state.loaded.has("history")) { state.loaded.add("history"); loadHistory(); }
@@ -663,19 +673,23 @@ function activateTab() {
 }
 
 function schedule(key, callback, milliseconds) { clearInterval(state.timers.get(key)); state.timers.set(key, setInterval(() => { if (!document.hidden) callback(); }, milliseconds)); }
-document.addEventListener("visibilitychange", () => { if (document.hidden) state.controllers.forEach(controller => controller.abort()); else { loadStatus(); loadLive(); } });
+document.addEventListener("visibilitychange", () => { if (document.hidden) state.controllers.forEach(controller => controller.abort()); else { loadStatus(); loadLive(); refreshAnalytics(); } });
 window.addEventListener("hashchange", activateTab);
 $("#history-range").addEventListener("change", loadHistory);
 $("#forecast-run").addEventListener("change", loadForecastComparison);
 $("#accuracy-range").addEventListener("change", loadForecastOperations);
 $("#accuracy-run").addEventListener("change", loadForecastOperations);
-const storedForecastCardMode = localStorage.getItem("forecast-card-mode");
-if (["live", "latest_complete"].includes(storedForecastCardMode)) $("#forecast-card-mode").value = storedForecastCardMode;
+try {
+  const storedForecastCardMode = localStorage.getItem("forecast-card-mode");
+  if (["live", "latest_complete"].includes(storedForecastCardMode)) $("#forecast-card-mode").value = storedForecastCardMode;
+} catch { /* Storage can be blocked in an embedded dashboard. */ }
 $("#forecast-card-mode").addEventListener("change", () => {
-  localStorage.setItem("forecast-card-mode", $("#forecast-card-mode").value);
+  try { localStorage.setItem("forecast-card-mode", $("#forecast-card-mode").value); }
+  catch { /* Keep the selection usable for this session. */ }
   loadForecastActualCard();
 });
 
 loadStatus(); loadLive(); loadShadowOverview(); loadForecastActualCard(); loadReserve(); loadReserveHistory(); state.loaded.add("reserve"); activateTab();
 schedule("status", loadStatus, 30000); schedule("live", loadLive, 30000);
-schedule("slow", () => { if (!document.hidden) { loadShadowOverview(); loadForecastActualCard(); if (state.loaded.has("history")) loadHistory(); if (state.loaded.has("forecasts")) loadForecastRuns(); if (state.loaded.has("operations")) loadForecastOperations(); if (state.loaded.has("calibration")) loadCalibration(); if (state.loaded.has("solar")) loadSolarDiagnostics(); if (state.loaded.has("reserve")) { loadReserve(); loadReserveHistory(); } if (state.loaded.has("decisions")) loadDecisions(); if (state.loaded.has("quality")) loadQuality(); if (state.loaded.has("arbitrage")) loadArbitrage(); } }, 300000);
+function refreshAnalytics() { if (!document.hidden) { loadShadowOverview(); loadForecastActualCard(); if (state.loaded.has("history")) loadHistory(); if (state.loaded.has("forecasts")) loadForecastRuns(); if (state.loaded.has("operations")) loadForecastOperations(); if (state.loaded.has("calibration")) loadCalibration(); if (state.loaded.has("solar")) loadSolarDiagnostics(); if (state.loaded.has("reserve")) { loadReserve(); loadReserveHistory(); } if (state.loaded.has("decisions")) loadDecisions(); if (state.loaded.has("quality")) loadQuality(); if (state.loaded.has("arbitrage")) loadArbitrage(); } }
+schedule("slow", refreshAnalytics, 300000);

@@ -38,4 +38,11 @@ test('old blocked records retain explicit legacy modes without invented economic
   assert.match(html, /Legacy strict\/raw/);
   assert.match(html, /Legacy fixed research floor/);
   assert.match(html, /Unavailable/);
+  assert.match(html, /"Forecast \/ reserve IDs","Unavailable \/ Unavailable"/);
+});
+
+test('capture hash has a wrapping boundary for narrow evidence cards', async () => {
+  const hash = 'a'.repeat(64);
+  const html = await render({status:'blocked', selected:'HOLD', provenance:{capture_hash:hash}});
+  assert.ok(html.includes(`<span class="capture-hash">${hash}</span>`));
 });
