@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.8.9 - controlled update candidate
+
+- Fix cancelled dashboard requests, visibility recovery, blocked browser storage and skip-link navigation.
+- Bound weather and captured-forecast tables on narrow screens and preserve accessible keyboard scrolling.
+- Clarify forecast-version overlap, the accuracy query limit, recent weather cycle counts and observation weather context.
+- Presentation-only fixes from PR #31. No migration, archive rewriting, collector changes or option changes. Preserve existing weather collection and the 1,000-call cap.
+
 ## 0.8.8
 
 - Exclude household baseline training rows when configured EV telemetry is stale or unknown and direct AC power is unavailable. Preserve raw household measurements and core collection health.
