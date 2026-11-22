@@ -26,7 +26,7 @@ from energy_optimizer.models import (
 from energy_optimizer.persistence import ApplicationRepository, open_repository
 
 SUPERVISOR_CORE_API_URL = "http://supervisor/core/api"
-APP_VERSION = "0.8.10"
+APP_VERSION = "0.8.11"
 HEALTH_PORT = 8099
 OPTIONS_PATH_ENV = "HOME_ENERGY_APP_OPTIONS_PATH"
 SUPERVISOR_OPTIONS_PATH = Path("/data/options.json")
@@ -52,6 +52,35 @@ class HomeAssistantAppOptions(BaseModel):
     ev_chart_charger_prefix: str = Field(
         default="", pattern=r"^(?:sensor\.ev_charger_[a-z0-9_]+)?$"
     )
+    ev_validation_start: str = ""
+    ev_validation_reference: str = Field(
+        default="", pattern=r"^(?:sensor\.[a-z0-9_]+)?$"
+    )
+
+    @model_validator(mode="after")
+    def validate_ev_comparison(self):
+        if self.ev_validation_start or self.ev_validation_reference:
+            from energy_optimizer.timestamps import aware_datetime
+
+            if (
+                not self.ev_chart_charger_prefix
+                or not self.ev_validation_reference
+                or not self.ev_validation_start
+            ):
+                raise ValueError(
+                    "EV validation requires the prefix, reference and cohort start"
+                )
+            aware_datetime(self.ev_validation_start)
+            if self.ev_validation_reference in {
+                entity_ids.GOODWE_HOUSE_CONSUMPTION,
+                self.ev_chart_charger_prefix + "_session_energy",
+                self.ev_chart_charger_prefix + "_charging_power",
+            }:
+                raise ValueError(
+                    "EV validation requires an independent household reference"
+                )
+        return self
+
     goodwe_soc_timestamp_enabled: bool = False
     arbitrage_capture_enabled: bool = False
     arbitrage_research_profile_json: str = ""

@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.8.11
+
+- Validate each provider-completed EV charge on the appliance. The EV validation report compares the first ten sessions using matched household readings.
+
 ## 0.8.10
 
 - Display issued forecasts, total site demand, eligible household actuals and the EV contribution with its source. Show the recorded battery advisory and its applicable window.
