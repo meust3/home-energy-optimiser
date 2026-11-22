@@ -113,6 +113,10 @@ select { display: block; width: 100%; min-width: 0; margin-top: .3rem; min-heigh
 .series-1 { color: var(--solar); }
 .series-2 { color: var(--grid); }
 .series-3 { color: var(--warning); }
+.series-4 { color: var(--battery); }
+.series-5 { color: var(--muted); }
+.chart .series-4 { stroke: var(--battery); stroke-dasharray: 5 4; }
+.chart .series-5 { stroke: var(--muted); stroke-dasharray: 5 4; }
 .chart .series-0 { stroke: var(--accent); }
 .chart .series-1 { stroke: var(--solar); }
 .chart .series-2 { stroke: var(--grid); }

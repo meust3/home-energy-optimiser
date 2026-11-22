@@ -283,7 +283,23 @@ class ForecastRunsResponse(ApiModel):
     empty: bool
 
 
-class ForecastComparisonPoint(ApiModel):
+class EVChartPoint(ApiModel):
+    site_actual_w: float | None = None
+    ev_adjustment_w: float | None = None
+    ev_source: str | None = None
+    ev_context: str | None = None
+
+
+class ChartAdvisory(ApiModel):
+    created_at_utc: datetime
+    selected_action: str | None
+    status: str
+    selected_start_utc: datetime | None
+    selected_end_utc: datetime | None
+    no_command_issued: bool
+
+
+class ForecastComparisonPoint(EVChartPoint):
     raw_actual_value: float | None = None
     actual_missing_reason: str | None = None
     period_start_utc: datetime
@@ -297,6 +313,7 @@ class ForecastComparisonPoint(ApiModel):
 
 
 class ForecastComparisonResponse(ApiModel):
+    advisory_actions: list[ChartAdvisory] = Field(default_factory=list)
     available: bool
     message: str | None = None
     forecast_run_id: int | None = None
@@ -441,7 +458,7 @@ class SolarDiagnosticsResponse(ApiModel):
     days: list[dict[str, Any]] = Field(default_factory=list)
 
 
-class ForecastComparisonCardPoint(ApiModel):
+class ForecastComparisonCardPoint(EVChartPoint):
     period_start_utc: datetime
     period_end_utc: datetime
     forecast_w: float
@@ -456,6 +473,7 @@ class ForecastComparisonCardPoint(ApiModel):
 
 
 class ForecastComparisonCardResponse(ApiModel):
+    advisory_actions: list[ChartAdvisory] = Field(default_factory=list)
     mode: Literal["live", "latest_complete"]
     run_id: int | None = None
     created_at_utc: datetime | None = None
@@ -1060,6 +1078,10 @@ class DashboardService:
                     lower_value=_number(row.get("lower_value")),
                     upper_value=_number(row.get("upper_value")),
                     actual_value=actual,
+                    site_actual_w=row.get("site_actual_w"),
+                    ev_adjustment_w=row.get("ev_adjustment_w"),
+                    ev_source=row.get("ev_source"),
+                    ev_context=row.get("ev_context"),
                     raw_actual_value=_number(row.get("raw_actual_value")),
                     actual_missing_reason=row.get("actual_missing_reason"),
                     error_value=error,
@@ -1076,6 +1098,7 @@ class DashboardService:
             horizon_start_utc=_utc(run["horizon_start_utc"]),
             horizon_end_utc=_utc(run["horizon_end_utc"]),
             unit=run["points"][0]["unit"],
+            advisory_actions=run.get("advisory_actions", []),
             sample_count=len(errors),
             missing_actual_count=len(points) - len(errors),
             excluded_actual_count=sum(
@@ -1173,6 +1196,10 @@ class DashboardService:
                     lower_w=_number(row.get("lower_value")),
                     upper_w=_number(row.get("upper_value")),
                     actual_w=actual,
+                    site_actual_w=None if future else row.get("site_actual_w"),
+                    ev_adjustment_w=None if future else row.get("ev_adjustment_w"),
+                    ev_source=None if future else row.get("ev_source"),
+                    ev_context=None if future else row.get("ev_context"),
                     actual_eligible=eligible,
                     actual_missing_reason=reason,
                     future=future,
@@ -1191,6 +1218,7 @@ class DashboardService:
         return ForecastComparisonCardResponse(
             mode=mode,
             run_id=int(run["id"]),
+            advisory_actions=run.get("advisory_actions", []),
             created_at_utc=_utc(run["created_at_utc"]),
             period_start_utc=_utc(run["horizon_start_utc"]),
             period_end_utc=_utc(run["horizon_end_utc"]),

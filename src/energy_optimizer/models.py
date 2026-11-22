@@ -307,6 +307,9 @@ class CollectorConfig(BaseModel):
     usable_battery_capacity_kwh: float = Field(default=40.0, gt=0)
     maximum_plausible_inverter_power_w: float = Field(default=15000.0, gt=0)
     maximum_plausible_pv_power_w: float = Field(default=20000.0, gt=0)
+    ev_chart_charger_prefix: str = Field(
+        default="", pattern=r"^(?:sensor\.ev_charger_[a-z0-9_]+)?$"
+    )
     goodwe_soc_timestamp_enabled: bool = False
     live_power_freshness_minutes: int = Field(default=5, gt=0)
     battery_soc_freshness_minutes: int = Field(default=10, gt=0)

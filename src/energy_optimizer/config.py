@@ -82,6 +82,7 @@ def load_config(env_file: Path | None = Path(".env")) -> CollectorConfig:
         maximum_plausible_pv_power_w=float(
             os.getenv("MAXIMUM_PLAUSIBLE_PV_POWER_W", "20000")
         ),
+        ev_chart_charger_prefix=os.getenv("EV_CHART_CHARGER_PREFIX", "").strip(),
         goodwe_soc_timestamp_enabled=(
             os.getenv("GOODWE_SOC_TIMESTAMP_ENABLED", "false").lower() == "true"
         ),

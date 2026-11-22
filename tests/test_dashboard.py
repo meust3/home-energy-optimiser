@@ -542,8 +542,8 @@ def test_web_shell_static_nested_ingress_api_and_security_headers():
         assert status == 200
         html = body.decode()
         assert f'<base href="{prefix}">' in html
-        assert 'href="static/app.css?v=dashboard-review1"' in html
-        assert 'src="static/app.js?v=dashboard-review1"' in html
+        assert 'href="static/app.css?v=ev-chart-v0810"' in html
+        assert 'src="static/app.js?v=ev-chart-v0810"' in html
         assert "Advisory only. No command was issued." in html
         assert 'id="decisions"' in html
         assert "Shadow only &mdash; no command issued" in html

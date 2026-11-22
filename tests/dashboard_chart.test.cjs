@@ -40,7 +40,7 @@ test('selected run shows all 288 expected points, keeps missing actuals as gaps,
   let nodes=descendants(registry['#forecast-comparison']);
   const lines=nodes.filter(n=>n.tag==='polyline');
   assert.equal(lines.find(n=>n.attributes.class==='series-0').attributes.points.split(' ').length,288);
-  assert.equal(lines.find(n=>n.attributes.class==='series-1').attributes.points.split(' ').length,21);
+  assert.equal(lines.find(n=>n.attributes.class==='series-3').attributes.points.split(' ').length,21);
   const ticks=nodes.filter(n=>n.tag==='text').map(n=>n.textContent);
   assert.match(ticks[0],/13.*06:05/);
   assert.match(ticks.at(-1),/14.*06:05/);
@@ -51,6 +51,22 @@ test('selected run shows all 288 expected points, keeps missing actuals as gaps,
   assert.equal(nodes.filter(n=>n.tag==='polyline').length,1);
   assert.match(nodes.find(n=>n.tag==='text').textContent,/08:35/);
   assert.notEqual(registry['#forecast-comparison'].children.length,0);
+});
+
+test('EV evidence and recorded advisory remain separate from the household actual', async () => {
+  const {context, registry} = setup();
+  registry['#forecast-run'].value = '1';
+  const data = payload('2025-01-06T00:00:00Z', 0);
+  Object.assign(data.points[0], {site_actual_w: 8000, ev_adjustment_w: 5000, ev_source: 'Session counter interval mean'});
+  data.advisory_actions = [{created_at_utc: data.horizon_start_utc, selected_action: 'HOLD', no_command_issued: true}];
+  context.request = async () => data;
+  await context.loadForecastComparison();
+  const nodes = descendants(registry['#forecast-comparison']);
+  assert.match(nodes.find(n => n.tag === 'li').textContent, /HOLD.*No command issued/);
+  const table = nodes.find(n => n.tag === 'details').innerHTML;
+  assert.match(table, />8</);
+  assert.match(table, />5<br>Session counter interval mean/);
+  assert.equal(nodes.some(n => n.tag === 'polyline' && n.attributes.class === 'series-3'), false);
 });
 
 test('late response from previously selected run cannot overwrite new run',async()=>{
