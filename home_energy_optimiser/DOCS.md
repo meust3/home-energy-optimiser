@@ -1,5 +1,25 @@
 # Home Energy Optimiser
 
+## EV evidence on the household forecast
+
+The Overview and Forecasts pages show the issued forecast, eligible household actual,
+total site demand, and the available EV contribution. The data table identifies the
+source of each EV value. Linked battery recommendations include the recorded time and
+applicable window. Missing EV power appears as a gap.
+
+Set `ev_chart_charger_prefix` to the common part of the station sensor names, for
+example `sensor.ev_charger_example` for `sensor.ev_charger_example_charging_power`.
+The existing five-minute collector records charger evidence after saving the core
+observation. The default empty value disables this optional capture. Nearby updates
+of an advancing session counter give a mean power estimate. A fresh station power
+sample can supply a labelled fallback. The household forecast and its scores use
+their existing inputs.
+
+The `tools/import_ev_chart_history.py` command imports a reviewed five-minute overlay
+into a private file with `--offline-sqlite PATH`. An explicitly selected
+`--configured-database` uses the existing capture tables. An identical import is
+safe to repeat. Conflicting evidence for an existing historical slot raises an error.
+
 ## Optional archived weather (disabled pending review)
 
 The app includes optional ten-minute One Call 4.0 collection with bounded 48-hour

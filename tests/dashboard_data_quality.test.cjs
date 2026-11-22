@@ -11,7 +11,7 @@ test('live card explains pending scores and omits unavailable bound columns', as
   const context = vm.createContext({Date, Number, Math, Intl,
     $: selector => registry[selector], safeText: String, localTime: String,
     percent: String, power: String, energy: String, definition: JSON.stringify,
-    makeChart: (...args) => {chart=args; return {};},
+    document: {createElement: () => ({})}, makeChart: (...args) => {chart=args; return {append() {}};},
     request: async () => ({
       metrics:{period_label:'Compared elapsed period'}, identity:{}, calibration_status:'provisional',
       coverage:{eligible_actual_intervals:1,matured_intervals:3,matured_actual_coverage_percent:33.3,observed_pending_score_intervals:1},
@@ -20,12 +20,13 @@ test('live card explains pending scores and omits unavailable bound columns', as
         {period_start_utc:'2026-10-04T21:40:00Z',forecast_w:1200,actual_w:null,actual_eligible:false,exclusion_reason:'known_ev_session_without_ac_power'}],
     }),
   });
+  vm.runInContext(source.slice(source.indexOf('const householdSeries ='), source.indexOf('function missingChartValue(')), context);
   vm.runInContext(source.slice(source.indexOf('async function loadForecastActualCard('), source.indexOf('function reserveMarginLabel(')), context);
   await context.loadForecastActualCard();
   assert.match(target.innerHTML, /official scoring pending/);
   assert.match(target.innerHTML, /Uncertainty bounds are not available/);
   assert.match(target.innerHTML, /1 of 3 completed intervals/);
-  assert.equal(chart[2].length, 2);
+  assert.deepEqual(Array.from(chart[2], s => s[1]), ['expected', 'site', 'ev', 'actual']);
   assert.equal(chart[3][0].actual, 2287);
   assert.equal(chart[3][1].actual_missing_reason, 'known_ev_session_without_ac_power');
 });

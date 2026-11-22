@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.8.10
+
+- Display issued forecasts, total site demand, eligible household actuals and the EV contribution with its source. Show the recorded battery advisory and its applicable window.
+- Optionally record charger evidence with the existing collector. Import reviewed historical EV evidence using the existing capture tables.
+
 ## 0.8.9 - controlled update candidate
 
 - Fix cancelled dashboard requests, visibility recovery, blocked browser storage and skip-link navigation.

@@ -114,7 +114,9 @@ def main(
 
     context_database_url = (
         load_database_url()
-        if mapping is not None or config.arbitrage_capture_enabled
+        if mapping is not None
+        or config.arbitrage_capture_enabled
+        or config.ev_chart_charger_prefix
         else None
     )
 
@@ -129,6 +131,16 @@ def main(
             ).collect_with_states(observed_at=datetime.now(UTC))
             receipt = datetime.now(UTC)
         result = save_with_retry(lambda: store.save(observation))
+        if config.ev_chart_charger_prefix:
+            from energy_optimizer.ev_chart import capture_charger
+
+            capture_charger(
+                states,
+                config.ev_chart_charger_prefix,
+                observation.slot_utc,
+                receipt,
+                lambda: open_bounded_context_repository(context_database_url),
+            )
         if mapping is not None:
             context = collect_and_store_context(
                 states,

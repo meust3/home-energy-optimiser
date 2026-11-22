@@ -17,6 +17,9 @@ configuration:
   timezone:
     name: Local timezone
     description: IANA timezone used for local observation timestamps.
+  ev_chart_charger_prefix:
+    name: EV charger sensor prefix
+    description: Shared sensor prefix used for charger evidence on the household demand charts. Leave empty to disable capture.
   health_max_observation_age_seconds:
     name: Maximum observation age
     description: Age after which collector health becomes unhealthy.

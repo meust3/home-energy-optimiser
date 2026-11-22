@@ -278,6 +278,10 @@ class Collector:
         )
         core_ids = ids.ALL_ENTITY_IDS + optional_entities
         context_ids = self._context_mapping.entity_ids if self._context_mapping else ()
+        if self._config.ev_chart_charger_prefix:
+            from energy_optimizer.ev_chart import charger_entities
+
+            context_ids += charger_entities(self._config.ev_chart_charger_prefix)
         if context_ids:
             states = self._client.get_states(
                 core_ids + context_ids,

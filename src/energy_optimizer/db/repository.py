@@ -1378,7 +1378,10 @@ class DatabaseRepository:
                     "actual_source",
                     "stored_score" if value["score_id"] is not None else None,
                 )
-        return {**dict(run), "points": values}
+            from energy_optimizer.ev_chart import attach_chart_evidence
+
+            actions = attach_chart_evidence(session, run, values)
+        return {**dict(run), "points": values, "advisory_actions": actions}
 
     def forecast_run(self, run_id: int) -> dict[str, Any] | None:
         with Session(self.engine) as session:
@@ -1621,7 +1624,15 @@ class DatabaseRepository:
                     else None
                 )
                 points.append(item)
-            return {**dict(run), "points": points, "unsupported_actual_type": False}
+            from energy_optimizer.ev_chart import attach_chart_evidence
+
+            actions = attach_chart_evidence(session, run, points)
+            return {
+                **dict(run),
+                "points": points,
+                "advisory_actions": actions,
+                "unsupported_actual_type": False,
+            }
 
     def latest_reserve_run_read_only(self) -> dict[str, Any] | None:
         """Return the latest persisted reserve-estimator run and bounded summaries."""

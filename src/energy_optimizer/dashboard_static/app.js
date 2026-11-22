@@ -262,13 +262,15 @@ async function loadForecastActualCard() {
     const points = data.points.map(point => ({
       timestamp_utc: point.period_start_utc, has_observation: true,
       expected: point.forecast_w, actual: point.actual_w, lower: point.lower_w, upper: point.upper_w,
+      site: point.site_actual_w, ev: point.ev_adjustment_w, evNote: [point.ev_source, point.ev_context].filter(Boolean).join(" · "),
       actual_missing_reason: point.exclusion_reason || point.actual_missing_reason,
       actual_source: point.actual_source,
       series_available: { expected: true, actual: point.actual_eligible, lower: point.lower_w != null, upper: point.upper_w != null },
     }));
     const start = new Date(data.period_start_utc).getTime(); const end = new Date(data.period_end_utc).getTime(); const now = new Date(data.now_utc).getTime();
     const nowPercent = end > start ? (now - start) / (end - start) * 100 : null;
-    const chart = makeChart("Forecast expected and actual household demand", "kW", [["Forecast expected", "expected"], ["Actual household demand", "actual"], ...(data.uncertainty_status === "stored_bounds" ? [["Forecast lower", "lower"], ["Forecast upper", "upper"]] : [])], points, value => value / 1000, "No comparable forecast and actual intervals are available.", { band: ["lower", "upper"], nowPercent: mode === "live" ? nowPercent : null });
+    const chart = makeChart("Forecast expected and actual household demand", "kW", [...householdSeries, ...(data.uncertainty_status === "stored_bounds" ? [["Forecast lower", "lower"], ["Forecast upper", "upper"]] : [])], points, value => value / 1000, "No comparable forecast and actual intervals are available.", { band: ["lower", "upper"], nowPercent: mode === "live" ? nowPercent : null });
+    appendHouseholdContext(chart, data);
     target.append(chart);
   } catch (error) { if (error.name === "AbortError") return;
     target.className = "error-state"; target.textContent = error.message;
@@ -341,6 +343,28 @@ function actualReason(reason) {
   return ({future_interval: "Future interval", no_observation: "Awaiting observation", actual_value_missing: "Value unavailable", actual_unhealthy_or_ineligible: "Unhealthy telemetry or excluded baseline", not_scored_or_ineligible: "Awaiting official scoring or excluded baseline", known_charging_without_power: "Excluded: EV charging without charger AC power", known_ev_session_without_ac_power: "Excluded: EV charging without charger AC power", known_ev_session_without_ev_power: "Excluded: EV charging without measured power", ev_active_power_unknown: "Excluded: EV charging power unavailable", invalid_actual_negative_household_demand: "Invalid negative household demand"})[reason] || (reason ? String(reason).replaceAll("_", " ") : "Value unavailable");
 }
 
+const householdSeries = [["Issued forecast", "expected"], ["Actual site demand (includes EV)", "site"], ["EV contribution", "ev"], ["Eligible household actual", "actual"]];
+
+function appendHouseholdContext(panel, data) {
+  const count = data.points.filter(p => p.ev_adjustment_w != null).length;
+  const note = document.createElement("p"); note.className = "muted";
+  note.textContent = `EV power is available for ${count} of ${data.points.length} intervals. The source for each value is shown in the data table. Forecast errors use the eligible household actual.`;
+  panel.append(note);
+  const heading = document.createElement("h4"); heading.textContent = "Advisory battery actions"; panel.append(heading);
+  const actions = data.advisory_actions || [];
+  if (!actions.length) {
+    const empty = document.createElement("p"); empty.textContent = "No battery recommendation recorded for this forecast."; panel.append(empty); return;
+  }
+  const list = document.createElement("ul");
+  for (const action of actions) {
+    const item = document.createElement("li");
+    const window = action.selected_start_utc && action.selected_end_utc ? ` · applies ${localTime(action.selected_start_utc)} – ${localTime(action.selected_end_utc)}` : "";
+    item.textContent = `${localTime(action.created_at_utc)} · ${action.selected_action || action.status}${window}${action.no_command_issued ? " · No command issued" : ""}`;
+    list.append(item);
+  }
+  panel.append(list);
+}
+
 function missingChartValue(point, field) {
   return field === "actual" ? actualReason(point.actual_missing_reason) : "Missing";
 }
@@ -353,7 +377,7 @@ function makeChart(title, unit, series, points, transform = value => value, empt
   };
   const chartableSeries = series.map(([name, field], index) => ({ name, field, index })).filter(item => points.some(point => isNumeric(plottedValue(point, item.field))));
   article.innerHTML = `<h3>${safeText(title)}</h3><p class="muted">${safeText(unit)} · gaps are not interpolated</p>`;
-  const details = document.createElement("details"); details.className = "table-fallback"; details.innerHTML = `<summary>Accessible data table</summary><div class="table-wrap"><table><thead><tr><th>Time</th>${series.map(([name]) => `<th>${safeText(name)}</th>`).join("")}</tr></thead><tbody>${points.length ? points.map(point => `<tr><td>${localTime(point.timestamp_utc)}</td>${series.map(([, field]) => `<td>${plottedValue(point, field) == null ? safeText(missingChartValue(point, field)) : number(transform(point[field]), 3)}</td>`).join("")}</tr>`).join("") : `<tr><td colspan="${series.length + 1}">No stored rows for this period</td></tr>`}</tbody></table></div>`;
+  const details = document.createElement("details"); details.className = "table-fallback"; details.innerHTML = `<summary>Accessible data table</summary><div class="table-wrap"><table><thead><tr><th>Time</th>${series.map(([name]) => `<th>${safeText(name)}</th>`).join("")}</tr></thead><tbody>${points.length ? points.map(point => `<tr><td>${localTime(point.timestamp_utc)}</td>${series.map(([, field]) => `<td>${plottedValue(point, field) == null ? safeText(missingChartValue(point, field)) : number(transform(point[field]), 3)}${field === "ev" && point.evNote ? `<br>${safeText(point.evNote)}` : ""}</td>`).join("")}</tr>`).join("") : `<tr><td colspan="${series.length + 1}">No stored rows for this period</td></tr>`}</tbody></table></div>`;
   if (!chartableSeries.length) {
     article.classList.add("chart-panel-empty");
     article.insertAdjacentHTML("beforeend", `<div class="empty-state chart-empty" role="status"><strong>${safeText(emptyMessage)}</strong><span>Historical collection gaps and unavailable normalized flow values are shown as missing.</span></div>`);
@@ -416,7 +440,7 @@ function makeChart(title, unit, series, points, transform = value => value, empt
   const showTooltip = (index, left, top) => {
     keyboardIndex = index;
     const point = points[index];
-    tooltip.innerHTML = `<strong>${localTime(point.timestamp_utc)}</strong><br>${chartableSeries.map(({ name, field }) => `${safeText(name)}: ${plottedValue(point, field) == null ? safeText(missingChartValue(point, field)) : `${number(plottedValue(point, field), 3)} ${safeText(unit)}`}`).join("<br>")}${point.actual_missing_reason ? `<br>Actual eligibility: ${safeText(actualReason(point.actual_missing_reason))}` : ""}`;
+    tooltip.innerHTML = `<strong>${localTime(point.timestamp_utc)}</strong><br>${chartableSeries.map(({ name, field }) => `${safeText(name)}: ${plottedValue(point, field) == null ? safeText(missingChartValue(point, field)) : `${number(plottedValue(point, field), 3)} ${safeText(unit)}`}`).join("<br>")}${point.evNote ? `<br>EV: ${safeText(point.evNote)}` : ""}${point.actual_missing_reason ? `<br>Actual eligibility: ${safeText(actualReason(point.actual_missing_reason))}` : ""}`;
     tooltip.style.display = "block"; tooltip.style.left = `${left}px`; tooltip.style.top = `${top}px`;
   };
   svg.addEventListener("pointermove", event => {
@@ -483,8 +507,11 @@ async function loadForecastComparison() {
     if (!data.available) { setState("#forecast-state", data.message); $("#forecast-comparison").innerHTML = `<div class="empty-state">${safeText(data.message)}</div>`; return; }
     setState("#forecast-state", `${data.sample_count} comparable actual samples; ${data.excluded_actual_count || 0} excluded observations; ${data.missing_actual_count - (data.excluded_actual_count || 0)} points without actuals (including future intervals). MAE and bias use comparable samples only; bias is actual minus forecast.`);
     $("#forecast-run-meta").innerHTML = definition([["Created", localTime(data.created_at_utc)], ["Model", data.model_version], ["Horizon", `${localTime(data.horizon_start_utc)} – ${localTime(data.horizon_end_utc)}`], ["MAE", number(data.mae, 3)], ["Bias", number(data.bias, 3)], ["Unit", data.unit]]);
-    const points = data.points.map(p => ({ timestamp_utc: p.period_start_utc, series_available: { expected: true, lower: true, upper: true, actual: p.actual_value != null }, actual_missing_reason: p.actual_missing_reason, expected: p.expected_value, actual: p.actual_value, lower: p.lower_value, upper: p.upper_value }));
-    const panel = makeChart("Expected versus actual", data.unit || "Stored unit", [["Expected", "expected"], ["Comparable actual", "actual"], ["Lower bound", "lower"], ["Upper bound", "upper"]], points, value => value, undefined, { start: data.horizon_start_utc, end: data.horizon_end_utc });
+    const points = data.points.map(p => ({ timestamp_utc: p.period_start_utc, series_available: { expected: true, lower: true, upper: true, actual: p.actual_value != null }, actual_missing_reason: p.actual_missing_reason, expected: p.expected_value, actual: p.actual_value, lower: p.lower_value, upper: p.upper_value, site: p.site_actual_w, ev: p.ev_adjustment_w, evNote: [p.ev_source, p.ev_context].filter(Boolean).join(" · ") }));
+    const household = ["baseline_household_load", "household_load"].includes(data.forecast_type) && data.unit === "W";
+    const series = household ? householdSeries : [["Expected", "expected"], ["Comparable actual", "actual"]];
+    const panel = makeChart("Expected versus actual", household ? "kW" : data.unit || "Stored unit", [...series, ["Lower bound", "lower"], ["Upper bound", "upper"]], points, value => household ? value / 1000 : value, undefined, { start: data.horizon_start_utc, end: data.horizon_end_utc });
+    if (household) appendHouseholdContext(panel, data);
     if (data.forecast_type === "baseline_household_load") panel.insertAdjacentHTML("beforeend", '<p class="muted">Baseline household demand excludes known EV charging without measured charger AC power and unhealthy or ineligible observations. Those actuals remain gaps; no EV power is inferred or subtracted. Forecast values cover the full selected horizon.</p>');
     const target = $("#forecast-comparison"); target.replaceWith(panel); panel.id = "forecast-comparison";
   } catch (error) { if (error.name === "AbortError") return; if (error.name !== "AbortError" && $("#forecast-run").value === id) setState("#forecast-state", error.message, "error-state"); }
