@@ -1,6 +1,7 @@
 """A deliberately GET-only Home Assistant HTTP client."""
 
 from collections.abc import Iterable
+from datetime import datetime, timedelta
 from typing import Any
 from urllib.parse import quote
 
@@ -83,6 +84,42 @@ class HomeAssistantClient:
         if self._base_url.endswith("/api") and path.startswith("/api"):
             return f"{self._base_url}{path[4:]}"
         return f"{self._base_url}{path}"
+
+    def recorder_history(
+        self, entity_ids: Iterable[str], start: datetime, end: datetime
+    ) -> list:
+        """Read a bounded window for the validator's four configured sensors."""
+        import re
+
+        ids = tuple(entity_ids)
+        if (
+            len(set(ids)) != 4
+            or len(ids) != 4
+            or not all(re.fullmatch(r"sensor\.[a-z0-9_]+", key) for key in ids)
+        ):
+            raise ValueError("Expected four recorder sensors")
+        if (
+            start.utcoffset() is None
+            or end.utcoffset() is None
+            or not timedelta(0) < end - start <= timedelta(seconds=7201)
+        ):
+            raise ValueError("Invalid recorder page")
+        response = self._session.get(
+            self._request_url("/api/history/period/" + start.isoformat()),
+            params={
+                "end_time": end.isoformat(),
+                "filter_entity_id": ",".join(ids),
+                "significant_changes_only": "0",
+            },
+            timeout=self._timeout,
+            allow_redirects=False,
+        )
+        if response.status_code != 200:
+            raise HomeAssistantResponseError("Recorder history read failed")
+        groups = response.json()
+        if not isinstance(groups, list):
+            raise HomeAssistantResponseError("Invalid recorder history")
+        return groups
 
     def check_api(self) -> dict[str, Any]:
         payload = self._get_json("/api/")

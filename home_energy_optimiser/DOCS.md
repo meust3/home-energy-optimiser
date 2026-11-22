@@ -352,3 +352,22 @@ removes only the nine nullable vehicle fields and therefore discards EV telemetr
 collected after v0.4.0 began while preserving legacy rows and fields. Confirm the
 old revision, unchanged legacy counts, and absent EV columns before installing and
 starting v0.3.2. Never use `alembic stamp` as a physical rollback.
+
+### EV validation on the appliance
+
+Configure the charger prefix, the independent household-load sensor in
+`ev_validation_reference` and the original cohort timestamp (including UTC
+offset) in `ev_validation_start`. Leave both validation options blank to disable.
+Recorder history must cover site power, independent household demand, station
+power and session energy. Keep the original values across updates and restarts.
+
+The existing scheduler reads witnessed charge completions when the collector is
+idle. It fetches a bounded page of recorder history per turn and resumes from its
+private working files under `/data/ev-validation`. Open **EV validation report**
+on the app dashboard for progress, the last successful check and the first ten
+sessions. Additional charges continue to be checked. A missing reference remains
+visible as zero matched intervals. Sessions are compared against the session
+counter on the same five-minute intervals. Positive bias means the estimate
+exceeds independent household load. The full ten-session comparison is also
+saved as analytical evidence in PostgreSQL. Review coverage, gaps, the individual
+sessions and the leave-one-session-out result before interpreting any improvement.

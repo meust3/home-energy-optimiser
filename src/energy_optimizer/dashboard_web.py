@@ -218,6 +218,15 @@ def make_handler(
 
         def _api(self, route: str) -> None:
             params = parse_qs(urlsplit(self.path).query, keep_blank_values=True)
+            if route == "/api/v1/ev-validation":
+                self._require_params(params, set())
+                reader = getattr(health, "ev_validation_status", None)
+                self._json(
+                    HTTPStatus.OK,
+                    reader() if reader else {"status": "disabled"},
+                    cache="no-store",
+                )
+                return
             if route == "/api/v1/ai/status":
                 self._require_params(params, set())
                 self._json(HTTPStatus.OK, local_status(), cache="no-store")

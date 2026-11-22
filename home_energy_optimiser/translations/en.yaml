@@ -17,6 +17,12 @@ configuration:
   timezone:
     name: Local timezone
     description: IANA timezone used for local observation timestamps.
+  ev_validation_start:
+    name: EV comparison cohort start
+    description: Enter the original ISO timestamp with UTC offset to replay witnessed completions.
+  ev_validation_reference:
+    name: Independent household load sensor
+    description: Recorder sensor giving household watts excluding EV charging. Leave both comparison options blank to disable.
   ev_chart_charger_prefix:
     name: EV charger sensor prefix
     description: Shared sensor prefix used for charger evidence on the household demand charts. Leave empty to disable capture.

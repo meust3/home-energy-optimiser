@@ -102,6 +102,7 @@ class ForecastCoordinator:
         clock: Callable[[], datetime] = lambda: datetime.now(UTC),
         monotonic: Callable[[], float] = time.monotonic,
         weather: Any | None = None,
+        ev_validator: Any | None = None,
     ) -> None:
         self.repository_factory = repository_factory
         self.collector_config = collector_config
@@ -110,13 +111,16 @@ class ForecastCoordinator:
         self.shadow_config = shadow_config or ShadowDecisionConfig()
         self.clock = clock
         self.monotonic = monotonic
+        self.ev_validator = ev_validator
         self.weather = weather
         self._active = threading.Lock()
         self._stop_requested: Callable[[], bool] = lambda: False
 
     def run(self, stop_event: threading.Event) -> None:
         self._stop_requested = stop_event.is_set
-        if self.weather is not None and self.weather.enabled:
+        if self.ev_validator is not None or (
+            self.weather is not None and self.weather.enabled
+        ):
             self._run_with_weather(stop_event)
             return
         if not self.config.enabled:
@@ -189,13 +193,16 @@ class ForecastCoordinator:
         )
         # Inspect durable work promptly after restart. claim_page enforces slots;
         # collector readiness/phase guards still prevent an early provider call.
-        weather_due = now
+        validator_due = now if self.ev_validator is not None else None
+        weather_due = now if self.weather is not None and self.weather.enabled else None
         self.health.configure_forecast_scheduler(
             enabled=self.config.enabled,
             next_run=forecast_due - grace if forecast_due else None,
         )
         while not stop_event.is_set():
-            wake = min(d for d in (forecast_due, weather_due) if d is not None)
+            wake = min(
+                d for d in (forecast_due, weather_due, validator_due) if d is not None
+            )
             if stop_event.wait(
                 max(0, (wake - self.clock().astimezone(UTC)).total_seconds())
             ):
@@ -217,7 +224,7 @@ class ForecastCoordinator:
                 )
             if stop_event.is_set():
                 return
-            if now >= weather_due:
+            if weather_due is not None and now >= weather_due:
                 weather_result = {}
                 try:
                     weather_result = (
@@ -243,6 +250,30 @@ class ForecastCoordinator:
                         + grace
                     )
                 )
+
+            now = self.clock().astimezone(UTC)
+            if (
+                validator_due is not None
+                and now >= validator_due
+                and not stop_event.is_set()
+            ):
+                if self.health.weather_collection_allowed(now) and (
+                    forecast_due is None or forecast_due - now > timedelta(seconds=30)
+                ):
+                    try:
+                        self.ev_validator.step(now)
+                    except Exception as exc:
+                        LOGGER.warning(
+                            "EV validation deferred (%s)", type(exc).__name__
+                        )
+                    validator_due = (
+                        next_aligned_boundary(
+                            now, timezone_name="UTC", alignment_minutes=5
+                        )
+                        + grace
+                    )
+                else:
+                    validator_due = now + timedelta(seconds=15)
 
     def run_boundary(self, scheduled_for: datetime) -> bool:
         """Claim and execute one boundary; return false for duplicate/overlap."""

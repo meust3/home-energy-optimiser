@@ -106,6 +106,12 @@ def _run(options) -> int:
     )
     health.calibration_min_weekday_days = options.calibration_min_weekday_days
     health.calibration_min_weekend_days = options.calibration_min_weekend_days
+    validator = None
+    if options.ev_validation_start:
+        from energy_optimizer.ev_validation import build_app_validator
+
+        validator = build_app_validator(options, config, environment["DATABASE_URL"])
+        health.ev_validation_status = validator.status
     server, thread = start_dashboard_server(
         health, database_url=environment["DATABASE_URL"], port=HEALTH_PORT
     )
@@ -148,6 +154,7 @@ def _run(options) -> int:
             discharge_efficiency=options.shadow_discharge_efficiency,
         ),
         health=health,
+        ev_validator=validator,
         weather=build_weather_collector(
             options, database_url=environment["DATABASE_URL"], health=health
         ),
