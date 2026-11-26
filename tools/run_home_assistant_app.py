@@ -9,6 +9,7 @@ import run_collector
 
 from energy_optimizer.ai_app import app_ai_environment
 from energy_optimizer.config import load_config
+from energy_optimizer.context_collection import open_bounded_context_repository
 from energy_optimizer.db.redaction import display_database_url
 from energy_optimizer.forecast_operations import (
     ForecastCoordinator,
@@ -121,6 +122,9 @@ def _run(options) -> int:
     )
     stop_event = threading.Event()
     coordinator = ForecastCoordinator(
+        household_shadow_repository=lambda: open_bounded_context_repository(
+            environment["DATABASE_URL"]
+        ),
         repository_factory=lambda: open_bounded_forecast_repository(
             environment["DATABASE_URL"],
             max_runtime_seconds=options.forecast_max_runtime_seconds,

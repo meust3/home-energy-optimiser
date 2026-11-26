@@ -261,7 +261,7 @@ async function loadForecastActualCard() {
     }
     const points = data.points.map(point => ({
       timestamp_utc: point.period_start_utc, has_observation: true,
-      expected: point.forecast_w, actual: point.actual_w, lower: point.lower_w, upper: point.upper_w,
+      expected: point.forecast_w, shadow: point.household_shadow_w, actual: point.actual_w, lower: point.lower_w, upper: point.upper_w,
       site: point.site_actual_w, ev: point.ev_adjustment_w, evNote: [point.ev_source, point.ev_context].filter(Boolean).join(" · "),
       actual_missing_reason: point.exclusion_reason || point.actual_missing_reason,
       actual_source: point.actual_source,
@@ -269,7 +269,7 @@ async function loadForecastActualCard() {
     }));
     const start = new Date(data.period_start_utc).getTime(); const end = new Date(data.period_end_utc).getTime(); const now = new Date(data.now_utc).getTime();
     const nowPercent = end > start ? (now - start) / (end - start) * 100 : null;
-    const chart = makeChart("Forecast expected and actual household demand", "kW", [...householdSeries, ...(data.uncertainty_status === "stored_bounds" ? [["Forecast lower", "lower"], ["Forecast upper", "upper"]] : [])], points, value => value / 1000, "No comparable forecast and actual intervals are available.", { band: ["lower", "upper"], nowPercent: mode === "live" ? nowPercent : null });
+    const chart = makeChart("Forecast expected and actual household demand", "kW", [...householdSeries, ...(data.household_shadow ? [["Shadow forecast", "shadow"]] : []), ...(data.uncertainty_status === "stored_bounds" ? [["Forecast lower", "lower"], ["Forecast upper", "upper"]] : [])], points, value => value / 1000, "No comparable forecast and actual intervals are available.", { band: ["lower", "upper"], nowPercent: mode === "live" ? nowPercent : null });
     appendHouseholdContext(chart, data);
     target.append(chart);
   } catch (error) { if (error.name === "AbortError") return;
@@ -346,6 +346,14 @@ function actualReason(reason) {
 const householdSeries = [["Issued forecast", "expected"], ["Actual site demand (includes EV)", "site"], ["EV contribution", "ev"], ["Eligible household actual", "actual"]];
 
 function appendHouseholdContext(panel, data) {
+  if (data.household_shadow) {
+    const s = data.household_shadow;
+    const source = {fresh: "Fresh household readings", delayed: "Delayed scores", issued: "Issued forecast fallback"}[s.source];
+    const age = s.age_seconds == null ? "" : ` · newest interval ended ${number(s.age_seconds / 60, 1)} minutes before issue`;
+    const info = document.createElement("p");
+    info.textContent = `${source} · shadow adjustment ${s.offset_w > 0 ? "+" : ""}${number(s.offset_w, 0)} W${age}${s.eased ? " · eased after a demand drop" : ""}`;
+    panel.append(info);
+  }
   const count = data.points.filter(p => p.ev_adjustment_w != null).length;
   const note = document.createElement("p"); note.className = "muted";
   note.textContent = `EV power is available for ${count} of ${data.points.length} intervals. The source for each value is shown in the data table. Forecast errors use the eligible household actual.`;
@@ -509,7 +517,8 @@ async function loadForecastComparison() {
     $("#forecast-run-meta").innerHTML = definition([["Created", localTime(data.created_at_utc)], ["Model", data.model_version], ["Horizon", `${localTime(data.horizon_start_utc)} – ${localTime(data.horizon_end_utc)}`], ["MAE", number(data.mae, 3)], ["Bias", number(data.bias, 3)], ["Unit", data.unit]]);
     const points = data.points.map(p => ({ timestamp_utc: p.period_start_utc, series_available: { expected: true, lower: true, upper: true, actual: p.actual_value != null }, actual_missing_reason: p.actual_missing_reason, expected: p.expected_value, actual: p.actual_value, lower: p.lower_value, upper: p.upper_value, site: p.site_actual_w, ev: p.ev_adjustment_w, evNote: [p.ev_source, p.ev_context].filter(Boolean).join(" · ") }));
     const household = ["baseline_household_load", "household_load"].includes(data.forecast_type) && data.unit === "W";
-    const series = household ? householdSeries : [["Expected", "expected"], ["Comparable actual", "actual"]];
+    if (household) points.forEach((point, index) => { point.shadow = data.points[index].household_shadow_w; });
+    const series = household ? [...householdSeries, ...(data.household_shadow ? [["Shadow forecast", "shadow"]] : [])] : [["Expected", "expected"], ["Comparable actual", "actual"]];
     const panel = makeChart("Expected versus actual", household ? "kW" : data.unit || "Stored unit", [...series, ["Lower bound", "lower"], ["Upper bound", "upper"]], points, value => household ? value / 1000 : value, undefined, { start: data.horizon_start_utc, end: data.horizon_end_utc });
     if (household) appendHouseholdContext(panel, data);
     if (data.forecast_type === "baseline_household_load") panel.insertAdjacentHTML("beforeend", '<p class="muted">Baseline household demand excludes known EV charging without measured charger AC power and unhealthy or ineligible observations. Those actuals remain gaps; no EV power is inferred or subtracted. Forecast values cover the full selected horizon.</p>');
