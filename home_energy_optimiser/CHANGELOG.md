@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.8.12 — release candidate
+
+- The EV validation report adds a versioned comparison alongside the original ten-session result. It recovers complete five-minute intervals on either side of a session-counter decrease using the existing Recorder samples.
+- Fresh charging status, positive station power and a return to idle and zero power can flag a provisional charge for reconciliation. A provisional entry carries no final energy and does not count toward the ten provider-completed sessions.
+
 ## 0.8.11
 
 - Validate each provider-completed EV charge on the appliance. The EV validation report compares the first ten sessions using matched household readings.

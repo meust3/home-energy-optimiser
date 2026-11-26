@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import math
 import os
 import sqlite3
@@ -14,6 +15,7 @@ from zoneinfo import ZoneInfo
 
 from sqlalchemy import select
 
+from energy_optimizer import ev_validation_review as review
 from energy_optimizer.arbitrage.capture import CaptureRepository, decode_capture_body
 from energy_optimizer.arbitrage.decision_types import digest
 from energy_optimizer.db.models import ArbitrageCapture, ArbitrageCommitWitness
@@ -113,7 +115,7 @@ class EVValidator:
 
     def status(self) -> dict:
         try:
-            return json.loads(
+            original = json.loads(
                 (self.directory / "status.json").read_text(encoding="utf-8")
             )
         except FileNotFoundError:
@@ -122,6 +124,67 @@ class EVValidator:
                 "completed": 0,
                 "required": 10,
             }
+        try:
+            candidate = json.loads(
+                (self.directory / "review-v2.json").read_text(encoding="utf-8")
+            )
+        except (OSError, ValueError):
+            candidate = {}
+        original["candidate_review"] = (
+            candidate
+            if isinstance(candidate, dict)
+            and candidate.get("as_of") == original["as_of"]
+            else {"version": review.VERSION, "status": "awaiting current review"}
+        )
+        return original
+
+    def _review(self, db, repository, first, windows, status, captures, since, until):
+        review.prepare(db)
+        freeze = self.frozen.timestamp()
+        fence = first[-1][1] if len(first) == 10 else until.timestamp()
+        # Allow the first post-completion zero-power receipt to arrive.
+        end = min(until.timestamp(), fence + 600)
+        with db:
+            db.execute(
+                "INSERT OR IGNORE INTO review_progress_v2 VALUES(1,?,?)",
+                (freeze, math.floor(freeze) - 1),
+            )
+            cursor = db.execute(
+                "SELECT witnessed FROM review_progress_v2 WHERE id=1"
+            ).fetchone()[0]
+            if cursor < until.timestamp():
+                left = max(freeze, cursor - 300)
+                right = min(until.timestamp(), left + 43200)
+                samples = (
+                    captures
+                    if since.timestamp() <= left and right == until.timestamp()
+                    else discovered(
+                        repository,
+                        datetime.fromtimestamp(left, UTC),
+                        datetime.fromtimestamp(right, UTC),
+                    )
+                )
+                for origin, receipt, stored in samples:
+                    slot = int(aware_datetime(origin).timestamp())
+                    if freeze <= slot <= end:
+                        body = decode_capture_body(stored)
+                        if body["station_key"] != self.station:
+                            raise ValueError(
+                                "Charger identity changed in review population"
+                            )
+                        review.store_capture(
+                            db, slot, utc_datetime(receipt).timestamp(), body
+                        )
+                db.execute(
+                    "UPDATE review_progress_v2 SET witnessed=? WHERE id=1", (right,)
+                )
+            candidate = review.review_status(
+                db, first, windows, self.ids, status, freeze, end
+            )
+        candidate["as_of"] = status["as_of"]
+        partial = self.directory / "review-v2.tmp"
+        partial.write_text(json.dumps(candidate, allow_nan=False), encoding="utf-8")
+        os.replace(partial, self.directory / "review-v2.json")
 
     def _events(self, db, captures: list) -> None:
         def wall_time(value: str) -> float:
@@ -317,6 +380,15 @@ class EVValidator:
                     json.dumps(status, allow_nan=False), encoding="utf-8"
                 )
                 os.replace(partial, self.directory / "status.json")
+                try:
+                    self._review(
+                        db, repository, first, windows, status, captures, since, until
+                    )
+                except Exception as exc:
+                    # A failed diagnostic must leave the frozen report available.
+                    logging.getLogger(__name__).warning(
+                        "EV candidate review failed (%s)", type(exc).__name__
+                    )
 
 
 def build_app_validator(options, config, database_url: str) -> EVValidator:

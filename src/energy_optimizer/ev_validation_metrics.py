@@ -68,7 +68,32 @@ def counter_at(series: Series, at: int) -> float | None:
     return None
 
 
-def summarize(start: float, end: float, streams: Streams) -> dict:
+def counter_segments(series: Series) -> list[Series]:
+    """Continuous monotone stretches bounded by valid reports."""
+    segments: list[Series] = []
+    for at, value in series:
+        if value is None or not math.isfinite(value) or value < 0:
+            segments.append([])
+            continue
+        if segments and segments[-1]:
+            last_at, last_value = segments[-1][-1]
+            if not 0 < at - last_at <= 150 or value < last_value:
+                segments.append([])
+        if not segments:
+            segments.append([])
+        segments[-1].append((at, value))
+    return [segment for segment in segments if len(segment) >= 2]
+
+
+def segment_for_slot(segments: list[Series], start: int) -> Series:
+    return next(
+        (s for s in segments if s[0][0] <= start and start + SLOT <= s[-1][0]), []
+    )
+
+
+def summarize(
+    start: float, end: float, streams: Streams, *, recover_resets: bool = False
+) -> dict:
     def timestamp(t: float) -> str:
         return datetime.fromtimestamp(t, UTC).isoformat()
 
@@ -77,6 +102,10 @@ def summarize(start: float, end: float, streams: Streams) -> dict:
         x is not None and y is not None and y < x
         for (_, x), (_, y) in zip(energy, energy[1:], strict=False)
     )
+    if recover_resets:
+        values = [value for _, value in energy if value is not None]
+        reset = any(b < a for a, b in zip(values, values[1:], strict=False))
+    segments = counter_segments(energy) if recover_resets and reset else []
     result = dict(
         start=timestamp(start),
         end=timestamp(end),
@@ -103,13 +132,11 @@ def summarize(start: float, end: float, streams: Streams) -> dict:
         site, station, load = (
             interval(streams[k], t) for k in ("site", "station", "load")
         )
-        left, right = (counter_at(energy, u) for u in (t, t + SLOT))
+        samples = segment_for_slot(segments, t) if reset else energy
+        left, right = (counter_at(samples, u) for u in (t, t + SLOT))
         counter = (
             (right - left) * 12000
-            if not reset
-            and left is not None
-            and right is not None
-            and 0 <= right - left <= 1
+            if left is not None and right is not None and 0 <= right - left <= 1
             else None
         )
         for label, value in (("station", station), ("counter", counter)):
