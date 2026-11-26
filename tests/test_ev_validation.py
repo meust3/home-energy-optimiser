@@ -14,7 +14,9 @@ START = datetime(2025, 1, 1, tzinfo=UTC)
 PREFIX = "sensor.ev_charger_test"
 
 
-def test_first_ten_with_retry_restart_duplicate_and_missing_reference(tmp_path):
+def test_first_ten_with_retry_restart_duplicate_and_missing_reference(
+    tmp_path, monkeypatch
+):
     url = f"sqlite:///{(tmp_path / 'archive.db').as_posix()}"
     repo = open_repository(url)
     repo.create_schema_for_tests()
@@ -79,8 +81,11 @@ def test_first_ten_with_retry_restart_duplicate_and_missing_reference(tmp_path):
     with pytest.raises(TimeoutError):
         validator().step(now)
     reader.side_effect = history
-    for _ in range(9):
-        validator().step(now)
+    # Simulate the original installation before loading the candidate.
+    with monkeypatch.context() as old_app:
+        old_app.setattr(EVValidator, "_review", lambda *args: None)
+        for _ in range(9):
+            validator().step(now)
     assert "comparison" not in validator().status()
     validator().step(now)
     first = validator().status()["comparison"]
@@ -96,6 +101,15 @@ def test_first_ten_with_retry_restart_duplicate_and_missing_reference(tmp_path):
     )
     assert first["decision"] == "inspect evidence before promotion"
     assert archive.latest(REPORT_KIND)["body"] == first
+    for _ in range(7):
+        validator().step(now)
+    candidate = validator().status()["candidate_review"]
+    assert candidate["completed"] == 10
+    assert candidate["status"] == "inspect evidence before promotion"
+    assert candidate["aligned"] == first["aligned"]
+    assert reader.call_count == 12
+    (validator().directory / "review-v2.json").write_text("{", encoding="utf-8")
+    assert validator().status()["comparison"] == first
     repo.close()
 
 

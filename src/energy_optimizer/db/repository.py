@@ -117,6 +117,11 @@ class DatabaseRepository:
             connection.execute(text("SELECT 1"))
         return True
 
+    def household_shadow_read_only(self, run_id: int):
+        from energy_optimizer.household_shadow import read_pair
+
+        return read_pair(self, run_id)
+
     def try_forecast_operation_lock(self) -> Any:
         """Hold a PostgreSQL session advisory lock for one whole operation."""
         if self.backend != "postgresql":

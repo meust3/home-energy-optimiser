@@ -103,6 +103,7 @@ class ForecastCoordinator:
         monotonic: Callable[[], float] = time.monotonic,
         weather: Any | None = None,
         ev_validator: Any | None = None,
+        household_shadow_repository: Callable[[], Any] | None = None,
     ) -> None:
         self.repository_factory = repository_factory
         self.collector_config = collector_config
@@ -112,6 +113,7 @@ class ForecastCoordinator:
         self.clock = clock
         self.monotonic = monotonic
         self.ev_validator = ev_validator
+        self.household_shadow_repository = household_shadow_repository
         self.weather = weather
         self._active = threading.Lock()
         self._stop_requested: Callable[[], bool] = lambda: False
@@ -561,6 +563,21 @@ class ForecastCoordinator:
                     "shadow_outcomes_scored": outcome_count,
                 },
             )
+            if self.household_shadow_repository is not None:
+                from energy_optimizer.household_shadow import record
+
+                shadow_repository = None
+                try:
+                    self._check_deadline(started_monotonic)
+                    shadow_repository = self.household_shadow_repository()
+                    record(shadow_repository, forecast_run, forecast_run_id, self.clock)
+                except Exception as exc:
+                    LOGGER.warning(
+                        "Household shadow unavailable (%s)", type(exc).__name__
+                    )
+                finally:
+                    if shadow_repository is not None:
+                        shadow_repository.close()
             if self.collector_config.arbitrage_capture_enabled:
                 optional_repository = None
                 try:

@@ -86,6 +86,85 @@ def capture_db(request, tmp_path):
             admin.dispose()
 
 
+def test_household_shadow_input_visibility(capture_db, healthy_states, config, now):
+    from energy_optimizer.collector import build_observation
+    from energy_optimizer.db.models import Observation
+    from energy_optimizer.household_shadow import (
+        CURRENT_FORECAST_MODEL_VERSION,
+        read_inputs,
+    )
+    from energy_optimizer.models import ForecastPoint, ForecastRun
+
+    repo, _ = capture_db
+    if repo.backend != "postgresql":
+        pytest.skip("App uses PostgreSQL for issue-time inputs")
+    slot = now.replace(minute=5, second=0, microsecond=0)
+    prior = slot - timedelta(minutes=30)
+    observation = build_observation(healthy_states, config, observed_at=slot)
+    repo.save_observation(observation)
+    with repo.transaction() as session:
+        row = session.get(Observation, slot)
+        row.ev_charging_active = False
+        row.ev_telemetry_fresh = True
+        row.baseline_training_eligible = row.telemetry_is_healthy = True
+        row.baseline_exclusion_reason = None
+        row.house_consumption_w = row.baseline_house_consumption_w = 1800
+    run = ForecastRun(
+        created_at_utc=prior,
+        source="scheduled_forecast_operations",
+        forecast_type="baseline_household_load",
+        model_version=CURRENT_FORECAST_MODEL_VERSION,
+        horizon_start_utc=slot,
+        horizon_end_utc=slot + timedelta(minutes=5),
+        metadata={
+            "training_policy": "verified_preferred",
+            "alignment_version": "full_5m_v1",
+        },
+        points=[
+            ForecastPoint(
+                period_start_utc=slot,
+                period_end_utc=slot + timedelta(minutes=5),
+                expected_value=1100,
+                unit="W",
+            )
+        ],
+    )
+    rid = repo.save_forecast_run(run)
+    aid = repo.claim_forecast_operation(scheduled_for=prior, started_at=prior)
+    repo.finish_forecast_operation(
+        aid,
+        status="success",
+        finished_at=prior + timedelta(seconds=3),
+        duration_seconds=3,
+        forecast_run_id=rid,
+    )
+    witness = slot + timedelta(minutes=6)
+    CaptureRepository(repo).save(
+        origin=slot.isoformat(),
+        kind="source",
+        at=slot,
+        body={
+            "sources": {
+                "house_power": {
+                    "state": "1800",
+                    "attributes": {"unit_of_measurement": "W"},
+                    "reported_at": slot.isoformat(),
+                }
+            }
+        },
+        clock=lambda: witness,
+    )
+    assert read_inputs(repo, witness - timedelta(seconds=1), run.model_version) == (
+        {},
+        {},
+    )
+    fresh, delayed = read_inputs(repo, witness, run.model_version)
+    assert fresh[slot].error == 700 and not delayed
+    with repo.transaction() as session:
+        session.get(Observation, slot).ev_charging_active = None
+    assert read_inputs(repo, witness, run.model_version) == ({}, {})
+
+
 def test_capture_post_commit_witness_immutability_and_rollback(capture_db):
     repo, url = capture_db
     store = CaptureRepository(repo)

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import math
 from collections import Counter, defaultdict
 from contextlib import contextmanager
@@ -283,7 +284,26 @@ class ForecastRunsResponse(ApiModel):
     empty: bool
 
 
+def _household_shadow(repository, run):
+    if not run or run.get("forecast_type") != "baseline_household_load":
+        return None, {}
+    reader = getattr(repository, "household_shadow_read_only", None)
+    try:
+        packet = reader(run["id"]) if reader else None
+        if packet:
+            return dict(model=packet["model"], **packet["decision"]), {
+                datetime.fromisoformat(start): value
+                for start, _, value in packet["points"]
+            }
+    except Exception as exc:
+        logging.getLogger(__name__).warning(
+            "Shadow chart unavailable (%s)", type(exc).__name__
+        )
+    return None, {}
+
+
 class EVChartPoint(ApiModel):
+    household_shadow_w: float | None = None
     site_actual_w: float | None = None
     ev_adjustment_w: float | None = None
     ev_source: str | None = None
@@ -313,6 +333,7 @@ class ForecastComparisonPoint(EVChartPoint):
 
 
 class ForecastComparisonResponse(ApiModel):
+    household_shadow: dict[str, Any] | None = None
     advisory_actions: list[ChartAdvisory] = Field(default_factory=list)
     available: bool
     message: str | None = None
@@ -473,6 +494,7 @@ class ForecastComparisonCardPoint(EVChartPoint):
 
 
 class ForecastComparisonCardResponse(ApiModel):
+    household_shadow: dict[str, Any] | None = None
     advisory_actions: list[ChartAdvisory] = Field(default_factory=list)
     mode: Literal["live", "latest_complete"]
     run_id: int | None = None
@@ -1056,6 +1078,7 @@ class DashboardService:
                 end=end,
                 limit=limit,
             )
+            shadow, shadow_points = _household_shadow(repository, run)
         if run is None or not run["points"]:
             return ForecastComparisonResponse(
                 available=False,
@@ -1072,6 +1095,7 @@ class DashboardService:
             actual = _number(row.get("actual_value"))
             points.append(
                 ForecastComparisonPoint(
+                    household_shadow_w=shadow_points.get(_utc(row["period_start_utc"])),
                     period_start_utc=_utc(row["period_start_utc"]),
                     period_end_utc=_utc(row["period_end_utc"]),
                     expected_value=float(row["expected_value"]),
@@ -1090,6 +1114,7 @@ class DashboardService:
             )
         return ForecastComparisonResponse(
             available=True,
+            household_shadow=shadow,
             forecast_run_id=run["id"],
             forecast_type=run["forecast_type"],
             source=run["source"],
@@ -1135,6 +1160,7 @@ class DashboardService:
                     )
                 ),
             )
+            shadow, shadow_points = _household_shadow(repository, run)
         if run is None:
             code = "no_current_forecast" if mode == "live" else "no_complete_forecast"
             message = (
@@ -1190,6 +1216,7 @@ class DashboardService:
                 )
             points.append(
                 ForecastComparisonCardPoint(
+                    household_shadow_w=shadow_points.get(start),
                     period_start_utc=start,
                     period_end_utc=end,
                     forecast_w=expected,
@@ -1218,6 +1245,7 @@ class DashboardService:
         return ForecastComparisonCardResponse(
             mode=mode,
             run_id=int(run["id"]),
+            household_shadow=shadow,
             advisory_actions=run.get("advisory_actions", []),
             created_at_utc=_utc(run["created_at_utc"]),
             period_start_utc=_utc(run["horizon_start_utc"]),
