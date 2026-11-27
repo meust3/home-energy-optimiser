@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.8.13
+
+- Scheduled household shadow forecasts use a narrower publication lookup and retry it once after a database cancellation. The original issue-time and pre-target pairing rules still apply.
+
 ## 0.8.12
 
 - Scheduled household forecasts now record a versioned shadow comparison. The dashboard shows its pre-target prediction, input source, input age and signed adjustment. The operational baseline continues to supply reserve and advisory calculations.
