@@ -88,7 +88,7 @@ def capture_db(request, tmp_path):
 
 def test_household_shadow_input_visibility(capture_db, healthy_states, config, now):
     from energy_optimizer.collector import build_observation
-    from energy_optimizer.db.models import Observation
+    from energy_optimizer.db.models import ForecastOperationAttempt, Observation
     from energy_optimizer.household_shadow import (
         CURRENT_FORECAST_MODEL_VERSION,
         read_inputs,
@@ -160,9 +160,54 @@ def test_household_shadow_input_visibility(capture_db, healthy_states, config, n
     )
     fresh, delayed = read_inputs(repo, witness, run.model_version)
     assert fresh[slot].error == 700 and not delayed
+    # A legacy success may be linked by run ID at a different start time.
     with repo.transaction() as session:
+        session.get(ForecastOperationAttempt, aid).started_at_utc = prior + timedelta(
+            seconds=1
+        )
+    assert read_inputs(repo, witness, run.model_version) == (fresh, delayed)
+    # Publication must precede the target, even if it precedes the shadow issue.
+    with repo.transaction() as session:
+        session.get(ForecastOperationAttempt, aid).finished_at_utc = slot + timedelta(
+            seconds=1
+        )
+    assert read_inputs(repo, witness, run.model_version) == ({}, {})
+    with repo.transaction() as session:
+        session.get(ForecastOperationAttempt, aid).finished_at_utc = slot
         session.get(Observation, slot).ev_charging_active = None
     assert read_inputs(repo, witness, run.model_version) == ({}, {})
+
+
+@pytest.mark.parametrize("cancel_count", [1, 2])
+def test_household_shadow_point_query_cancellation(capture_db, cancel_count):
+    from sqlalchemy import event
+
+    from energy_optimizer import household_shadow
+    from energy_optimizer.db.engine import DatabaseQueryCanceledError
+
+    repo, _ = capture_db
+    if repo.backend != "postgresql":
+        pytest.skip("The forecast point lookup uses PostgreSQL statement timeouts")
+    attempts = []
+
+    def cancel_lookup(conn, cursor, statement, parameters, context, executemany):
+        if context.compiled and context.compiled.statement is household_shadow._POINTS:
+            attempts.append(dict(parameters))
+            if len(attempts) <= cancel_count:
+                cursor.execute("SET LOCAL statement_timeout='50ms'")
+                return "SELECT pg_sleep(0.2)", ()
+        return statement, parameters
+
+    event.listen(repo.engine, "before_cursor_execute", cancel_lookup, retval=True)
+    try:
+        if cancel_count == 1:
+            assert household_shadow.read_inputs(repo, T, "test") == ({}, {})
+        else:
+            with pytest.raises(DatabaseQueryCanceledError):
+                household_shadow.read_inputs(repo, T, "test")
+        assert len(attempts) == 2 and attempts[0] == attempts[1]
+    finally:
+        event.remove(repo.engine, "before_cursor_execute", cancel_lookup)
 
 
 def test_capture_post_commit_witness_immutability_and_rollback(capture_db):

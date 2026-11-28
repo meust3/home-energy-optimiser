@@ -1,5 +1,6 @@
 """Issue-time household comparison, isolated from the operational forecast."""
 
+import logging
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from math import isfinite
@@ -15,12 +16,14 @@ from energy_optimizer.arbitrage.capture import (
     decode_capture_body,
 )
 from energy_optimizer.arbitrage.decision_types import digest
+from energy_optimizer.db.engine import DatabaseQueryCanceledError
 from energy_optimizer.db.models import ArbitrageCapture, ArbitrageCommitWitness
 from energy_optimizer.forecast_calibration import CURRENT_FORECAST_MODEL_VERSION
 
 MODEL = "household-combined-eased-v1"
 KIND = "household_shadow"
 STEP = timedelta(minutes=5)
+LOGGER = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -65,27 +68,41 @@ def select_offset(issue, fresh, delayed):
 
 
 _POINTS = text("""
-    SELECT p.period_start_utc AS slot, r.created_at_utc, p.expected_value,
-           s.actual_value, s.health_eligible, s.actual_available,
-           scoring.finished_at_utc AS score_finished, pub.finished_at_utc AS published
-    FROM forecast_runs r JOIN forecast_points p ON p.forecast_run_id=r.id
+    WITH points AS MATERIALIZED (
+        SELECT p.id, r.id AS run_id, p.period_start_utc AS slot, r.created_at_utc,
+               p.expected_value
+        FROM forecast_runs r JOIN forecast_points p ON p.forecast_run_id=r.id
+        WHERE r.created_at_utc BETWEEN :earliest AND :issue
+          AND r.source='scheduled_forecast_operations'
+          AND r.forecast_type='baseline_household_load'
+          AND r.model_version=:model
+          AND r.metadata_json->>'training_policy'='verified_preferred'
+          AND r.metadata_json->>'alignment_version'='full_5m_v1'
+          AND p.period_start_utc>=r.created_at_utc
+          AND p.period_start_utc<r.created_at_utc+interval '3 hours'
+          AND p.period_start_utc>=:lo AND p.period_end_utc<=:issue
+    ), publications AS MATERIALIZED (
+        SELECT r.run_id, COALESCE((
+            SELECT min(a.finished_at_utc) FROM forecast_operation_attempts a
+            WHERE a.started_at_utc=r.created_at_utc AND a.forecast_run_id=r.run_id
+              AND a.status='success' AND a.finished_at_utc<=r.first_slot
+        ), (
+            SELECT min(a.finished_at_utc) FROM forecast_operation_attempts a
+            WHERE a.forecast_run_id=r.run_id AND a.status='success'
+        )) AS finished
+        FROM (SELECT run_id, created_at_utc, min(slot) AS first_slot
+              FROM points GROUP BY run_id, created_at_utc) r
+    )
+    SELECT p.slot, p.created_at_utc, p.expected_value, s.actual_value,
+           s.health_eligible, s.actual_available,
+           scoring.finished_at_utc AS score_finished, pub.finished<=p.slot AS published
+    FROM points p JOIN publications pub ON pub.run_id=p.run_id
     LEFT JOIN forecast_point_scores s ON s.forecast_point_id=p.id
         AND s.scored_at_utc<=:issue
     LEFT JOIN forecast_operation_attempts scoring
         ON scoring.started_at_utc=s.scored_at_utc
         AND scoring.status='success' AND scoring.finished_at_utc<=:issue
-    LEFT JOIN forecast_operation_attempts pub ON pub.forecast_run_id=r.id
-        AND pub.status='success' AND pub.finished_at_utc<=p.period_start_utc
-    WHERE r.created_at_utc BETWEEN :earliest AND :issue
-        AND r.source='scheduled_forecast_operations'
-        AND r.forecast_type='baseline_household_load'
-        AND r.model_version=:model
-        AND r.metadata_json->>'training_policy'='verified_preferred'
-        AND r.metadata_json->>'alignment_version'='full_5m_v1'
-        AND p.period_start_utc>=r.created_at_utc
-        AND p.period_start_utc<r.created_at_utc+interval '3 hours'
-        AND p.period_start_utc>=:lo AND p.period_end_utc<=:issue
-    ORDER BY r.created_at_utc
+    ORDER BY p.created_at_utc
 """)
 
 _OBS = text("""
@@ -119,16 +136,28 @@ _CAPS = text("""
 """)
 
 
+def _forecast_points(repository, params):
+    # A matching creator that finished before the earliest slot proves every
+    # candidate slot was published. Otherwise use the earliest linked success.
+    with repository.transaction() as session:
+        return session.execute(_POINTS, params).mappings().all()
+
+
 def read_inputs(repository, issue, model):
     lo = issue - timedelta(minutes=110)
     params = dict(issue=issue, lo=lo, earliest=lo - timedelta(hours=3), model=model)
     published, delayed, fresh = {}, {}, {}
+    try:
+        points = _forecast_points(repository, params)
+    except DatabaseQueryCanceledError:
+        LOGGER.warning("Household shadow forecast-point lookup canceled, retrying once")
+        points = _forecast_points(repository, params)
     with repository.transaction() as session:
-        for row in session.execute(_POINTS, params).mappings():
+        for row in points:
             slot, base = row["slot"], row["expected_value"]
             if not isfinite(base):
                 continue
-            if row["published"] is not None:
+            if row["published"]:
                 published[slot] = base
             actual = row["actual_value"]
             if (
